@@ -19,15 +19,22 @@ import torch.nn.functional as F
 
 import math
 
+from pathlib import Path
+import os
+import pickle
+
 from dataclasses import dataclass, fields
 from functools import total_ordering
+from collections import defaultdict
 
 from typing import (Self, TypedDict, Literal, cast,
                     Container, Iterable, Mapping,
-                    ClassVar, TypeVar)
+                    ClassVar, TypeVar, Callable,
+                    NotRequired)
 
 Mode = Literal["standard", "input", "supervised"]
 M = TypeVar("M", bound="Metric")
+N = TypeVar("N")
 
 
 @total_ordering
@@ -38,10 +45,15 @@ class Metric:
 
     _to_mean: ClassVar[set[str]] = {"lm_loss"}
 
+    _convert: ClassVar[dict[str, Callable[[N], N]]] = {}    # type: ignore
+
     def __getattr__(self, prop: str):
         """Calculate mean for metrics"""
         if prop in self._to_mean:
-            return super().__getattribute__(f"_{prop}") / self.num
+            val = super().__getattribute__(f"_{prop}") / self.num
+            if prop in self._convert:
+                val = self._convert[prop](val)
+            return val
         else:
             raise AttributeError(
                 f"'{self.__class__}' has no attribute '{prop}' or '_{prop}'.")
@@ -65,10 +77,14 @@ class Metric:
     def __radd__(self, other: M) -> M:
         return other + self
 
-    def print(self, epoch: int, 
+    def print(self, epoch: int,
               total_epochs: int, kind: str) -> None:
         strs = [f"{name}: {getattr(self, name):.2f}" for name in self._to_mean]
-        print(f"[{epoch}/{total_epochs}] {kind}: " + ", ".join(strs))
+        print(f"[{epoch}/{total_epochs}] {kind}:: " + ", ".join(strs))
+
+    def print_test(self) -> None:
+        strs = [f"{name}: {getattr(self, name):.2f}" for name in self._to_mean]
+        print("Test results: " + ", ".join(strs))
 
     @property
     def loss(self) -> torch.Tensor:
@@ -120,78 +136,124 @@ class SupervisedMetric(Metric):
 
 
 @dataclass
-class UASMetric(SupervisedMetric):
+class EvalMetric(Metric):
+    _perplexity: float = 0
+    _to_mean: ClassVar[set[str]] = Metric._to_mean | {"perplexity"}
+    _convert = Metric._convert | {"perplexity": math.exp}    # type: ignore
+
+
+@dataclass
+class SupervisedEvalMetric(SupervisedMetric, EvalMetric):
     _uas: float = 0
-    _to_mean: ClassVar[set[str]] = SupervisedMetric._to_mean | {"arc_loss",
-                                                                "uas"}
+    _to_mean: ClassVar[set[str]] = (SupervisedMetric._to_mean
+                                    | EvalMetric._to_mean
+                                    | {"uas"})
 
 
 class GeneralConfig(TypedDict):
     batch_size: int
+    mode: Mode
+    arc_loss_weighted: bool
+    device: str
 
 
 class TrainConfig(GeneralConfig):
     eval_interval: int
     epochs: int
     learning_rate: float
-    mode: Mode
     model_dir: str
-    arc_loss_weighted: bool
+
+
+class OptionalConfig(TypedDict):
+    batch_size: NotRequired[int]
+    mode: NotRequired[Mode]
+    arc_loss_weighted: NotRequired[bool]
+    eval_interval: NotRequired[int]
+    epochs: NotRequired[int]
+    learning_rate: NotRequired[float]
+    model_dir: NotRequired[str]
+    device: NotRequired[str]
 
 
 class LMTrainer():
     def __init__(self, transformerlm: MITransformerLM,
                  transformer_config: MITransformerConfig,
-                 train_config: TrainConfig | None,
-                 device: str = "cpu"):
+                 config: GeneralConfig):
         self.transformerlm: MITransformerLM = transformerlm
-        self.transformerlm.to(device)
-        self.device: str = device
+        self.transformerlm.to(config["device"])
         self.transformer_config: MITransformerConfig = transformer_config
 
         self.optimiser: Optimizer | None
-        self.__train_config: TrainConfig | None
-        self.train_config = train_config
+        self.__config: GeneralConfig
+        self.config = config
+
+    @property
+    def config(self) -> GeneralConfig:
+        return self.__config
+
+    @config.setter
+    def config(self, config: GeneralConfig) -> None:
+        self.__config = config
+        if "learning_rate" in config:
+            self.optimiser = Adam(
+                self.transformerlm.parameters(),
+                lr=config["learning_rate"])  # type: ignore
+        else:
+            self.optimiser = None
 
     @property
     def train_config(self) -> TrainConfig | None:
-        return self.__train_config
-
-    @train_config.setter
-    def train_config(self, train_config: TrainConfig | None) -> None:
-        self.__train_config = train_config
-        if train_config is None:
-            self.optimiser = None
+        if "learning_rate" in self.config:
+            return cast(TrainConfig, self.config)
         else:
-            self.optimiser = Adam(self.transformerlm.parameters(),
-                                  lr=train_config["learning_rate"])
+            return None
 
     @classmethod
     def load(cls, model_dir: str,
-             train_config: TrainConfig | None,
-             device: str = "cpu",) -> Self:
-        state_dict, config = torch.load(model_dir).values()
-        config = cast(MITransformerConfig, config)
-        model: MITransformerLM = MITransformerLM(MITransformer(**config))
+             optional_config: OptionalConfig | None = None) -> Self:
+
+        state_dict, transformer_config = torch.load(
+            os.path.join(model_dir, "model")).values()
+        transformer_config = cast(MITransformerConfig, transformer_config)
+        model: MITransformerLM = MITransformerLM(
+            MITransformer(**transformer_config))
+
         model.load_state_dict(state_dict)
-        return cls(model, config, train_config, device)
+
+        with open(os.path.join(model_dir, "config"), 'rb') as handle:
+            config = pickle.load(handle)
+
+        if optional_config is not None:
+            for key, value in optional_config.items():
+                config[key] = value
+
+        return cls(model, transformer_config, config)
 
     @classmethod
-    def new(cls, config: MITransformerConfig,
-            train_config: TrainConfig | None,
-            device: str = "cpu") -> Self:
-        model: MITransformerLM = MITransformerLM(MITransformer(**config))
+    def new(cls, trainsformer_config: MITransformerConfig,
+            config: GeneralConfig) -> Self:
+        model: MITransformerLM = MITransformerLM(
+            MITransformer(**trainsformer_config))
         model_parameters = filter(
             lambda p: p.requires_grad, model.parameters())
         params = sum([np.prod(p.size()) for p in model_parameters])
         print(f"Number of parameters: {params}")
-        return cls(model, config, train_config, device)
+        return cls(model, trainsformer_config, config)
 
     def save(self, model_dir: str) -> None:
+        assert self.train_config is not None
+
+        Path(model_dir).mkdir(parents=True, exist_ok=True)
         torch.save(
             {"model": self.transformerlm.state_dict(),
              "config": self.transformer_config},
-            model_dir)
+            os.path.join(model_dir, "model"))
+
+        # overwrites config
+        with open(os.path.join(model_dir, "config"), 'wb') as handle:
+            pickle.dump(self.train_config,
+                        handle,
+                        protocol=pickle.HIGHEST_PROTOCOL)
 
     def loss(self, logits: torch.Tensor, labels: torch.Tensor,
              ignore_index: int = -100,
@@ -210,9 +272,9 @@ class LMTrainer():
             to_ignore_mask: torch.BoolTensor | None,
             reduction: Literal["sum", "mean"] = "mean"
             ) -> torch.Tensor:
-        assert self.train_config is not None
         """reduction sum takes a mean across dim 1
         of the mask"""
+
         batch_size = score_preds.shape[1]
         seq_len = score_preds.shape[2]
         total_len = batch_size * seq_len
@@ -239,7 +301,7 @@ class LMTrainer():
             score_gold.to(score_preds.dtype),
             reduction='none')
 
-        if self.train_config["arc_loss_weighted"]:
+        if self.config["arc_loss_weighted"]:
             total_el = score_gold.numel()
             true_el = torch.sum(score_gold)
             false_el = total_el - true_el
@@ -262,7 +324,8 @@ class LMTrainer():
     @staticmethod
     def filter_arc_scores(
             arc_scores: Mapping[str, list[torch.Tensor]],
-            keep_keys: Container | Iterable) -> dict[str, list[torch.Tensor]]:
+            keep_keys: Container[str] | Iterable[str]
+            ) -> dict[str, list[torch.Tensor]]:
         return {key: arc_scores[key]
                 for key in arc_scores.keys() if key in keep_keys}
 
@@ -297,11 +360,9 @@ class LMTrainer():
             ) -> tuple[torch.Tensor, torch.BoolTensor] | tuple[None, None]:
         score_preds = cls.stack_pred_scores(arc_scores)
         score_gold = cls.expand_gold_scores(masks, arc_scores)
-        if arc_scores is None or masks is None:
+        if score_preds is None or score_gold is None:
             return None, None
         else:
-            assert isinstance(score_preds, torch.Tensor)
-            assert isinstance(score_gold, torch.Tensor)
             return score_preds, score_gold
 
     @classmethod
@@ -339,7 +400,7 @@ class LMTrainer():
     def train_step(self,
                    batch: CoNNLUTokenisedBatch | EssentialBatch,
                    ignore_index: int) -> Metric:
-        assert self.train_config is not None, "train_config not specified"
+        assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
 
         logits, arc_scores = self.transformerlm(**batch)
@@ -390,8 +451,10 @@ class LMTrainer():
                   ignore_index: int) -> Metric:
         logits, arc_scores = self.transformerlm(**batch)
         # remove from arc_scores those that should not be used...
+
+        labels = batch["label_ids"]
         lm_loss = self.loss(
-            logits, batch["label_ids"],
+            logits, labels,
             ignore_index=ignore_index, reduction="sum")
 
         loss = lm_loss
@@ -400,6 +463,9 @@ class LMTrainer():
 
         num_instances = batch["input_ids"][batch["input_ids"]
                                            != ignore_index].numel()
+
+        surprisal_sum = sum_unpadded(logits_to_surprisal(logits, labels),
+                                     labels, ignore_index).sum()
 
         if (mode == "supervised"
                 and score_preds is not None
@@ -437,44 +503,43 @@ class LMTrainer():
                 gold_headlist = mask_to_headlist(g)
                 uas_abs += uas_absolute(pred_headlist, gold_headlist)
 
-            return UASMetric(num_instances,
-                             lm_loss.detach().cpu(),
-                             arc_loss.detach().cpu(),
-                             uas_abs)
+            return SupervisedEvalMetric(
+                num_instances,
+                lm_loss.detach().cpu(),
+                surprisal_sum.detach().cpu().item(),
+                arc_loss.detach().cpu(),
+                uas_abs)
 
-        return Metric(num_instances, lm_loss.detach().cpu())
+        return EvalMetric(num_instances, lm_loss.detach().cpu(),
+                          surprisal_sum.detach().cpu().item())
 
     def train(self,
               train: DepDataset[IDSen],
               eval: DepDataset[IDSen],
-              test: DepDataset[IDSen] | None = None) -> None:
-        assert self.train_config is not None, "train_config not specified"
+              test: DepDataset[IDSen] | None = None,
+              **kwargs) -> None:
+        assert self.train_config is not None, "Config missing training params."
+        assert self.train_config["batch_size"] <= len(train), (
+            "Batch size larger than dataset.")
         train_config = self.train_config
+        device = train_config["device"]
 
         train_loader = get_loader(
             train, batch_size=train_config["batch_size"],
-            bucket=False, device=self.device)
+            bucket=False, device=device)
 
         eval_loader = get_loader(
             eval, batch_size=train_config["batch_size"],
-            bucket=False, device=self.device,
+            bucket=False, device=device,
             shuffle=False, droplast=False)
 
         best: float | Metric = math.inf
         self.transformerlm.train()
         for epoch in range(1, train_config["epochs"]+1):
-            metric: Metric = SupervisedMetric()
-            for batch in train_loader:
-                metric += self.train_step(
-                    batch,
-                    train.keys_for_padding["label_ids"])
-            # print progress
-            # metric.print(epoch, self.train_config["epochs"], "train")
+            metric = self._train(train_loader)
+            metric.print(epoch, self.train_config["epochs"], "train")
 
             if epoch % train_config["eval_interval"] == 0:
-                metric = self._eval(train_loader)
-                metric.print(epoch, self.train_config["epochs"], "train")
-
                 metric = self._eval(eval_loader)
                 metric.print(epoch, self.train_config["epochs"], "eval")
                 self.transformerlm.train()
@@ -484,6 +549,8 @@ class LMTrainer():
                     self.save(train_config["model_dir"])
                     print(f"Saving model at epoch {epoch}...")
 
+        if test is not None:
+            pass
         # if score_preds is not None and score_gold is not None:
         #    token_mapper: TokenMapper = TokenMapper.load("./tokmap.pickle")
         #    for i in range(10):
@@ -527,27 +594,81 @@ class LMTrainer():
         #                  gold_headlist.tolist(),
         #                  labels)
 
+    def _train(self, loader: DataLoader[IDBatch, D]) -> Metric:
+        assert self.train_config is not None, "Config missing training params."
+        self.transformerlm.train()
+        metric: Metric = SupervisedMetric()
+        for batch in loader:
+            metric += self.train_step(
+                batch,
+                loader.dataset.keys_for_padding["label_ids"])
+
+        return metric
+
     def _eval(self, loader: DataLoader[IDBatch, D]) -> Metric:
-        assert self.train_config is not None, "train_config not specified"
         self.transformerlm.eval()
         with torch.no_grad():
             # eval loop: no backprop on this data, to avoid storing
             # all intermediatte variable
-            metric: Metric = UASMetric()
+            metric: Metric = SupervisedEvalMetric()
             for batch in loader:
                 metric += self.eval_step(
                     batch,
-                    self.train_config["mode"],
+                    self.config["mode"],
                     loader.dataset.keys_for_padding["label_ids"])
         return metric
 
-    def test(self, dataset: DepDataset, test_config: dict) -> None:
-        pass
+    def test(self, dataset: DepDataset) -> None:
+        loader = get_loader(
+            dataset, batch_size=self.config["batch_size"],
+            bucket=False, device=self.config["device"],
+            shuffle=False, droplast=False)
+
+        self._eval(loader).print_test()
 
     def predict(
             self, dataset: DepDataset,
-            predict_config: dict) -> tuple[torch.Tensor, torch.Tensor]:
-        pass
+            make_prob: bool = False,
+            only_true: bool = False
+            ) -> tuple[list[torch.Tensor], dict[str, list[torch.Tensor]]]:
+        """Returns logits and arc scores"""
+        loader = get_loader(
+            dataset, batch_size=self.config["batch_size"],
+            bucket=False, device=self.config["device"],
+            shuffle=False, droplast=False)
+
+        ignore_index = dataset.keys_for_padding["label_ids"]
+
+        unpadded_logits: list[torch.Tensor] = []
+        unpadded_arc_scores: defaultdict[str, list[torch.Tensor]]
+        unpadded_arc_scores = defaultdict(list)
+        self.transformerlm.eval()
+        with torch.no_grad():
+            # eval loop: no backprop on this data, to avoid storing
+            # all intermediatte variable
+            logits: torch.Tensor
+            arc_scores: dict[str, list[torch.Tensor]]
+            for batch in loader:
+                logits, arc_scores = self.transformerlm(**batch)
+                print(logits.shape)
+                labels = batch["label_ids"]
+
+                if make_prob:
+                    logits = logits_to_probs(logits)
+
+                if only_true:
+                    logits = select_true(logits, labels, ignore_index)
+                    print(logits[0])
+
+                unpadded_logits.extend(
+                    unpad(logits, labels, ignore_index))
+
+                for key in arc_scores.keys():
+                    unpadded_arc_scores[key].extend(
+                        unpad_masks(torch.stack(
+                            arc_scores[key]).swapaxes(0, 1),
+                            labels, ignore_index))
+        return unpadded_logits, dict(unpadded_arc_scores)
 
     def generate(
             self, token_mapper: TokenMapper,
@@ -556,7 +677,9 @@ class LMTrainer():
         g: list[int]
 
         if start is None:
-            idx = torch.zeros((1, 2), dtype=torch.long, device=self.device)
+            idx = torch.zeros((1, 2),
+                              dtype=torch.long,
+                              device=self.config["device"])
             idx[0, 0] = token_mapper.token2id[DUMMY]
             idx[0, 1] = token_mapper.token2id[ROOT]
             g = self.transformerlm.generate(
@@ -592,3 +715,89 @@ class LMTrainer():
         first_eos = next((i for i, x in enumerate(g) if x == eos_id), len(g))
         g = g[:first_eos + 1]
         return token_mapper.decode([g], to_string=True)[0]
+
+
+#def logits_to_probs(logits: torch.Tensor,
+#                    labels: torch.Tensor,
+#                    ignore_id: int) -> list[torch.Tensor]:
+#    probs = torch.softmax(logits, dim=-1)
+#    pred_prob_list = []
+#    for probs_sen, label_ids_sen in zip(
+#            probs, labels):
+#        select_entries = label_ids_sen != ignore_id
+#        unpadded_labels = label_ids_sen[select_entries][1:-1]
+#        probs_sen = probs_sen[1:-1]
+#        unpadded_indices = torch.arange(
+#            label_ids_sen.shape[0])[select_entries][1:-1] - 1
+#        pred_prob = probs_sen[unpadded_indices,
+#                              unpadded_labels.long()]
+#        pred_prob_list.append(pred_prob)
+#    return pred_prob_list
+
+def select_true(preds: torch.Tensor,
+                labels: torch.Tensor,
+                ignore_index: int | None = None) -> torch.Tensor:
+    """If ignore_index is given, it selects the probability for element zero"""
+    labels = labels.unsqueeze(-1)
+    if ignore_index is not None:
+        labels = labels.clone()
+        labels[labels == ignore_index] = 0
+    return torch.gather(preds, -1, labels.to(torch.int64)).squeeze(-1)
+
+
+def logits_to_probs(logits: torch.Tensor) -> torch.Tensor:
+    return torch.softmax(logits, dim=-1)
+
+
+def logits_to_true_probs(logits: torch.Tensor,
+                         labels: torch.Tensor) -> torch.Tensor:
+    probs = logits_to_probs(logits)
+    return select_true(probs, labels)
+
+
+def logits_to_surprisal(logits: torch.Tensor,
+                        labels: torch.Tensor) -> torch.Tensor:
+    return -torch.log(logits_to_true_probs(logits, labels))
+
+
+def sum_unpadded(values: torch.Tensor,
+                 labels: torch.Tensor,
+                 ignore_index: int) -> torch.Tensor:
+    values[labels == ignore_index] = 0
+    return values.sum(-1)
+
+
+def mean_unpadded(values: torch.Tensor,
+                  labels: torch.Tensor,
+                  ignore_index: int) -> torch.Tensor:
+    num_items = (labels != ignore_index).sum(-1)
+    sums = sum_unpadded(values, labels, ignore_index)
+    return sums / num_items
+
+
+def logits_to_perplexity(logits: torch.Tensor,
+                         labels: torch.Tensor,
+                         ignore_index: int) -> torch.Tensor:
+    # Should we disregard first node (root from dummy?)
+    surprisal = logits_to_surprisal(logits, labels)
+    means = mean_unpadded(surprisal, labels, ignore_index)
+    return torch.exp(means)
+
+
+def unpad(sentences: torch.Tensor, labels: torch.Tensor,
+          ignore_index: int) -> list[torch.Tensor]:
+    unpadded_list: list[torch.Tensor] = []
+    for sentence, sen_labels in zip(sentences, labels):
+        unpadded_list.append(sentence[sen_labels != ignore_index])
+    print(unpadded_list[0].shape)
+    return unpadded_list
+
+
+def unpad_masks(masks: torch.Tensor, labels: torch.Tensor,
+                ignore_index: int) -> list[torch.Tensor]:
+    unpadded_list: list[torch.Tensor] = []
+    for sentence, sen_labels in zip(masks, labels):
+        unpadded_list.append(
+            sentence[:, sen_labels != ignore_index][
+                :, :, sen_labels != ignore_index])
+    return unpadded_list

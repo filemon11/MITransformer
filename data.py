@@ -24,6 +24,9 @@ from mmap_ninja import RaggedMmap   # type: ignore
 from random import shuffle
 from collections import defaultdict
 
+import os
+from pathlib import Path
+
 from tokeniser import TokenMapper, EOS, ROOT, DUMMY
 
 from abc import ABC, abstractmethod
@@ -31,7 +34,7 @@ from abc import ABC, abstractmethod
 from typing import (Iterable, Iterator, Sequence, TypedDict,
                     TypeVar, Callable, Hashable, Literal, Any, Mapping,
                     Concatenate, NotRequired, Generic, Union, overload,
-                    Unpack)
+                    )
 
 ENCODING = "utf-8"
 
@@ -686,7 +689,7 @@ class MemMapWindowDataset(MemMapDataset):
                                                                self.max_len))
 
 
-class BySequenceLengthSampler(Sampler): 
+class BySequenceLengthSampler(Sampler):
     def __init__(self, data_source: DepDataset,
                  bucket_boundaries, batch_size=64,
                  drop_last=True, include_smaller=False, include_larger=False):
@@ -1007,7 +1010,7 @@ def get_head_list(tokenlist: conllu.TokenList,
         for token in tokenlist)
     # 0 is already root; therefore add 1 because of dummy # +1
     heads.append(0+(1 if add_dummy_and_root else 0))  # (1)   # EOS token
-    return np.asarray(heads, dtype=np.int16)
+    return np.asarray(heads, dtype=np.int8)
 
 
 def get_space_after(tokenlist: conllu.TokenList) -> npt.NDArray[np.bool_]:
@@ -1051,3 +1054,179 @@ def apply_to_tokenlist(
         funcs: tuple[Callable[[conllu.TokenList], Any], ...]
         ) -> tuple[Any, ...]:
     return tuple(fn(tokenlist) for fn in funcs)
+
+
+SplitSelection = (tuple[Literal["train"],
+                        Literal["eval"],
+                        Literal["test"]]
+                  | tuple[Literal["train"], Literal["eval"]]
+                  | tuple[Literal["test"]])
+
+TupleSelection = tuple[str, str, str] | tuple[str, str] | tuple[str]
+
+
+class DatasetDetails(TypedDict):
+    dirs: NotRequired[TupleSelection]
+    memmap_dir: str
+    memmaped: NotRequired[SplitSelection]
+    tokmap_dir: str
+    tokmap_is_trained: NotRequired[bool]
+
+
+class DatasetDetailsFull(DatasetDetails):
+    dirs: NotRequired[tuple[str, str, str]]  # type: ignore
+    memmaped: NotRequired[tuple[Literal["train"],  # type: ignore
+                                Literal["eval"],
+                                Literal["test"]]]
+
+
+class DatasetDictBase(TypedDict):
+    token_mapper: TokenMapper
+
+
+class DatasetDictTrain(DatasetDictBase):
+    train: MemMapDataset
+    eval: MemMapDataset
+    test: NotRequired[MemMapDataset]
+
+
+class DatasetDictTest(DatasetDictBase):
+    test: MemMapDataset
+
+
+ud = "./Universal Dependencies 2.14/ud-treebanks-v2.14"
+
+
+EWT = DatasetDetailsFull(
+    dirs=(os.path.join(ud, "UD_English-EWT/en_ewt-ud-train.conllu"),
+          os.path.join(ud, "UD_English-EWT/en_ewt-ud-dev.conllu"),
+          os.path.join(ud, "UD_English-EWT/en_ewt-ud-test.conllu")),
+    memmap_dir="./processed/EWT/memmap",
+    tokmap_dir="./processed/EWT/"
+    )
+
+dataset_details = dict(
+    EWT=EWT
+    )
+
+
+def mmd_splits(memmap_dir: str, splits: SplitSelection) -> TupleSelection:
+    return tuple(os.path.join(memmap_dir, split)
+                 for split in splits)  # type: ignore
+
+
+@overload
+def load_dataset(details: DatasetDetailsFull,
+                 max_len_train: int | None = 40,
+                 vocab_size: int | None = 50_000
+                 ) -> DatasetDictTrain:
+    ...
+
+
+@overload
+def load_dataset(details: DatasetDetails,
+                 max_len_train: int | None = 40,
+                 vocab_size: int | None = 50_000
+                 ) -> DatasetDictTrain | DatasetDictTest:
+    ...
+
+
+def load_dataset(details: DatasetDetails,       # type: ignore
+                 max_len_train: int | None = 40,  # should mark all
+                 vocab_size: int | None = 50_000  # of this with ReadOnly
+                 ) -> DatasetDictTrain | DatasetDictTest:
+    transform = get_transform_mask_head_child(
+        keys_for_head={"head"},
+        keys_for_child={"child"},
+        triangulate=True)
+
+    memmap_dir = details["memmap_dir"]
+
+    load_memmap = False
+    if "memmaped" in details:
+        load_memmap = True
+        assert "dirs" not in details, (
+            "Cannot specify existing memmap and raw dataset"
+            "at the same time")
+        dirs = mmd_splits(memmap_dir, details["memmaped"])
+    else:
+        assert "dirs" in details
+        dirs = details["dirs"]
+
+    train_token_mapper = True
+    if load_memmap or ("tokmap_is_trained" in details
+                       and details["tokmap_is_trained"]):
+        train_token_mapper = False
+
+    assert not (load_memmap and train_token_mapper), (
+        "Cannot train token mapper with a memmap.")
+
+    def load_dataset(dir: str, max_len: int | None = None) -> MemMapDataset:
+        if load_memmap:
+            return MemMapDataset.from_memmap(dir, transform,
+                                             max_len=max_len)
+        else:
+            return MemMapDataset.from_file(dir, transform,
+                                           max_len=max_len)
+
+    train: None | MemMapDataset
+    eval: None | MemMapDataset
+    test: None | MemMapDataset
+    if len(dirs) == 1:
+        # Only test
+        test = load_dataset(dirs[0])
+    elif len(dirs) > 1 and len(dirs) < 4:
+        # train, eval and optional test
+        train = load_dataset(dirs[0], max_len_train)
+        eval = load_dataset(dirs[1])
+        if len(dirs) == 3:
+            test = load_dataset(dirs[0])
+    else:
+        raise Exception("Too many or not enough dataset dirs provided.")
+
+    tokmap_dir = details["tokmap_dir"]
+    if train_token_mapper:
+        assert train is not None, (
+            "Must train token_mapper on train set. "
+            "Please provide a train set.")
+        assert vocab_size is not None, (
+            "Vocabulary size must be specified. Given: None.")
+
+        token_mapper = TokenMapper.train(
+            train.tokens,
+            keep_top_k=vocab_size)
+
+        Path(tokmap_dir).mkdir(parents=True, exist_ok=True)
+        token_mapper.save(os.path.join(tokmap_dir, "mapper"))
+
+    else:
+        token_mapper = TokenMapper.load(tokmap_dir)
+
+    for split, split_name in zip((train, eval, test),
+                                 ("train", "eval", "test")):
+        if split is not None and not split.mapped:
+            Path(memmap_dir).mkdir(parents=True, exist_ok=True)
+            split.map_to_ids(token_mapper,
+                             os.path.join(memmap_dir, split_name))
+
+    if train is not None:
+        assert eval is not None
+        if test is not None:
+            return DatasetDictTrain(
+                token_mapper=token_mapper,
+                train=train,
+                eval=eval,
+                test=test
+                )
+        else:
+            return DatasetDictTrain(
+                token_mapper=token_mapper,
+                train=train,
+                eval=eval,
+                )
+    else:
+        assert test is not None
+        return DatasetDictTest(
+            token_mapper=token_mapper,
+            test=test
+            )

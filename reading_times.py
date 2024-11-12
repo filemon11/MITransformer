@@ -9,11 +9,13 @@ from tokeniser import TokenMapper
 from data import (CoNLLUDataset, DataLoader,
                   get_transform_mask_head_child, get_loader)
 from model import MITransformerLM, MITransformer
+from trainer import LMTrainer, OptionalConfig
 from parse import parse_list_of_words_with_spacy
 
 from natural_stories import load_natural_stories
 
 import torch
+import numpy as np
 
 from typing import Iterable
 
@@ -80,50 +82,27 @@ def tsv_to_csv(input_file: str, output_file: str,
 
 
 def generate_probs(
-        model: MITransformerLM,
-        dataloader,
-        padding_label: int,
+        trainer: LMTrainer,
+        dataset,
         untokenise: bool = False,
         surprisal: bool = False) -> torch.Tensor:
     """WARNING: untested"""
 
-    pred_prob_list: list[torch.Tensor] = []
-    detok_list = []
+    pred_probs, _ = trainer.predict(
+        dataset,
+        make_prob=True,
+        only_true=True)
 
-    space_after_list = []
-    for batch in dataloader:
+    # Throw away probs of root and eos token
+    probs = torch.cat([p[1:-1] for p in pred_probs])
 
-        logits, _ = model(**batch)
-        probs = torch.softmax(logits, dim=-1)
-
-        token_mapper: TokenMapper = TokenMapper.load("./tokmap.pickle")
-
-        space_after_list.extend(batch["space_after"])
-        for probs_sen, label_ids_sen in zip(
-                probs, batch["label_ids"]):
-
-            select_entries = label_ids_sen != padding_label
-            unpadded_labels = label_ids_sen[select_entries][1:-1]
-
-            detok = token_mapper.decode([unpadded_labels.tolist()])[0]
-            detok_list.extend(detok)
-
-            probs_sen = probs_sen[1:-1]
-            unpadded_indices = torch.arange(
-                label_ids_sen.shape[0])[select_entries][1:-1] - 1
-            pred_prob = probs_sen[unpadded_indices,
-                                  unpadded_labels.long()]
-            pred_prob_list.append(pred_prob)
-
-    probs = torch.cat(
-            [p for p in pred_prob_list])
+    space_after = np.concat(dataset.space_after)
 
     if untokenise:
-        space_after = torch.cat(
-            [torch.tensor(e) for e in space_after_list]).tolist()
-        probs = torch.tensor(list(untokenise_probs(
-            probs.tolist(),
-            space_after)))
+        probs = torch.tensor(
+            list(untokenise_probs(
+                probs.tolist(),
+                space_after)))
 
     if surprisal:
         probs = -torch.log(probs)
@@ -174,8 +153,7 @@ def add_surprisal(input_file: str, output_file,
                   surprisal_col: str = SURPRISAL_COL,
                   device: str = DEVICE,
                   batch_size: int = BATCH_SIZE) -> None:
-    # TODO: generate preditions with model
-    # TODO: save
+
     df = pd.read_csv(input_file)
     words = df[token_col]
     conllu = parse_list_of_words_with_spacy(words, min_len=0)
@@ -190,16 +168,12 @@ def add_surprisal(input_file: str, output_file,
 
     token_mapper: TokenMapper = TokenMapper.load(token_mapper_dir)
     dataset.map_to_ids(token_mapper)
-    dataloader: DataLoader = get_loader(dataset, batch_size=batch_size,
-                                        bucket=False, device=device,
-                                        shuffle=False, droplast=False)
 
-    state_dict, config = torch.load(model_dir).values()
-    model: MITransformerLM = MITransformerLM(MITransformer(**config))
-    model.load_state_dict(state_dict)
-
+    trainer = LMTrainer.load(model_dir,
+                             optional_config=OptionalConfig(
+                                 batch_size=batch_size))
     surprisal = generate_probs(
-        model, dataloader, padding_label=dataset.keys_for_padding["label_ids"],
+        trainer, dataset,
         untokenise=True, surprisal=True)
 
     df[surprisal_col] = surprisal
