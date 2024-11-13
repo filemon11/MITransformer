@@ -223,7 +223,8 @@ class DepDataset(Dataset, ABC, Generic[Sen]):
                     str,
                     npt.NDArray[np.bool_]]] | None,
             masks_setting: Literal['complete', 'current', 'next'],
-            max_len: int | None):
+            max_len: int | None,
+            first_k: int | None):
         ...
 
     @abstractmethod
@@ -286,9 +287,10 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
                     str,
                     npt.NDArray[np.bool_]]] | None = None,
             masks_setting: Literal['complete', 'current', 'next'] = "current",
-            max_len: int | None = 40):
+            max_len: int | None = 40,
+            first_k: int | None = None):
 
-        tokenlists = load_conllu(file, max_len)
+        tokenlists = load_conllu(file, max_len, first_k)
         data_dict = cls.make_connludict(tokenlists)
 
         return cls(data_dict, transform_masks, masks_setting)
@@ -368,10 +370,12 @@ class MemMapDataset(DepDataset[EssentialSentence]):
             file: str | None = None,
             masks_setting: Literal['complete', 'current', 'next'] = "current",
             id_hl: RaggedMmap | None = None,
-            max_len: int | None = 40):
+            max_len: int | None = 40,
+            first_k: int | None = None):
         self.mapped: bool = False
 
         self.file: str | None = file
+        self.first_k: int | None = first_k
 
         self.transform_mask: TransformFunc | None
         self.transform_mask = transform_mask
@@ -395,20 +399,26 @@ class MemMapDataset(DepDataset[EssentialSentence]):
     def sentences(self) -> Iterator[tuple[list[str],
                                     npt.NDArray[np.int8]]]:
         assert self.file is not None
-        return (self.get_sentence(tl) for tl in load_conllu(self.file,
-                                                            self.max_len))
+        return (self.get_sentence(tl) for tl in load_conllu(
+            self.file,
+            self.max_len,
+            first_k=self.first_k))
 
     @property
     def tokens(self) -> Iterator[list[str]]:
         assert self.file is not None
-        return (get_tokens(tl) for tl in load_conllu(self.file,
-                                                     self.max_len))
+        return (get_tokens(tl) for tl in load_conllu(
+            self.file,
+            self.max_len,
+            first_k=self.first_k))
 
     @property
     def heads(self) -> Iterator[npt.NDArray[np.int8]]:
         assert self.file is not None
-        return (get_head_list(tl) for tl in load_conllu(self.file,
-                                                        self.max_len))
+        return (get_head_list(tl) for tl in load_conllu(
+            self.file,
+            self.max_len,
+            first_k=self.first_k))
 
     @staticmethod
     def get_sentence(
@@ -425,10 +435,11 @@ class MemMapDataset(DepDataset[EssentialSentence]):
                     str,
                     npt.NDArray[np.bool_]]] | None = None,
             masks_setting: Literal['complete', 'current', 'next'] = "current",
-            max_len: int | None = 40):
+            max_len: int | None = 40,
+            first_k: int | None = None):
 
         return cls(transform_masks, file, masks_setting,
-                   max_len=max_len)
+                   max_len=max_len, first_k=first_k)
 
     @classmethod
     def from_memmap(
@@ -453,11 +464,6 @@ class MemMapDataset(DepDataset[EssentialSentence]):
         dataset.keys_for_mask_padding = {"masks": False}
 
         return dataset
-
-    def reload(self) -> None:
-        assert self.file is not None
-        self.sentence_generator = (self.get_sentence(tl)
-                                   for tl in load_conllu(self.file))
 
     def __len__(self) -> int:
         assert self.id_hl is not None
@@ -518,10 +524,12 @@ class MemMapWindowDataset(MemMapDataset):
             file: str | None = None,
             masks_setting: Literal['complete', 'current', 'next'] = "current",
             memdir: str | None = None,
-            max_len: int = 40):
+            max_len: int = 40,
+            first_k: int | None = None):
         self.mapped: bool = False
 
         self.file: str | None = file
+        self.first_k: int | None = first_k
 
         self.transform_mask: TransformFunc | None
         self.transform_mask = transform_mask
@@ -552,10 +560,11 @@ class MemMapWindowDataset(MemMapDataset):
                     str,
                     npt.NDArray[np.bool_]]] | None = None,
             masks_setting: Literal['complete', 'current', 'next'] = "current",
-            max_len: int | None = 40):
+            max_len: int | None = 40,
+            first_k: int | None = None):
         assert max_len is not None
         return cls(transform_masks, file, masks_setting,
-                   max_len=max_len)
+                   max_len=max_len, first_k=first_k)
 
     @classmethod
     def from_memmap(
@@ -674,19 +683,22 @@ class MemMapWindowDataset(MemMapDataset):
                                     npt.NDArray[np.int8]]]:
         assert self.file is not None
         return (self.get_sentence(tl) for tl in load_conllu(self.file,
-                                                            self.max_len//10))
+                                                            self.max_len//10,
+                                                            self.first_k))
 
     @property
     def tokens(self) -> Iterator[list[str]]:
         assert self.file is not None
         return (get_tokens(tl, False) for tl in load_conllu(self.file,
-                                                            self.max_len))
+                                                            self.max_len,
+                                                            self.first_k))
 
     @property
     def heads(self) -> Iterator[npt.NDArray[np.int8]]:
         assert self.file is not None
         return (get_head_list(tl, False) for tl in load_conllu(self.file,
-                                                               self.max_len))
+                                                               self.max_len,
+                                                               self.first_k))
 
 
 class BySequenceLengthSampler(Sampler):
@@ -974,9 +986,11 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
 
 
 def load_conllu(
-        file: str, max_len: int | None = 40
+        file: str, max_len: int | None = 40,
+        first_k: int | None = None
         ) -> Iterator[conllu.TokenList]:
     data_file = open(file, "r", encoding=ENCODING)
+    loaded_num = 0
     for tokenlist in conllu.parse_incr(data_file):
         if max_len is None or len(tokenlist) <= max_len:
             # Disregard contracted tokens
@@ -984,6 +998,9 @@ def load_conllu(
                                     if isinstance(token["id"], int)],
                                    metadata=tokenlist.metadata,
                                    default_fields=tokenlist.default_fields)
+            loaded_num += 1
+        if first_k is not None and loaded_num >= first_k:
+            break
 
 
 def load_conllu_from_str(
