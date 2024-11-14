@@ -105,13 +105,21 @@ class FeedForward(nn.Module):
 class DualFixedLinear(nn.Module):
     def __init__(self, in_dim, out_dim, bias: bool = False):
         super().__init__()
-        self.w_qkv = nn.Linear(in_dim, 2 * out_dim // 3, bias=bias)
-        # -> 2*(M * H//2 * (E/3)*2)
+        # TODO: make possible to use when having other keys
+        # => then head, child must be first pair
+        # in addition to head and child
+        # num_keys; saves 1/3 keys * proportion
+        # dim: out_dim - (out_dim/3)*(2/num_keys)
+        self.w_qkv = nn.Linear(in_dim, 2 * out_dim / 3, bias=bias)
+        # -> 2*(M * H/2 * (E/3)*2)
 
     def forward(self, x):
         # x : [B, S, E]
         # -> B x (M/2 * H * E/3)
         qk, v = self.w_qkv(x).chunk(2, dim=-1)
+        # take v from end
+        # take q, k and chunk rest into two
+        # cat q, k, r1, k, q, r2, v
         q, k = qk.chunk(2, dim=-1)
         m = torch.cat((q, k, k, q, v), dim=-1)
         return m
@@ -340,6 +348,8 @@ class MITransformer(nn.Module):
                     p, mean=0.0,
                     std=0.02/math.sqrt(2 * len(transformer_description)))
 
+        # self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
+
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
@@ -364,15 +374,15 @@ class MITransformer(nn.Module):
             Output : Shape[B, S, E]
         call the model with idx and targets (training)
         or without targets (generation)"""
-
         S = input_ids.shape[1]
 
         tok_emb = self.wte(input_ids.long())
         pos_emb = self.wpe(torch.arange(0, S, device=tok_emb.device))
 
         x = self.embd_dropout(tok_emb + pos_emb)
-        # # idx and targets are both of shape (B,T)
-        # x = self.token_embedder(input_ids)  # shape (B,T,C)
+        
+        # x = self.lstm(x)[0]
+        # return x, {}
 
         scores = []
         for layer in self.layers:

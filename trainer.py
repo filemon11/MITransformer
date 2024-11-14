@@ -43,14 +43,18 @@ class Metric:
     num: int = 0
     _lm_loss: torch.Tensor = torch.tensor(0)
 
-    _to_mean: ClassVar[set[str]] = {"lm_loss"}
+    _to_mean: ClassVar[set[str]] = {"lm_loss", "loss"}
 
     _convert: ClassVar[dict[str, Callable[[N], N]]] = {}    # type: ignore
+
+    loss: ClassVar[torch.Tensor]
+    # just for typing so that we can safely call metric.loss.backward()
+    # without the type checker complaining
 
     def __getattr__(self, prop: str):
         """Calculate mean for metrics"""
         if prop in self._to_mean:
-            val = super().__getattribute__(f"_{prop}") / self.num
+            val = self.__getattribute__(f"_{prop}") / self.num
             if prop in self._convert:
                 val = self._convert[prop](val)
             return val
@@ -58,12 +62,13 @@ class Metric:
             raise AttributeError(
                 f"'{self.__class__}' has no attribute '{prop}' or '_{prop}'.")
 
-    def __add__(self, other: Self) -> Self:
+    def __add__(self, other: "Metric") -> "Metric":
         # other must be a lower type or Self
 
         higher = None
-        if isinstance(self, other.__class__):
-            higher = other
+        if (isinstance(self, other.__class__)
+                and not isinstance(other, self.__class__)):
+            return other.__add__(self)
         elif isinstance(other, self.__class__):
             higher = self
         assert higher is not None, (f"Cannot add metrics "
@@ -71,11 +76,11 @@ class Metric:
                                     f"and {other.__class__}")
 
         return higher.__class__(
-            *[getattr(self, f.name) + getattr(other, f.name)
-              for f in fields(higher)])
+            **{f.name: getattr(self, f.name) + getattr(other, f.name)
+               for f in fields(higher)})
 
-    def __radd__(self, other: M) -> M:
-        return other + self
+    def __radd__(self, other: "Metric") -> "Metric":
+        return self + other
 
     def print(self, epoch: int,
               total_epochs: int, kind: str) -> None:
@@ -87,8 +92,8 @@ class Metric:
         print("Test results: " + ", ".join(strs))
 
     @property
-    def loss(self) -> torch.Tensor:
-        return getattr(self, "lm_loss")
+    def _loss(self) -> torch.Tensor:
+        return self._lm_loss
 
     def detach(self) -> None:
         for f in fields(self):
@@ -104,7 +109,7 @@ class Metric:
 
     @property
     def main(self) -> torch.Tensor:
-        return self.loss
+        return getattr(self, "loss")
 
     def __gt__(self, other: object) -> bool:
         if isinstance(other, Metric):
@@ -128,11 +133,44 @@ class Metric:
 @dataclass
 class SupervisedMetric(Metric):
     _arc_loss: torch.Tensor = torch.tensor(0)
+    alpha: float | None = None
     _to_mean: ClassVar[set[str]] = Metric._to_mean | {"arc_loss"}
 
     @property
-    def loss(self) -> torch.Tensor:
-        return (self._lm_loss + self._arc_loss) / self.num
+    def _loss(self) -> torch.Tensor:
+        if self.alpha is None:
+            print("self.alpha is None!")
+            return (self._lm_loss
+                    + self._arc_loss)
+        else:
+            return (self.alpha*self._lm_loss
+                    + (1-self.alpha)*self._arc_loss)
+
+    def __add__(self, other: Metric) -> Metric:
+        # other must be a lower type or Self
+
+        higher = None
+        if (isinstance(self, other.__class__)
+                and not isinstance(other, self.__class__)):
+            return other.__add__(self)
+        elif isinstance(other, self.__class__):
+            higher = self
+        assert higher is not None, (f"Cannot add metrics "
+                                    f"of types {self.__class__} "
+                                    f"and {other.__class__}")
+        other = cast(Self, other)
+
+        assert (other.alpha == self.alpha or other.alpha is None
+                or self.alpha is None), (
+                    "Cannot combine metrics with different alpha."
+                )
+
+        alpha = other.alpha if other.alpha is not None else self.alpha
+
+        fs = fields(higher)
+        return higher.__class__(
+            **{f.name: getattr(self, f.name) + getattr(other, f.name)
+               for f in fs if f.name != "alpha"}, alpha=alpha)
 
 
 @dataclass
@@ -153,6 +191,7 @@ class SupervisedEvalMetric(SupervisedMetric, EvalMetric):
 class GeneralConfig(TypedDict):
     batch_size: int
     mode: Mode
+    loss_alpha: float | None
     arc_loss_weighted: bool
     device: str
 
@@ -274,21 +313,35 @@ class LMTrainer():
             ) -> torch.Tensor:
         """reduction sum takes a mean across dim 1
         of the mask"""
+        # TODO: what if we have more than two masks?
+        masks_dim = 0
+        batch_dim = 1
+        seq1_dim = 2
+        seq2_dim = 3
+        shape = score_preds.shape
 
-        batch_size = score_preds.shape[1]
-        seq_len = score_preds.shape[2]
-        total_len = batch_size * seq_len
-        factor = seq_len+1
+        M = shape[masks_dim]
+        B = shape[batch_dim]
+        S = shape[seq1_dim]
+
+        # Calculation if unpadded (no ignore mask)
+        total_len = B * S
+        factor = int((S+1) / 2 * M)
         num_scores = total_len * factor
 
         if to_ignore_mask is not None:
+            # assumes lens are the same for each M
+            lens = (~to_ignore_mask).select(
+                seq2_dim, 0).select(masks_dim, 0).sum(seq1_dim-1).float()
+            # TODO: make it possbile to give lens as parameter
+            # since we compute them already in normal loss calculation
+            # and compute the to_ignore_mask here using broadcasting...
 
-            # compute number of non-padding tokens to compute
-            # number of arcs
-            lens = (~to_ignore_mask[0, :, 0]).sum(1).cpu()  # type: ignore
+            total_len = int(lens.sum().item())
+            # divide through M since each head mask contributes 1x total_len
 
-            num_scores = (torch.dot((lens+1), lens)).item()  # type: ignore
-            factor: int = num_scores / lens.sum().item()  # type: ignore
+            num_scores = (
+                torch.dot((lens+1), lens) / 2 * M).item()  # type: ignore
             # divide score/factor by number of tokens to get average
             # per-token loss
             score_gold = cast(torch.BoolTensor,
@@ -302,11 +355,10 @@ class LMTrainer():
             reduction='none')
 
         if self.config["arc_loss_weighted"]:
-            total_el = score_gold.numel()
             true_el = torch.sum(score_gold)
-            false_el = total_el - true_el
-            f_true = 0.5*(total_el)/true_el
-            f_false = 0.5*(total_el)/false_el
+            false_el = num_scores - true_el
+            f_true = 0.5*num_scores/true_el
+            f_false = 0.5*num_scores/false_el
             weights = torch.zeros(*score_preds.shape,
                                   device=score_preds.device)
             weights[score_gold] = f_true
@@ -317,7 +369,7 @@ class LMTrainer():
         if reduction == "mean":
             loss /= num_scores
         else:
-            loss /= factor
+            loss /= num_scores/total_len  # = factor
             # Each position can be attended to S+1 times
         return loss
 
@@ -435,7 +487,9 @@ class LMTrainer():
         if arc_loss is None:
             metric = Metric(num_instances, lm_loss)
         else:
-            metric = SupervisedMetric(num_instances, lm_loss, arc_loss)
+            assert self.train_config["loss_alpha"] is not None
+            metric = SupervisedMetric(num_instances, lm_loss, arc_loss,
+                                      self.train_config["loss_alpha"])
 
         metric.loss.backward()   # backward pass
         self.optimiser.step()   # update parameters
@@ -483,6 +537,9 @@ class LMTrainer():
                 reduction="sum")
             loss += arc_loss
 
+            # TODO: fix selection of scores for cases
+            # depth > 1 and width > 2
+            # select from score_gold["head"]; but which?
             preds_head = score_preds[0].detach().cpu().numpy()
             golds_head = score_gold[0].detach().cpu().numpy()
             preds_child = score_preds[1].detach().cpu().numpy()
@@ -501,13 +558,17 @@ class LMTrainer():
                 g = g[n][:, n]
                 pred_headlist = mst(p)
                 gold_headlist = mask_to_headlist(g)
-                uas_abs += uas_absolute(pred_headlist, gold_headlist)
+                uas_abs += uas_absolute(pred_headlist, gold_headlist) + 1
+                # add 1 for dummy mask since metric divides through
+                # the number of all tokens
 
+            assert self.config["loss_alpha"] is not None
             return SupervisedEvalMetric(
                 num_instances,
                 lm_loss.detach().cpu(),
                 surprisal_sum.detach().cpu().item(),
                 arc_loss.detach().cpu(),
+                self.config["loss_alpha"],
                 uas_abs)
 
         return EvalMetric(num_instances, lm_loss.detach().cpu(),
@@ -537,11 +598,15 @@ class LMTrainer():
         self.transformerlm.train()
         for epoch in range(1, train_config["epochs"]+1):
             metric = self._train(train_loader)
-            metric.print(epoch, self.train_config["epochs"], "train")
+            # metric.print(epoch, self.train_config["epochs"], "train")
 
             if epoch % train_config["eval_interval"] == 0:
+                metric = self._eval(train_loader)
+                metric.print(epoch, self.train_config["epochs"], "train")
+
                 metric = self._eval(eval_loader)
                 metric.print(epoch, self.train_config["epochs"], "eval")
+
                 self.transformerlm.train()
 
                 if metric > best:       # greater means better
@@ -549,8 +614,9 @@ class LMTrainer():
                     self.save(train_config["model_dir"])
                     print(f"Saving model at epoch {epoch}...")
 
+        # TODO: load best (saved) into transformerlm
         if test is not None:
-            pass
+            self.test(test)
         # if score_preds is not None and score_gold is not None:
         #    token_mapper: TokenMapper = TokenMapper.load("./tokmap.pickle")
         #    for i in range(10):

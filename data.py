@@ -34,7 +34,7 @@ from abc import ABC, abstractmethod
 from typing import (Iterable, Iterator, Sequence, TypedDict,
                     TypeVar, Callable, Hashable, Literal, Any, Mapping,
                     Concatenate, NotRequired, Generic, Union, overload,
-                    )
+                    TypeVarTuple)
 
 ENCODING = "utf-8"
 
@@ -67,9 +67,16 @@ def filldict(keys: Sequence[Z],
 def get_transform_mask_head_child(
         keys_for_head: set[str] = {"head"},
         keys_for_child: set[str] = {"child"},
-        triangulate: bool = True
+        triangulate: int | None = 0,
+        connect_with_dummy: bool = True,
+        connect_with_self: bool = False,
         ) -> Callable[[npt.NDArray[np.bool_]],
                       dict[str, npt.NDArray[np.bool_]]]:
+    print("connect_with_self:", connect_with_self)
+    assert not (connect_with_dummy and connect_with_self), (
+        "You cannot represent non-existant arcs both with "
+        "arcs to the dummy node and with self-arcs."
+        )
 
     def transform_mask_head_child(
             mask: npt.NDArray[np.bool_],
@@ -86,17 +93,40 @@ def get_transform_mask_head_child(
         # head[range(len(head)), range(len(head))] = True
         # child[range(len(child)), range(len(child))] = True
 
-        tril_head = np.tril(head, -1)
-        set_true = ~tril_head.any(1)
-        head[:, 0] = np.logical_or(set_true, head[:, 0])
+        if connect_with_dummy:
+            tril_head = np.tril(head, -1)
+            set_true = ~tril_head.any(1)
+            head[:, 0] = np.logical_or(set_true, head[:, 0])
 
-        tril_child = np.tril(child, -1)
-        set_true = ~tril_child.any(1)
-        child[:, 0] = np.logical_or(set_true, child[:, 0])
+            tril_child = np.tril(child, -1)
+            set_true = ~tril_child.any(1)
+            child[:, 0] = np.logical_or(set_true, child[:, 0])
 
-        if triangulate:
-            head = np.tril(head, 0)
-            child = np.tril(child, 0)
+        if connect_with_self:
+            tril_head = np.tril(head, -1)
+            length = head.shape[0]
+            set_true = ~tril_head.any(1)
+            head[np.arange(0, length),
+                 np.arange(0, length)] = np.logical_or(
+                     set_true,
+                     head.diagonal(
+                         axis1=-1,
+                         axis2=-2
+                     ))
+            tril_child = np.tril(child, -1)
+            length = head.shape[0]
+            set_true = ~tril_child.any(1)
+            child[np.arange(0, length),
+                  np.arange(0, length)] = np.logical_or(
+                      set_true,
+                      child.diagonal(
+                          axis1=-1,
+                          axis2=-2
+                      ))
+
+        if triangulate is not None:
+            head = np.tril(head, triangulate)
+            child = np.tril(child, triangulate)
 
         out_dict: dict[str, npt.NDArray[np.bool_]] = {}
 
@@ -1111,19 +1141,45 @@ class DatasetDictTest(DatasetDictBase):
     test: MemMapDataset
 
 
+T = TypeVarTuple("T")
+
+
+def make_name(dir: str, naming_pattern: str,
+              splits: tuple[*T]) -> tuple[*T]:
+    return tuple(
+        os.path.join(
+            dir, naming_pattern.format(split))
+        for split in splits)  # type: ignore
+
+
 ud = "./Universal Dependencies 2.14/ud-treebanks-v2.14"
+EWT_dir = os.path.join(ud, "UD_English-EWT")
+EWT_name = "en_ewt-ud-{}.conllu"
 
 
 EWT = DatasetDetailsFull(
-    dirs=(os.path.join(ud, "UD_English-EWT/en_ewt-ud-train.conllu"),
-          os.path.join(ud, "UD_English-EWT/en_ewt-ud-dev.conllu"),
-          os.path.join(ud, "UD_English-EWT/en_ewt-ud-test.conllu")),
+    dirs=make_name(EWT_dir, EWT_name,
+                   ("train", "dev", "test")),
     memmap_dir="./processed/EWT/memmap",
     tokmap_dir="./processed/EWT/"
     )
 
-dataset_details = dict(
-    EWT=EWT
+Wikitext = DatasetDetailsFull(
+    dirs=make_name("./Wikitext", "wikitext_spacy_{}.conllu",
+                   ("train", "dev", "test")),
+    memmap_dir="./processed/Wikitext/memmap",
+    tokmap_dir="./processed/Wikitext/"
+    )
+
+NaturalStoriesOld = DatasetDetails(
+    dirs=("./naturalstories-master/parses/ud/stories-aligned.conllx",),
+    memmap_dir="./processed/NaturalStories/memmap",
+    tokmap_dir="./processed/NaturalStories/"
+    )
+
+dataset_details_full = dict(
+    EWT=EWT,
+    Wikitext=Wikitext
     )
 
 
@@ -1135,7 +1191,12 @@ def mmd_splits(memmap_dir: str, splits: SplitSelection) -> TupleSelection:
 @overload
 def load_dataset(details: DatasetDetailsFull,
                  max_len_train: int | None = 40,
-                 vocab_size: int | None = 50_000
+                 max_len_eval_test: int | None = None,
+                 vocab_size: int | None = 50_000,
+                 first_k: int | None = None,
+                 triangulate: int | None = 0,
+                 connect_with_dummy: bool = True,
+                 connect_with_self: bool = False
                  ) -> DatasetDictTrain:
     ...
 
@@ -1143,19 +1204,33 @@ def load_dataset(details: DatasetDetailsFull,
 @overload
 def load_dataset(details: DatasetDetails,
                  max_len_train: int | None = 40,
-                 vocab_size: int | None = 50_000
+                 max_len_eval_test: int | None = None,
+                 vocab_size: int | None = 50_000,
+                 first_k: int | None = None,
+                 triangulate: int | None = 0,
+                 connect_with_dummy: bool = True,
+                 connect_with_self: bool = False
                  ) -> DatasetDictTrain | DatasetDictTest:
     ...
 
 
 def load_dataset(details: DatasetDetails,       # type: ignore
                  max_len_train: int | None = 40,  # should mark all
-                 vocab_size: int | None = 50_000  # of this with ReadOnly
+                 max_len_eval_test: int | None = None,
+                 vocab_size: int | None = 50_000,  # of this with ReadOnly
+                 first_k: int | None = None,
+                 triangulate: int | None = 0,
+                 connect_with_dummy: bool = True,
+                 connect_with_self: bool = False
                  ) -> DatasetDictTrain | DatasetDictTest:
+    # TODO: implement option to read raw string data and parse,
+    # to accept raw string as input and to save parsed data
     transform = get_transform_mask_head_child(
         keys_for_head={"head"},
         keys_for_child={"child"},
-        triangulate=True)
+        triangulate=triangulate,
+        connect_with_dummy=connect_with_dummy,
+        connect_with_self=connect_with_self)
 
     memmap_dir = details["memmap_dir"]
 
@@ -1178,26 +1253,39 @@ def load_dataset(details: DatasetDetails,       # type: ignore
     assert not (load_memmap and train_token_mapper), (
         "Cannot train token mapper with a memmap.")
 
-    def load_dataset(dir: str, max_len: int | None = None) -> MemMapDataset:
+    def load_dataset(dir: str, is_train: bool,
+                     max_len: int | None = None) -> MemMapDataset:
         if load_memmap:
+            assert first_k is None, (
+                "Loading only part of memmap is not implemented")
             return MemMapDataset.from_memmap(dir, transform,
                                              max_len=max_len)
         else:
+            first_k_param = first_k if is_train else None
             return MemMapDataset.from_file(dir, transform,
-                                           max_len=max_len)
+                                           max_len=max_len,
+                                           first_k=first_k_param)
 
-    train: None | MemMapDataset
-    eval: None | MemMapDataset
-    test: None | MemMapDataset
+    train: None | MemMapDataset = None
+    eval: None | MemMapDataset = None
+    test: None | MemMapDataset = None
+    sets: tuple[MemMapDataset, ...] = tuple()
+    splits: tuple[str, ...] = tuple()
     if len(dirs) == 1:
         # Only test
-        test = load_dataset(dirs[0])
+        test = load_dataset(dirs[0], True, max_len_eval_test)
+        sets = (test,)
+        splits = ("test",)
     elif len(dirs) > 1 and len(dirs) < 4:
         # train, eval and optional test
-        train = load_dataset(dirs[0], max_len_train)
-        eval = load_dataset(dirs[1])
+        train = load_dataset(dirs[0], True, max_len_train)
+        eval = load_dataset(dirs[1], False, max_len_eval_test)
+        sets = (train, eval)
+        splits = ("train", "eval")
         if len(dirs) == 3:
-            test = load_dataset(dirs[0])
+            test = load_dataset(dirs[0], False, max_len_eval_test)
+            sets = (train, eval, test)
+            splits = ("train", "eval", "test")
     else:
         raise Exception("Too many or not enough dataset dirs provided.")
 
@@ -1219,8 +1307,7 @@ def load_dataset(details: DatasetDetails,       # type: ignore
     else:
         token_mapper = TokenMapper.load(tokmap_dir)
 
-    for split, split_name in zip((train, eval, test),
-                                 ("train", "eval", "test")):
+    for split, split_name in zip(sets, splits):
         if split is not None and not split.mapped:
             Path(memmap_dir).mkdir(parents=True, exist_ok=True)
             split.map_to_ids(token_mapper,
