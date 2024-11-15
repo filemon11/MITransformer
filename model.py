@@ -11,7 +11,8 @@ import math
 
 from collections import defaultdict
 
-from typing import TypedDict, NotRequired, Sequence, Unpack
+from typing import (TypedDict, NotRequired, Sequence, Unpack,
+                    Literal)
 
 
 def combine_scores(
@@ -111,7 +112,7 @@ class DualFixedLinear(nn.Module):
         # in addition to head and child
         # num_keys; saves 1/3 keys * proportion
         # dim: out_dim - (out_dim/3)*(2/num_keys)
-        self.w_qkv = nn.Linear(in_dim, 2 * out_dim / 3, bias=bias)
+        self.w_qkv = nn.Linear(in_dim, 2 * out_dim // 3, bias=bias)
         # -> 2*(M * H/2 * (E/3)*2)
 
     def forward(self, x):
@@ -284,6 +285,13 @@ class MILayer(nn.Module):
 
 TransformerDescription = tuple[LayerDescription, ...]
 
+ProbMethod = Literal["sigmoid", "softmax"]
+
+
+class TransformerDescription2(TypedDict):
+    layers: tuple[LayerDescription, ...]
+    prob_methods: dict[tuple[str, str] | str, ProbMethod]
+
 
 class MITransformerConfig(TypedDict):
     transformer_description: TransformerDescription
@@ -349,7 +357,7 @@ class MITransformer(nn.Module):
                     p, mean=0.0,
                     std=0.02/math.sqrt(2 * len(transformer_description)))
 
-        # self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
+        self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
         # self.transformer = torch.nn.Transformer(400, 1, 1, 1, 4*400, 0, batch_first=True)
 
     def _init_weights(self, module):
@@ -383,7 +391,7 @@ class MITransformer(nn.Module):
 
         x = self.embd_dropout(tok_emb + pos_emb)
 
-        # x = self.lstm(x)[0]
+        x = self.lstm(x)[0]
         # return x, {}
         # return self.transformer(x, x), {}
         scores = []

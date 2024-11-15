@@ -82,6 +82,7 @@ def test_subset():
     n_embd = 400
     block_size = 500
     transformer_description = ((("head", "child"), 1),
+                               (("head", "child"), 1),
                                )
 
     # Experiment 1
@@ -103,7 +104,7 @@ def test_subset():
                             max_len_train=40,
                             max_len_eval_test=40,
                             vocab_size=50_000,
-                            first_k=10_000,
+                            first_k=1_000,
                             connect_with_dummy=True,
                             connect_with_self=False)
 
