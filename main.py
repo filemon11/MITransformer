@@ -1,4 +1,3 @@
-# -*- coding: future_typing -*-
 import torch
 
 from data import load_dataset, dataset_details_full
@@ -87,7 +86,7 @@ def test_subset():
 
     # Experiment 1
     train_config = TrainConfig(
-        batch_size=1,
+        batch_size=100,
         eval_interval=100,
         epochs=100,
         learning_rate=1e-3,
@@ -100,11 +99,11 @@ def test_subset():
 
     ds_det = dataset_details_full["Wikitext"]
     ds_det["dirs"] = ds_det["dirs"][0:2]  # type: ignore
-    datasets = load_dataset(dataset_details_full["Wikitext"],
+    datasets = load_dataset(ds_det,
                             max_len_train=40,
                             max_len_eval_test=40,
                             vocab_size=50_000,
-                            first_k=1000,
+                            first_k=10_000,
                             connect_with_dummy=True,
                             connect_with_self=False)
 

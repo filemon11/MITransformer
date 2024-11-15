@@ -55,7 +55,8 @@ class PositionalEncoding(nn.Module):
         pe[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe)
 
-        self.begin_emb = torch.zeros((2, d_model))
+        begin_emb = torch.zeros((2, d_model))
+        self.register_buffer('begin_emb', begin_emb)
 
     def forward(self, len: int) -> torch.Tensor:
         """
@@ -182,7 +183,6 @@ class MIAttention(nn.Module):
         """Mask shape: [M, B, S, S]
         with M number of multiheads,
         B batch size, S sequence length"""
-
         B, S, E = x.shape
         # B = batch size, S = sequence length, E = embedding dimensionality
         # H = head number, M = multihead number
@@ -196,7 +196,7 @@ class MIAttention(nn.Module):
         att: torch.Tensor = torch.matmul(q, k.transpose(-1, -2)) * self.scale
         # (B, MH, S, S)
 
-        att = einops.rearrange(att, 'b (m h) n1 n2 -> b m h n1 n2',
+        att = einops.rearrange(att, 'b (m h) s1 s2 -> b m h s1 s2',
                                m=self.n_multihead)
         att *= (1.0 / math.sqrt(k.shape[-1]))
 
@@ -240,7 +240,7 @@ class MIAttention(nn.Module):
         out_scores = {
             tag: [arc_scores[:, m, h] for h in range(self.n_head)]
             for tag, m in zip(self.tags, range(self.n_multihead))}
-        return x, out_scores
+        return out, out_scores
 
 
 class MILayer(nn.Module):
@@ -334,6 +334,7 @@ class MITransformer(nn.Module):
         self.wte = nn.Embedding(kwargs["vocab_size"], n_embd)
         # self.wpe = PositionalEncoding(n_embd, 0, self.block_size)
         self.wpe = nn.Embedding(self.block_size, n_embd)
+
         self.embd_dropout = nn.Dropout(kwargs["embd_dropout"])
 
         self.use_input_mask: bool = kwargs["use_input_mask"]
@@ -349,6 +350,7 @@ class MITransformer(nn.Module):
                     std=0.02/math.sqrt(2 * len(transformer_description)))
 
         # self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
+        # self.transformer = torch.nn.Transformer(400, 1, 1, 1, 4*400, 0, batch_first=True)
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -380,10 +382,10 @@ class MITransformer(nn.Module):
         pos_emb = self.wpe(torch.arange(0, S, device=tok_emb.device))
 
         x = self.embd_dropout(tok_emb + pos_emb)
-        
+
         # x = self.lstm(x)[0]
         # return x, {}
-
+        # return self.transformer(x, x), {}
         scores = []
         for layer in self.layers:
             x, sc = layer(x, masks if self.use_input_mask else None)
@@ -404,7 +406,7 @@ class MITransformerLM(nn.Module):
         self.lm_head = nn.Linear(n_embd,
                                  mi_transformer.vocab_size, bias=False)
 
-        self.mi_transformer.wte.weight = self.lm_head.weight
+        self.lm_head.weight = mi_transformer.wte.weight
 
         self._init_weights(self.lm_head)
 
@@ -433,6 +435,7 @@ class MITransformerLM(nn.Module):
 
         x = self.ln(x)
         logits = self.lm_head(x)
+
         # shape (B,T,C)  B : batch, T : sequence length, C : embedding dim
 
         # logits = x @ self.embds

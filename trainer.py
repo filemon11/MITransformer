@@ -463,7 +463,6 @@ class LMTrainer():
             reduction="sum")
         arc_loss: torch.Tensor | None = None
 
-        loss = lm_loss
         score_preds, score_gold = self.prepare_scores(
             arc_scores, batch["masks"])
         if (self.train_config["mode"] == "supervised"
@@ -480,14 +479,12 @@ class LMTrainer():
                 score_gold,
                 to_ignore,
                 reduction="sum")
-            loss += arc_loss
 
-        num_instances = (batch["input_ids"] != ignore_index).numel()
+        num_instances = (batch["label_ids"] != ignore_index).numel()
 
         if arc_loss is None:
             metric = Metric(num_instances, lm_loss)
         else:
-            assert self.train_config["loss_alpha"] is not None
             metric = SupervisedMetric(num_instances, lm_loss, arc_loss,
                                       self.train_config["loss_alpha"])
 
@@ -511,14 +508,13 @@ class LMTrainer():
             logits, labels,
             ignore_index=ignore_index, reduction="sum")
 
-        loss = lm_loss
         score_preds, score_gold = self.prepare_scores(
             arc_scores, batch["masks"])
 
-        num_instances = batch["input_ids"][batch["input_ids"]
-                                           != ignore_index].numel()
+        num_instances = int((labels != ignore_index).sum().item())
 
-        surprisal_sum = sum_unpadded(logits_to_surprisal(logits, labels),
+        surprisal_sum = sum_depadded(logits_to_surprisal(logits, labels,
+                                                         ignore_index),
                                      labels, ignore_index).sum()
 
         if (mode == "supervised"
@@ -535,7 +531,6 @@ class LMTrainer():
                 score_gold,
                 to_ignore,
                 reduction="sum")
-            loss += arc_loss
 
             # TODO: fix selection of scores for cases
             # depth > 1 and width > 2
@@ -550,7 +545,7 @@ class LMTrainer():
             golds_arcs = dummy_mask_removal(
                 merge_head_child_scores(golds_head, golds_child))
 
-            not_padding = (batch["input_ids"][:, 1:]
+            not_padding = (batch["label_ids"][:, 1:]
                            != ignore_index).cpu().numpy()
             uas_abs = 0
             for p, g, n in zip(preds_arcs, golds_arcs, not_padding):
@@ -558,18 +553,20 @@ class LMTrainer():
                 g = g[n][:, n]
                 pred_headlist = mst(p)
                 gold_headlist = mask_to_headlist(g)
-                uas_abs += uas_absolute(pred_headlist, gold_headlist) + 1
+                uas_s = uas_absolute(pred_headlist, gold_headlist) + 1
+                uas_abs += uas_s
                 # add 1 for dummy mask since metric divides through
                 # the number of all tokens
 
             assert self.config["loss_alpha"] is not None
-            return SupervisedEvalMetric(
+            m = SupervisedEvalMetric(
                 num_instances,
                 lm_loss.detach().cpu(),
                 surprisal_sum.detach().cpu().item(),
                 arc_loss.detach().cpu(),
                 self.config["loss_alpha"],
                 uas_abs)
+            return m
 
         return EvalMetric(num_instances, lm_loss.detach().cpu(),
                           surprisal_sum.detach().cpu().item())
@@ -598,7 +595,6 @@ class LMTrainer():
         self.transformerlm.train()
         for epoch in range(1, train_config["epochs"]+1):
             metric = self._train(train_loader)
-            # metric.print(epoch, self.train_config["epochs"], "train")
 
             if epoch % train_config["eval_interval"] == 0:
                 metric = self._eval(train_loader)
@@ -668,7 +664,6 @@ class LMTrainer():
             metric += self.train_step(
                 batch,
                 loader.dataset.keys_for_padding["label_ids"])
-
         return metric
 
     def _eval(self, loader: DataLoader[IDBatch, D]) -> Metric:
@@ -716,7 +711,6 @@ class LMTrainer():
             arc_scores: dict[str, list[torch.Tensor]]
             for batch in loader:
                 logits, arc_scores = self.transformerlm(**batch)
-                print(logits.shape)
                 labels = batch["label_ids"]
 
                 if make_prob:
@@ -724,7 +718,6 @@ class LMTrainer():
 
                 if only_true:
                     logits = select_true(logits, labels, ignore_index)
-                    print(logits[0])
 
                 unpadded_logits.extend(
                     unpad(logits, labels, ignore_index))
@@ -816,28 +809,30 @@ def logits_to_probs(logits: torch.Tensor) -> torch.Tensor:
 
 
 def logits_to_true_probs(logits: torch.Tensor,
-                         labels: torch.Tensor) -> torch.Tensor:
+                         labels: torch.Tensor,
+                         ignore_index: int | None = None) -> torch.Tensor:
     probs = logits_to_probs(logits)
-    return select_true(probs, labels)
+    return select_true(probs, labels, ignore_index)
 
 
 def logits_to_surprisal(logits: torch.Tensor,
-                        labels: torch.Tensor) -> torch.Tensor:
-    return -torch.log(logits_to_true_probs(logits, labels))
+                        labels: torch.Tensor,
+                        ignore_index: int | None = None) -> torch.Tensor:
+    return -torch.log(logits_to_true_probs(logits, labels, ignore_index))
 
 
-def sum_unpadded(values: torch.Tensor,
+def sum_depadded(values: torch.Tensor,
                  labels: torch.Tensor,
                  ignore_index: int) -> torch.Tensor:
     values[labels == ignore_index] = 0
     return values.sum(-1)
 
 
-def mean_unpadded(values: torch.Tensor,
+def mean_depadded(values: torch.Tensor,
                   labels: torch.Tensor,
                   ignore_index: int) -> torch.Tensor:
     num_items = (labels != ignore_index).sum(-1)
-    sums = sum_unpadded(values, labels, ignore_index)
+    sums = sum_depadded(values, labels, ignore_index)
     return sums / num_items
 
 
@@ -846,7 +841,7 @@ def logits_to_perplexity(logits: torch.Tensor,
                          ignore_index: int) -> torch.Tensor:
     # Should we disregard first node (root from dummy?)
     surprisal = logits_to_surprisal(logits, labels)
-    means = mean_unpadded(surprisal, labels, ignore_index)
+    means = mean_depadded(surprisal, labels, ignore_index)
     return torch.exp(means)
 
 
@@ -855,7 +850,6 @@ def unpad(sentences: torch.Tensor, labels: torch.Tensor,
     unpadded_list: list[torch.Tensor] = []
     for sentence, sen_labels in zip(sentences, labels):
         unpadded_list.append(sentence[sen_labels != ignore_index])
-    print(unpadded_list[0].shape)
     return unpadded_list
 
 

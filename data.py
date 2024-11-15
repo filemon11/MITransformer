@@ -72,7 +72,6 @@ def get_transform_mask_head_child(
         connect_with_self: bool = False,
         ) -> Callable[[npt.NDArray[np.bool_]],
                       dict[str, npt.NDArray[np.bool_]]]:
-    print("connect_with_self:", connect_with_self)
     assert not (connect_with_dummy and connect_with_self), (
         "You cannot represent non-existant arcs both with "
         "arcs to the dummy node and with self-arcs."
@@ -1112,6 +1111,7 @@ SplitSelection = (tuple[Literal["train"],
 TupleSelection = tuple[str, str, str] | tuple[str, str] | tuple[str]
 
 
+# TODO: should switch to Python 3.13 and add ReadOnly to attributes
 class DatasetDetails(TypedDict):
     dirs: NotRequired[TupleSelection]
     memmap_dir: str
@@ -1171,6 +1171,12 @@ Wikitext = DatasetDetailsFull(
     tokmap_dir="./processed/Wikitext/"
     )
 
+Sample = DatasetDetailsFull(
+    dirs=tuple(3*["./sample.conllu"]),  # type: ignore
+    memmap_dir="./processed/Sample/memmap",
+    tokmap_dir="./processed/Sample/"
+    )
+
 NaturalStoriesOld = DatasetDetails(
     dirs=("./naturalstories-master/parses/ud/stories-aligned.conllx",),
     memmap_dir="./processed/NaturalStories/memmap",
@@ -1179,8 +1185,12 @@ NaturalStoriesOld = DatasetDetails(
 
 dataset_details_full = dict(
     EWT=EWT,
-    Wikitext=Wikitext
+    Wikitext=Wikitext,
+    Sample=Sample
     )
+
+dataset_details = (dataset_details_full
+                   | {"NaturalStoriesOld": NaturalStoriesOld})
 
 
 def mmd_splits(memmap_dir: str, splits: SplitSelection) -> TupleSelection:
