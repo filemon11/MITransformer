@@ -181,12 +181,12 @@ def options(seq_of_items: list[tuple[str, Iterable[Any]]]
 def test_multiple():
     sent_num_and_bs = [(1, 1), (100, 10), (1_000, 100)]
     params = dict(
-        depth=[1], #, 2, 5],
-        width=[1], #, 2, 5],
-        add_standard=[False], #, True],
-        use_lstm=[False], #, True],
-        unrestricted_before=[0], #, 1],
-        unrestricted_after=[0] #, 1],
+        depth=[1, 2, 5],
+        width=[1, 2, 5],
+        add_standard=[False, True],
+        use_lstm=[False, True],
+        unrestricted_before=[0, 1],
+        unrestricted_after=[0, 1],
     )
 
     for sent_num, batch_size in sent_num_and_bs:
