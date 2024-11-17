@@ -308,6 +308,7 @@ class MITransformerConfig(TypedDict):
     use_input_mask: bool
     use_dual_fixed: bool
     bias: bool
+    use_lstm: bool
     # I would like to make these optional
     # in the class constructor but still
     # type them; dataclass is not unpackable
@@ -357,7 +358,9 @@ class MITransformer(nn.Module):
                     p, mean=0.0,
                     std=0.02/math.sqrt(2 * len(transformer_description)))
 
-        self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
+        self.lstm = None
+        if kwargs["use_lstm"]:
+            self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
         # self.transformer = torch.nn.Transformer(400, 1, 1, 1, 4*400, 0, batch_first=True)
 
     def _init_weights(self, module):
@@ -391,9 +394,9 @@ class MITransformer(nn.Module):
 
         x = self.embd_dropout(tok_emb + pos_emb)
 
-        x = self.lstm(x)[0]
-        # return x, {}
-        # return self.transformer(x, x), {}
+        if self.lstm is not None:
+            x = self.lstm(x)[0]
+
         scores = []
         for layer in self.layers:
             x, sc = layer(x, masks if self.use_input_mask else None)

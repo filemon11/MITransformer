@@ -2,9 +2,9 @@ import torch
 
 from data import load_dataset, dataset_details_full
 from trainer import LMTrainer, TrainConfig, MITransformerConfig
+import pandas as pd
 
-
-from typing import Literal
+from typing import Literal, Any, TypedDict, Iterable
 
 # set the random seed, for reproducibility
 torch.manual_seed(42)
@@ -59,7 +59,8 @@ def train(mode: Literal["standard", "input", "supervised"], dataset_name: str):
         dropout_embd=dropout,
         vocab_size=datasets["token_mapper"].vocab_size,
         overlay_causal=True, use_input_mask=(mode == "input"),
-        use_dual_fixed=True, bias=False)
+        use_dual_fixed=True, bias=False,
+        use_lstm=False)
 
     trainer = LMTrainer.new(transformer_config, train_config)
 
@@ -73,21 +74,32 @@ def train(mode: Literal["standard", "input", "supervised"], dataset_name: str):
     return trainer, generated, logits, arc_scores
 
 
-def test_subset():
-    # device: where to execute computation
-    alphas = (1.0, 0.5, 0.0)
+def test_subset(batch_size: int = 100,
+                first_k: int | None = 1_000,
+                depth: int = 1,
+                width: int = 1,
+                add_standard: bool = False,
+                use_lstm: bool = False,
+                unrestricted_before: int = 0,
+                unrestricted_after: int = 0,
+                alphas: tuple[float, ...] = (0.0, 0.5, 1.0)):
 
+    layer_design = (("head", "child", "standard")
+                    if add_standard else ("head", "child"))
     # dropout rate (variable p) for dropout units
     dropout = 0.0
-    n_embd = 400
+    n_embd = 400 // len(layer_design) * len(layer_design)
     block_size = 500
-    transformer_description = ((("head", "child"), 1),
-                               (("head", "child"), 1),
-                               )
+    core = tuple([(layer_design, width)
+                  ] * depth)
+    before = tuple([(("standard",), len(layer_design)*width)
+                    ] * unrestricted_before)
+    after = tuple([(("standard",), len(layer_design)*width)
+                   ] * unrestricted_after)
+    transformer_description = before + core + after
 
-    # Experiment 1
     train_config = TrainConfig(
-        batch_size=100,
+        batch_size=batch_size,
         eval_interval=100,
         epochs=100,
         learning_rate=1e-3,
@@ -104,7 +116,9 @@ def test_subset():
                             max_len_train=40,
                             max_len_eval_test=40,
                             vocab_size=50_000,
-                            first_k=1_000,
+                            first_k=first_k,
+                            first_k_eval_test=None,
+                            triangulate=0,
                             connect_with_dummy=True,
                             connect_with_self=False)
 
@@ -120,9 +134,11 @@ def test_subset():
         dropout_embd=dropout,
         vocab_size=datasets["token_mapper"].vocab_size,
         overlay_causal=True, use_input_mask=False,
-        use_dual_fixed=False, bias=False)
+        use_dual_fixed=False, bias=False,
+        use_lstm=use_lstm)
 
-    # Experiment 2
+    # Experiments
+    dataframe_list = []
     for i, a in enumerate(alphas):
         i += 1
         print(f"Performing experiment {i}")
@@ -130,4 +146,53 @@ def test_subset():
         train_config["loss_alpha"] = a
 
         trainer = LMTrainer.new(transformer_config, train_config)
-        trainer.train(**datasets)
+        metrics = trainer.train(**datasets)
+
+        metric_dicts: list[dict[str, Any]] = [
+            dict(metric.to_dict()) for metric in metrics]
+        for d, s in zip(metric_dicts, ("train", "eval", "test")):
+            d["split"] = s
+            d["alpha"] = a
+            d["batch_size"] = batch_size
+            d["sentences"] = first_k
+            d["depth"] = depth
+            d["width"] = width
+            d["add_standard"] = add_standard
+            d["use_lstm"] = use_lstm
+            d["unrestricted_before"] = unrestricted_before
+            d["unrestricted_after"] = unrestricted_after
+        dataframe_list.append(pd.DataFrame(metric_dicts))
+
+    return pd.concat(dataframe_list)
+
+
+def options(seq_of_items: list[tuple[str, Iterable[Any]]]
+            ) -> Iterable[dict[str, Any]]:
+    name, values = seq_of_items[0]
+    for value in values:
+        if len(seq_of_items[1:]) == 0:
+            yield {name: value}
+        else:
+            for d in options(seq_of_items[1:]):
+                d[name] = value
+                yield d
+
+
+def test_multiple():
+    sent_num_and_bs = [(1, 1), (100, 10), (1_000, 100)]
+    params = dict(
+        depth=[1], #, 2, 5],
+        width=[1], #, 2, 5],
+        add_standard=[False], #, True],
+        use_lstm=[False], #, True],
+        unrestricted_before=[0], #, 1],
+        unrestricted_after=[0] #, 1],
+    )
+
+    for sent_num, batch_size in sent_num_and_bs:
+        for kwargs in options(list(params.items())):
+            df = test_subset(batch_size=batch_size,
+                             first_k=sent_num,
+                             **kwargs)
+            df.to_csv("./results.csv", index=False,
+                      mode="a")

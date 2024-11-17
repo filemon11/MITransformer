@@ -134,6 +134,8 @@ def get_transform_mask_head_child(
 
         for key in keys_for_child:
             out_dict[key] = child
+        # print(head)
+        # print(child)
 
         return out_dict
 
@@ -516,6 +518,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
             case "next":
                 masks = {key: None if masks is None else masks[1:, :-1]
                          for key, masks in masks.items()}
+        # print(masks)
 
         return EssentialSentence(
             masks=masks,
@@ -1204,6 +1207,7 @@ def load_dataset(details: DatasetDetailsFull,
                  max_len_eval_test: int | None = None,
                  vocab_size: int | None = 50_000,
                  first_k: int | None = None,
+                 first_k_eval_test: int | None = None,
                  triangulate: int | None = 0,
                  connect_with_dummy: bool = True,
                  connect_with_self: bool = False
@@ -1217,6 +1221,7 @@ def load_dataset(details: DatasetDetails,
                  max_len_eval_test: int | None = None,
                  vocab_size: int | None = 50_000,
                  first_k: int | None = None,
+                 first_k_eval_test: int | None = None,
                  triangulate: int | None = 0,
                  connect_with_dummy: bool = True,
                  connect_with_self: bool = False
@@ -1229,6 +1234,7 @@ def load_dataset(details: DatasetDetails,       # type: ignore
                  max_len_eval_test: int | None = None,
                  vocab_size: int | None = 50_000,  # of this with ReadOnly
                  first_k: int | None = None,
+                 first_k_eval_test: int | None = None,
                  triangulate: int | None = 0,
                  connect_with_dummy: bool = True,
                  connect_with_self: bool = False
@@ -1271,7 +1277,7 @@ def load_dataset(details: DatasetDetails,       # type: ignore
             return MemMapDataset.from_memmap(dir, transform,
                                              max_len=max_len)
         else:
-            first_k_param = first_k if is_train else None
+            first_k_param = first_k if is_train else first_k_eval_test
             return MemMapDataset.from_file(dir, transform,
                                            max_len=max_len,
                                            first_k=first_k_param)
