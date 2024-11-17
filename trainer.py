@@ -129,6 +129,10 @@ class Metric:
             except ValueError:
                 return False
 
+    def to_dict(self) -> dict[str, float]:
+        return {attr: round(float(getattr(self, attr)), 2)
+                for attr in self._to_mean}
+
 
 @dataclass
 class SupervisedMetric(Metric):
@@ -344,11 +348,12 @@ class LMTrainer():
                 torch.dot((lens+1), lens) / 2 * M).item()  # type: ignore
             # divide score/factor by number of tokens to get average
             # per-token loss
-            score_gold = cast(torch.BoolTensor,
-                              score_gold[~to_ignore_mask])
+            # score_gold = cast(torch.BoolTensor,
+            #                  score_gold[~to_ignore_mask])
 
-            score_preds = score_preds[~to_ignore_mask]
+            # score_preds = score_preds[~to_ignore_mask]
 
+        # print(score_preds.detach().cpu().numpy().round(2), score_gold.to(score_preds.dtype).detach().cpu().numpy())
         loss = F.binary_cross_entropy(
             score_preds,
             score_gold.to(score_preds.dtype),
@@ -508,6 +513,7 @@ class LMTrainer():
             logits, labels,
             ignore_index=ignore_index, reduction="sum")
 
+        # print(batch["masks"])
         score_preds, score_gold = self.prepare_scores(
             arc_scores, batch["masks"])
 
@@ -535,24 +541,34 @@ class LMTrainer():
             # TODO: fix selection of scores for cases
             # depth > 1 and width > 2
             # select from score_gold["head"]; but which?
-            preds_head = score_preds[0].detach().cpu().numpy()
-            golds_head = score_gold[0].detach().cpu().numpy()
-            preds_child = score_preds[1].detach().cpu().numpy()
-            golds_child = score_gold[1].detach().cpu().numpy()
-
+            middle = score_preds.shape[0]//2
+            preds_head = score_preds[:middle].mean(0).detach().cpu().numpy()
+            golds_head = score_gold[
+                :middle].float().mean(0).detach().cpu().numpy()
+            preds_child = score_preds[middle:].mean(0).detach().cpu().numpy()
+            golds_child = score_gold[
+                middle:].float().mean(0).detach().cpu().numpy()
+            # print("golds_head", golds_head.astype(float))
+            # print("golds_child", golds_child.astype(float))
             preds_arcs = dummy_mask_removal(
                 merge_head_child_scores(preds_head, preds_child))
             golds_arcs = dummy_mask_removal(
                 merge_head_child_scores(golds_head, golds_child))
 
-            not_padding = (batch["label_ids"][:, 1:]
-                           != ignore_index).cpu().numpy()
+            # print(preds_arcs.round(2))
+            # print(golds_arcs.astype(float))
+            not_padding = (batch["label_ids"]
+                           != ignore_index).cpu().numpy()[:, 1:]
             uas_abs = 0
             for p, g, n in zip(preds_arcs, golds_arcs, not_padding):
+                # print(n)
                 p = p[n][:, n]
                 g = g[n][:, n]
+                # print(p)
+                # print(g)
                 pred_headlist = mst(p)
                 gold_headlist = mask_to_headlist(g)
+                # print(pred_headlist, gold_headlist)
                 uas_s = uas_absolute(pred_headlist, gold_headlist) + 1
                 uas_abs += uas_s
                 # add 1 for dummy mask since metric divides through
@@ -575,7 +591,7 @@ class LMTrainer():
               train: DepDataset[IDSen],
               eval: DepDataset[IDSen],
               test: DepDataset[IDSen] | None = None,
-              **kwargs) -> None:
+              **kwargs) -> tuple[Metric, Metric] | tuple[Metric, Metric, Metric]:
         assert self.train_config is not None, "Config missing training params."
         assert self.train_config["batch_size"] <= len(train), (
             "Batch size larger than dataset.")
@@ -597,9 +613,6 @@ class LMTrainer():
             metric = self._train(train_loader)
 
             if epoch % train_config["eval_interval"] == 0:
-                metric = self._eval(train_loader)
-                metric.print(epoch, self.train_config["epochs"], "train")
-
                 metric = self._eval(eval_loader)
                 metric.print(epoch, self.train_config["epochs"], "eval")
 
@@ -611,8 +624,16 @@ class LMTrainer():
                     print(f"Saving model at epoch {epoch}...")
 
         # TODO: load best (saved) into transformerlm
+
+        final_train = self._eval(train_loader)
+        final_eval = self._eval(eval_loader)
+
         if test is not None:
-            self.test(test)
+            final_test = self.test(test)
+            return (final_train, final_eval, final_test)
+
+        else:
+            return (final_train, final_eval)
         # if score_preds is not None and score_gold is not None:
         #    token_mapper: TokenMapper = TokenMapper.load("./tokmap.pickle")
         #    for i in range(10):
@@ -679,13 +700,16 @@ class LMTrainer():
                     loader.dataset.keys_for_padding["label_ids"])
         return metric
 
-    def test(self, dataset: DepDataset) -> None:
+    def test(self, dataset: DepDataset) -> Metric:
         loader = get_loader(
             dataset, batch_size=self.config["batch_size"],
             bucket=False, device=self.config["device"],
             shuffle=False, droplast=False)
 
-        self._eval(loader).print_test()
+        metric = self._eval(loader)
+        metric.print_test()
+
+        return metric
 
     def predict(
             self, dataset: DepDataset,
