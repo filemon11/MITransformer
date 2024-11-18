@@ -40,7 +40,7 @@ N = TypeVar("N")
 @total_ordering
 @dataclass
 class Metric:
-    num: int = 0
+    num: float = 0
     _lm_loss: torch.Tensor = torch.tensor(0)
 
     _to_mean: ClassVar[set[str]] = {"lm_loss", "loss"}
@@ -81,6 +81,11 @@ class Metric:
 
     def __radd__(self, other: "Metric") -> "Metric":
         return self + other
+
+    def __truediv__(self, other: float) -> "Metric":
+        new = self.__class__() + self
+        new.num *= other
+        return new
 
     def print(self, epoch: int,
               total_epochs: int, kind: str) -> None:
@@ -591,7 +596,8 @@ class LMTrainer():
               train: DepDataset[IDSen],
               eval: DepDataset[IDSen],
               test: DepDataset[IDSen] | None = None,
-              **kwargs) -> tuple[Metric, Metric] | tuple[Metric, Metric, Metric]:
+              **kwargs) -> tuple[Metric, Metric] | tuple[
+                  Metric, Metric, Metric]:
         assert self.train_config is not None, "Config missing training params."
         assert self.train_config["batch_size"] <= len(train), (
             "Batch size larger than dataset.")
@@ -614,7 +620,7 @@ class LMTrainer():
 
             if epoch % train_config["eval_interval"] == 0:
                 metric = self._eval(eval_loader)
-                metric.print(epoch, self.train_config["epochs"], "eval")
+                # metric.print(epoch, self.train_config["epochs"], "eval")
 
                 self.transformerlm.train()
 
@@ -627,6 +633,13 @@ class LMTrainer():
 
         final_train = self._eval(train_loader)
         final_eval = self._eval(eval_loader)
+
+        final_train.print(self.train_config["epochs"],
+                          self.train_config["epochs"],
+                          "train")
+        final_eval.print(self.train_config["epochs"],
+                         self.train_config["epochs"],
+                         "eval")
 
         if test is not None:
             final_test = self.test(test)

@@ -146,7 +146,7 @@ class MIAttention(nn.Module):
         self.n_multihead: int = len(self.tags)
         self.n_head: int = layer_description[1]
         self.head_size: int = n_embd // (self.n_multihead * self.n_head)
-        assert n_embd % self.n_head == 0
+        assert n_embd % (self.n_multihead * self.n_head) == 0
 
         #####
         self.scale = self.head_size ** -0.5
@@ -361,6 +361,8 @@ class MITransformer(nn.Module):
         self.lstm = None
         if kwargs["use_lstm"]:
             self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
+            self.lstm_dropout = nn.Dropout(kwargs["attn_dropout"])
+            # TODO separate dropout for LSTM
         # self.transformer = torch.nn.Transformer(400, 1, 1, 1, 4*400, 0, batch_first=True)
 
     def _init_weights(self, module):
@@ -396,6 +398,7 @@ class MITransformer(nn.Module):
 
         if self.lstm is not None:
             x = self.lstm(x)[0]
+            x = self.lstm_dropout(x)
 
         scores = []
         for layer in self.layers:
