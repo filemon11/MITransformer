@@ -17,8 +17,9 @@ from torch.optim.adam import Adam
 from torch.optim import Optimizer
 import torch.nn.functional as F
 
-import math
+from torch.utils.tensorboard.writer import SummaryWriter
 
+import math
 from pathlib import Path
 import os
 import pickle
@@ -30,7 +31,7 @@ from collections import defaultdict
 from typing import (Self, TypedDict, Literal, cast,
                     Container, Iterable, Mapping,
                     ClassVar, TypeVar, Callable,
-                    NotRequired)
+                    NotRequired, Any)
 
 Mode = Literal["standard", "input", "supervised"]
 M = TypeVar("M", bound="Metric")
@@ -197,6 +198,36 @@ class SupervisedEvalMetric(SupervisedMetric, EvalMetric):
                                     | {"uas"})
 
 
+class MetricWriter(SummaryWriter):
+    def add_metric(
+            self,
+            metric: Metric,
+            epoch: int,
+            split: Literal["train", "eval", "test"]
+            ) -> None:
+        for key, value in metric.to_dict().items():
+            self.add_scalar(f"{key}/{split}", value, epoch)
+
+    def add_params(
+            self,
+            params: Mapping[str, Any],
+            metric: Metric
+            ) -> None:
+        def check_type(value: Any) -> bool:
+            if (isinstance(value, float)
+                    or isinstance(value, int)
+                    or isinstance(value, torch.Tensor)
+                    or isinstance(value, bool)
+                    or isinstance(value, str)):
+                return True
+            return False
+        self.add_hparams(
+            {key: value for key, value
+             in params.items() if check_type(value)},
+            {f"_{key}": value for key, value in metric.to_dict().items()})
+
+
+# TODO: in Python 3.14 set extra_items=float
 class GeneralConfig(TypedDict):
     batch_size: int
     mode: Mode
@@ -209,7 +240,8 @@ class TrainConfig(GeneralConfig):
     eval_interval: int
     epochs: int
     learning_rate: float
-    model_dir: str
+    model_name: str
+    abort_after: int | None
 
 
 class OptionalConfig(TypedDict):
@@ -219,14 +251,18 @@ class OptionalConfig(TypedDict):
     eval_interval: NotRequired[int]
     epochs: NotRequired[int]
     learning_rate: NotRequired[float]
-    model_dir: NotRequired[str]
+    model_name: NotRequired[str]
     device: NotRequired[str]
+    abort_after: NotRequired[int | None]
 
 
 class LMTrainer():
+    model_dir: str = "./models/"
+
     def __init__(self, transformerlm: MITransformerLM,
                  transformer_config: MITransformerConfig,
                  config: GeneralConfig):
+        self.writer = MetricWriter()
         self.transformerlm: MITransformerLM = transformerlm
         self.transformerlm.to(config["device"])
         self.transformer_config: MITransformerConfig = transformer_config
@@ -257,18 +293,19 @@ class LMTrainer():
             return None
 
     @classmethod
-    def load(cls, model_dir: str,
+    def load(cls, model_name: str,
              optional_config: OptionalConfig | None = None) -> Self:
 
         state_dict, transformer_config = torch.load(
-            os.path.join(model_dir, "model")).values()
+            os.path.join(cls.model_dir, model_name, "model")).values()
         transformer_config = cast(MITransformerConfig, transformer_config)
         model: MITransformerLM = MITransformerLM(
             MITransformer(**transformer_config))
 
         model.load_state_dict(state_dict)
 
-        with open(os.path.join(model_dir, "config"), 'rb') as handle:
+        with open(os.path.join(
+                    cls.model_dir, model_name, "config"), 'rb') as handle:
             config = pickle.load(handle)
 
         if optional_config is not None:
@@ -288,17 +325,17 @@ class LMTrainer():
         print(f"Number of parameters: {params}")
         return cls(model, trainsformer_config, config)
 
-    def save(self, model_dir: str) -> None:
+    def save(self) -> None:
         assert self.train_config is not None
-
-        Path(model_dir).mkdir(parents=True, exist_ok=True)
+        dir = os.path.join(self.model_dir, self.train_config["model_name"])
+        Path(dir).mkdir(parents=True, exist_ok=True)
         torch.save(
             {"model": self.transformerlm.state_dict(),
              "config": self.transformer_config},
-            os.path.join(model_dir, "model"))
+            os.path.join(dir, "model"))
 
         # overwrites config
-        with open(os.path.join(model_dir, "config"), 'wb') as handle:
+        with open(os.path.join(dir, "config"), 'wb') as handle:
             pickle.dump(self.train_config,
                         handle,
                         protocol=pickle.HIGHEST_PROTOCOL)
@@ -614,38 +651,53 @@ class LMTrainer():
             shuffle=False, droplast=False)
 
         best: float | Metric = math.inf
+        evals_without_improvement: int = 0
+        eval_interval = train_config["eval_interval"]
+
         self.transformerlm.train()
         for epoch in range(1, train_config["epochs"]+1):
-            metric = self._train(train_loader)
+            train_metric = self._train(train_loader)
+            self.writer.add_metric(train_metric, epoch, "train")
 
-            if epoch % train_config["eval_interval"] == 0:
-                metric = self._eval(eval_loader)
-                # metric.print(epoch, self.train_config["epochs"], "eval")
+            if epoch % eval_interval == 0:
+                eval_metric = self._eval(eval_loader)
+                self.writer.add_metric(eval_metric, epoch, "eval")
 
                 self.transformerlm.train()
 
-                if metric > best:       # greater means better
-                    best = metric
-                    self.save(train_config["model_dir"])
+                if eval_metric > best:       # greater means better
+                    best = eval_metric
+                    self.save()
                     print(f"Saving model at epoch {epoch}...")
+                    evals_without_improvement = 0
+                else:
+                    evals_without_improvement += 1
+
+            abort_after = train_config["abort_after"]
+            if (abort_after is not None
+                    and abort_after <= evals_without_improvement):
+                no_change_epochs = (evals_without_improvement
+                                    * eval_interval)
+                print(f"Aborting training after {no_change_epochs} epochs.")
+                break
 
         # TODO: load best (saved) into transformerlm
 
         final_train = self._eval(train_loader)
         final_eval = self._eval(eval_loader)
 
-        final_train.print(self.train_config["epochs"],
-                          self.train_config["epochs"],
-                          "train")
-        final_eval.print(self.train_config["epochs"],
-                         self.train_config["epochs"],
-                         "eval")
+        self.writer.add_metric(final_train, epoch, "train")
+        self.writer.add_metric(final_eval, epoch, "eval")
 
         if test is not None:
             final_test = self.test(test)
+            self.writer.add_metric(final_test, epoch, "test")
+
+            self.writer.flush()
             return (final_train, final_eval, final_test)
 
         else:
+            self.writer.flush()
             return (final_train, final_eval)
         # if score_preds is not None and score_gold is not None:
         #    token_mapper: TokenMapper = TokenMapper.load("./tokmap.pickle")

@@ -59,13 +59,16 @@ class TokenMapper():
             for word in sentence:
                 word_freqs[word] += 1
 
+        # if num tokens < max vocab size, then definitely replace
+        # three words with UNK
         token2id: dict[str, int]
         selected: list[tuple[str, float]] = sorted(
             word_freqs.items(),
             key=lambda i: i[1], reverse=True
-            )[:keep_top_k]
+            )[:len(word_freqs)-3][:keep_top_k]
 
-        wordset: list[str] = [token for token, _ in selected]
+        # replace words that appear only once with UNK
+        wordset: list[str] = [token for token, freq in selected if freq > 1]
 
         token2id = {word: word_id for word_id, word in enumerate(wordset)}
 
