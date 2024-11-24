@@ -25,7 +25,7 @@ def train(mode: Literal["standard", "input", "supervised"], dataset_name: str):
     train_config = TrainConfig(
         batch_size=10,
         eval_interval=5,
-        abort_after=3,
+        abort_after=1,
         epochs=50,
         learning_rate=1e-3,
         mode=mode,
@@ -118,7 +118,7 @@ def test_subset(batch_size: int = 100,
 
     metrics_tries: list[tuple[Metric, ...]] = []
 
-    for i in range(num_tries):
+    for _ in range(num_tries):
         layer_design = (("head", "child", "standard")
                         if stand else ("head", "child"))
         n_embd = int(n_embd // (len(layer_design)*width)
@@ -215,7 +215,7 @@ def options(seq_of_items: list[tuple[str, Iterable[Any]]]
 def test_multiple(result_file: str = "./resultsUAS.csv",
                   tries: int = 3,
                   max_evals: int = 50,
-                  objective_col: str = "UAS",
+                  objective_col: str = "uas",
                   device: str | None = None):
     sent_num_and_bs = [(100_000, 256)]
     params = dict(
