@@ -681,7 +681,9 @@ class LMTrainer():
                 print(f"Aborting training after {no_change_epochs} epochs.")
                 break
 
-        # TODO: load best (saved) into transformerlm
+        # load best (saved) into transformerlm
+        self.transformerlm = self.load(
+            self.train_config["model_name"]).transformerlm   # type: ignore
 
         final_train = self._eval(train_loader)
         final_eval = self._eval(eval_loader)
@@ -845,9 +847,10 @@ class LMTrainer():
                 conllu, transform, max_len=None)
 
             dataset.map_to_ids(token_mapper)
-            dataloader: DataLoader = get_loader(
-                dataset, batch_size=1,
-                bucket=False, device=self.device,
+            dataloader: DataLoader = get_loader(        # type: ignore
+                dataset, batch_size=1,                  # type: ignore
+                bucket=False, min_size=0, max_size=50,
+                device=self.config["device"],
                 shuffle=False, droplast=False)
 
             for batch in dataloader:
