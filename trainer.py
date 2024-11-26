@@ -16,6 +16,8 @@ import torch
 from torch.optim.adam import Adam
 from torch.optim import Optimizer
 import torch.nn.functional as F
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from torch.utils.tensorboard.writer import SummaryWriter
 
@@ -27,6 +29,7 @@ import pickle
 from dataclasses import dataclass, fields
 from functools import total_ordering
 from collections import defaultdict
+from contextlib import contextmanager
 
 from typing import (Self, TypedDict, Literal, cast,
                     Container, Iterable, Mapping,
@@ -36,6 +39,17 @@ from typing import (Self, TypedDict, Literal, cast,
 Mode = Literal["standard", "input", "supervised"]
 M = TypeVar("M", bound="Metric")
 N = TypeVar("N")
+
+
+def sum_metrics(metrics: Iterable[M]) -> M:
+    s: None | M = None
+    for m in metrics:
+        if s is None:
+            s = m
+        else:
+            s = cast(M, m + s)
+    assert s is not None, "Iterable of metrics cannot be empty."
+    return s
 
 
 @total_ordering
@@ -234,6 +248,8 @@ class GeneralConfig(TypedDict):
     loss_alpha: float | None
     arc_loss_weighted: bool
     device: str
+    rank: int | None
+    world_size: int
 
 
 class TrainConfig(GeneralConfig):
@@ -254,6 +270,8 @@ class OptionalConfig(TypedDict):
     model_name: NotRequired[str]
     device: NotRequired[str]
     abort_after: NotRequired[int | None]
+    rank: NotRequired[int | None]
+    world_size: NotRequired[int]
 
 
 class LMTrainer():
@@ -263,13 +281,30 @@ class LMTrainer():
                  transformer_config: MITransformerConfig,
                  config: GeneralConfig):
         self.writer = MetricWriter()
-        self.transformerlm: MITransformerLM = transformerlm
+        self.transformerlm: MITransformerLM | DDP = transformerlm
         self.transformerlm.to(config["device"])
         self.transformer_config: MITransformerConfig = transformer_config
 
         self.optimiser: Optimizer | None
         self.__config: GeneralConfig
         self.config = config
+
+        rank = config["rank"]
+        device = config["device"]
+        self.use_ddp = self.setup_ddp(rank, config["world_size"])
+
+        if self.use_ddp:
+            self.transformerlm.to(rank)
+            self.transformerlm = DDP(
+                self.transformerlm,
+                device_ids=[rank],
+                output_device=device,
+                find_unused_parameters=True)
+            self.use_ddp = True
+
+        else:
+            self.transformerlm.to(config["device"])
+            return
 
     @property
     def config(self) -> GeneralConfig:
@@ -293,16 +328,21 @@ class LMTrainer():
             return None
 
     @classmethod
-    def load(cls, model_name: str,
-             optional_config: OptionalConfig | None = None) -> Self:
-
+    def load_model(cls, model_name: str
+                   ) -> tuple[MITransformerLM, MITransformerConfig]:
         state_dict, transformer_config = torch.load(
             os.path.join(cls.model_dir, model_name, "model")).values()
         transformer_config = cast(MITransformerConfig, transformer_config)
         model: MITransformerLM = MITransformerLM(
             MITransformer(**transformer_config))
-
         model.load_state_dict(state_dict)
+        return model, transformer_config
+
+    @classmethod
+    def load(cls, model_name: str,
+             optional_config: OptionalConfig | None = None) -> Self:
+
+        model, transformer_config = cls.load_model(model_name)
 
         with open(os.path.join(
                     cls.model_dir, model_name, "config"), 'rb') as handle:
@@ -317,8 +357,10 @@ class LMTrainer():
     @classmethod
     def new(cls, trainsformer_config: MITransformerConfig,
             config: GeneralConfig) -> Self:
+
         model: MITransformerLM = MITransformerLM(
             MITransformer(**trainsformer_config))
+
         model_parameters = filter(
             lambda p: p.requires_grad, model.parameters())
         params = sum([np.prod(p.size()) for p in model_parameters])
@@ -327,18 +369,23 @@ class LMTrainer():
 
     def save(self) -> None:
         assert self.train_config is not None
-        dir = os.path.join(self.model_dir, self.train_config["model_name"])
-        Path(dir).mkdir(parents=True, exist_ok=True)
-        torch.save(
-            {"model": self.transformerlm.state_dict(),
-             "config": self.transformer_config},
-            os.path.join(dir, "model"))
+        if not self.use_ddp or self.config["rank"] == 0:
+            model = self.transformerlm
+            if self.use_ddp:
+                dist.barrier()
+                model = self.transformerlm.module
+            dir = os.path.join(self.model_dir, self.train_config["model_name"])
+            Path(dir).mkdir(parents=True, exist_ok=True)
+            torch.save(
+                {"model": model.state_dict(),
+                 "config": self.transformer_config},
+                os.path.join(dir, "model"))
 
-        # overwrites config
-        with open(os.path.join(dir, "config"), 'wb') as handle:
-            pickle.dump(self.train_config,
-                        handle,
-                        protocol=pickle.HIGHEST_PROTOCOL)
+            # overwrites config
+            with open(os.path.join(dir, "config"), 'wb') as handle:
+                pickle.dump(self.train_config,
+                            handle,
+                            protocol=pickle.HIGHEST_PROTOCOL)
 
     def loss(self, logits: torch.Tensor, labels: torch.Tensor,
              ignore_index: int = -100,
@@ -643,12 +690,14 @@ class LMTrainer():
 
         train_loader = get_loader(
             train, batch_size=train_config["batch_size"],
-            bucket=False, device=device)
+            bucket=False, device=device, rank=train_config["rank"],
+            world_size=train_config["world_size"])
 
         eval_loader = get_loader(
             eval, batch_size=train_config["batch_size"],
             bucket=False, device=device,
-            shuffle=False, droplast=False)
+            shuffle=False, droplast=False, rank=train_config["rank"],
+            world_size=train_config["world_size"])
 
         best: float | Metric = math.inf
         evals_without_improvement: int = 0
@@ -656,12 +705,15 @@ class LMTrainer():
 
         self.transformerlm.train()
         for epoch in range(1, train_config["epochs"]+1):
+            if self.use_ddp:
+                train_loader.sampler.set_epoch(epoch)  # type: ignore
+
             train_metric = self._train(train_loader)
-            self.writer.add_metric(train_metric, epoch, "train")
+            self.log_metric(train_metric, epoch, "train")
 
             if epoch % eval_interval == 0:
                 eval_metric = self._eval(eval_loader)
-                self.writer.add_metric(eval_metric, epoch, "eval")
+                self.log_metric(eval_metric, epoch, "eval")
 
                 self.transformerlm.train()
 
@@ -674,32 +726,37 @@ class LMTrainer():
                     evals_without_improvement += 1
 
             abort_after = train_config["abort_after"]
-            if (abort_after is not None
-                    and abort_after <= evals_without_improvement):
+            early_stop = (abort_after is not None
+                          and abort_after <= evals_without_improvement)
+            early_stop = sum(self.gather_ddp(early_stop)) > 0
+
+            if early_stop:
                 no_change_epochs = (evals_without_improvement
                                     * eval_interval)
                 print(f"Aborting training after {no_change_epochs} epochs.")
                 break
 
         # load best (saved) into transformerlm
-        self.transformerlm = self.load(
-            self.train_config["model_name"]).transformerlm   # type: ignore
+        if self.use_ddp:
+            self.transformerlm.module = self.load_model(
+                self.train_config["model_name"])[0]   # type: ignore
+            self.transformerlm.module.to(self.config["rank"])
+        else:
+            self.transformerlm = self.load_model(
+                self.train_config["model_name"])[0]   # type: ignore
+            self.transformerlm.to(device)
 
         final_train = self._eval(train_loader)
         final_eval = self._eval(eval_loader)
-
-        self.writer.add_metric(final_train, epoch, "train")
-        self.writer.add_metric(final_eval, epoch, "eval")
+        self.log_metric(final_train, epoch, "train")
+        self.log_metric(final_eval, epoch, "eval")
 
         if test is not None:
             final_test = self.test(test)
-            self.writer.add_metric(final_test, epoch, "test")
-
-            self.writer.flush()
+            self.log_metric(final_test, epoch, "test")
             return (final_train, final_eval, final_test)
 
         else:
-            self.writer.flush()
             return (final_train, final_eval)
         # if score_preds is not None and score_gold is not None:
         #    token_mapper: TokenMapper = TokenMapper.load("./tokmap.pickle")
@@ -747,35 +804,35 @@ class LMTrainer():
     def _train(self, loader: DataLoader[IDBatch, D]) -> Metric:
         assert self.train_config is not None, "Config missing training params."
         self.transformerlm.train()
-        metric: Metric = SupervisedMetric()
-        for batch in loader:
-            metric += self.train_step(
+        metrics = [
+            self.train_step(
                 batch,
                 loader.dataset.keys_for_padding["label_ids"])
-        return metric
+            for batch in loader]
+        return self.gather_metrics(sum_metrics(metrics))
 
     def _eval(self, loader: DataLoader[IDBatch, D]) -> Metric:
         self.transformerlm.eval()
         with torch.no_grad():
             # eval loop: no backprop on this data, to avoid storing
             # all intermediatte variable
-            metric: Metric = SupervisedEvalMetric()
-            for batch in loader:
-                metric += self.eval_step(
+            metrics = [
+                self.eval_step(
                     batch,
                     self.config["mode"],
                     loader.dataset.keys_for_padding["label_ids"])
-        return metric
+                for batch in loader]
+        return self.gather_metrics(sum_metrics(metrics))
 
     def test(self, dataset: DepDataset) -> Metric:
         loader = get_loader(
             dataset, batch_size=self.config["batch_size"],
             bucket=False, device=self.config["device"],
-            shuffle=False, droplast=False)
+            shuffle=False, droplast=False,
+            world_size=self.config["world_size"],
+            rank=self.config["rank"])
 
         metric = self._eval(loader)
-        metric.print_test()
-
         return metric
 
     def predict(
@@ -826,13 +883,18 @@ class LMTrainer():
 
         g: list[int]
 
+        if self.use_ddp:
+            model = self.transformerlm.module
+        else:
+            model = self.transformerlm
+
         if start is None:
             idx = torch.zeros((1, 2),
                               dtype=torch.long,
                               device=self.config["device"])
             idx[0, 0] = token_mapper.token2id[DUMMY]
             idx[0, 1] = token_mapper.token2id[ROOT]
-            g = self.transformerlm.generate(
+            g = model.generate(
                 idx, max_new_tokens=max_len).tolist()[0]
             # support an initial mask here
         else:
@@ -859,13 +921,49 @@ class LMTrainer():
                 pass
 
             # TODO: support mask
-            g = self.transformerlm.generate(batch["input_ids"][0],
-                                            max_new_tokens=max_len).tolist()[0]
+            g = model.generate(batch["input_ids"][0],
+                               max_new_tokens=max_len).tolist()[0]
 
         eos_id = token_mapper.token2id[EOS]
         first_eos = next((i for i, x in enumerate(g) if x == eos_id), len(g))
         g = g[:first_eos + 1]
         return token_mapper.decode([g], to_string=True)[0]
+
+    @staticmethod
+    def setup_ddp(rank, world_size) -> bool:
+        if rank is not None and world_size > 1:
+            os.environ['MASTER_ADDR'] = 'localhost'
+            os.environ['MASTER_PORT'] = '12355'
+            dist.init_process_group(
+                "nccl", rank=rank, world_size=world_size)
+            return True
+        else:
+            return False
+
+    def __del__(self) -> None:
+        if self.use_ddp:
+            dist.destroy_process_group()
+
+        self.writer.flush()
+
+    def gather_ddp(self, data: N) -> list[N]:
+        if self.use_ddp:
+            outputs = [data]*self.config["world_size"]
+            dist.all_gather_object(outputs, data)
+            return outputs
+        return [data]
+
+    def gather_metrics(self, metric: M) -> M:
+        if self.use_ddp:
+            return sum_metrics(self.gather_ddp(metric))
+        else:
+            return metric
+
+    def log_metric(self, metric: Metric,
+                   epoch: int,
+                   split: Literal["train", "eval", "test"]) -> None:
+        if not self.use_ddp or self.config["rank"] == 0:
+            self.writer.add_metric(metric, epoch, split)
 
 
 #def logits_to_probs(logits: torch.Tensor,
@@ -884,6 +982,7 @@ class LMTrainer():
 #                              unpadded_labels.long()]
 #        pred_prob_list.append(pred_prob)
 #    return pred_prob_list
+
 
 def select_true(preds: torch.Tensor,
                 labels: torch.Tensor,

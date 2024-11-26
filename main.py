@@ -1,4 +1,5 @@
 import torch
+import torch.multiprocessing as mp
 
 from data import load_dataset, dataset_details_full, DatasetDictTrain
 from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
@@ -14,7 +15,8 @@ from typing import Literal, Any, Iterable, cast
 torch.manual_seed(42)
 
 
-def train(mode: Literal["standard", "input", "supervised"], dataset_name: str):
+def train(rank: int | None, world_size: int,
+          mode: Literal["standard", "input", "supervised"], dataset_name: str):
     # device: where to execute computation
     loss_alpha: float | None
     if mode == "supervised":
@@ -23,7 +25,7 @@ def train(mode: Literal["standard", "input", "supervised"], dataset_name: str):
         loss_alpha = None
 
     train_config = TrainConfig(
-        batch_size=256,
+        batch_size=10,
         eval_interval=5,
         abort_after=5,
         epochs=10,
@@ -32,10 +34,12 @@ def train(mode: Literal["standard", "input", "supervised"], dataset_name: str):
         loss_alpha=loss_alpha,
         model_name="experiment",
         arc_loss_weighted=False,
-        device="cuda" if torch.cuda.is_available() else "cpu"
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        rank=rank,
+        world_size=world_size
         )
 
-    # dropout rate (variable p) for dropout units
+    # dropout rate (variable p) fquit(or dropout units
     dropout = 0.1
     n_embd = 400
     block_size = 500
@@ -48,7 +52,7 @@ def train(mode: Literal["standard", "input", "supervised"], dataset_name: str):
                             max_len_eval_test=40,
                             vocab_size=50_000,
                             triangulate=0,
-                            first_k=100_000,
+                            first_k=1000,
                             first_k_eval_test=100,
                             connect_with_dummy=True,
                             connect_with_self=False)
@@ -74,13 +78,15 @@ def train(mode: Literal["standard", "input", "supervised"], dataset_name: str):
         use_lstm=False)
 
     trainer = LMTrainer.new(transformer_config, train_config)
+    trainer.train(**datasets)
 
-    m = trainer.train(**datasets)
+    if rank is None or rank == 0:
+        generated = []
+        for _ in range(20):
+            generated.append(trainer.generate(datasets["token_mapper"]))
+        print(generated)
 
-    generated = []
-    for _ in range(20):
-        generated.append(trainer.generate(datasets["token_mapper"]))
-    return trainer, m, generated
+    del trainer
 
 
 def test_subset(batch_size: int = 100,
@@ -142,7 +148,9 @@ def test_subset(batch_size: int = 100,
             model_name="experiment",
             arc_loss_weighted=False,
             device=device if device is not None else (
-                "cuda" if torch.cuda.is_available() else "cpu")
+                "cuda" if torch.cuda.is_available() else "cpu"),
+            rank=0,
+            world_size=1
             )
 
         if datasets is None:
@@ -177,6 +185,8 @@ def test_subset(batch_size: int = 100,
         trainer = LMTrainer.new(transformer_config, train_config)
         metrics = trainer.train(**datasets)
         metrics_tries.append(metrics)
+
+        del trainer
 
     metrics_mean: list[Metric] = []
     for split_metrics in zip(*metrics_tries):
@@ -216,6 +226,7 @@ def test_multiple(result_file: str = "./resultsUAS.csv",
                   max_evals: int = 50,
                   objective_col: str = "uas",
                   device: str | None = None):
+    # TODO: make usable with DDP
     sent_num_and_bs = [(100_000, 256)]
     params = dict(
         depth=[1],
@@ -291,4 +302,10 @@ def test_multiple(result_file: str = "./resultsUAS.csv",
 
 
 if __name__ == "__main__":
-    print(train("supervised", "Wikitext"))
+    n_devices = torch.cuda.device_count()
+    if n_devices == 0:
+        train(None, 1, "supervised", "Wikitext")
+    else:
+        mp.spawn(  # type: ignore
+            train,
+            args=(n_devices, "supervised", "Wikitext",), nprocs=n_devices)

@@ -16,6 +16,7 @@ The masks use boolean arrays/tensors.
 import torch
 from torch.utils.data import Dataset, Sampler
 from torch.utils.data import DataLoader as torchDataLoader
+from torch.utils.data.distributed import DistributedSampler
 import conllu
 import numpy as np
 import numpy.typing as npt
@@ -963,7 +964,9 @@ def get_loader(dataset: DepDataset[CoNNLUTokenisedSentence], batch_size: int,
                bucket: bool = True, min_size: int = 5,
                max_size: int = 50, device: str = "cuda",
                shuffle: bool = True,
-               droplast: bool = True
+               droplast: bool = True,
+               rank: int | None = 0,
+               world_size: int = 1
                ) -> DataLoader[CoNNLUTokenisedBatch, DepDataset]:
     ...
 
@@ -973,7 +976,9 @@ def get_loader(dataset: DepDataset[EssentialSentence], batch_size: int,
                bucket: bool = True, min_size: int = 5,
                max_size: int = 50, device: str = "cuda",
                shuffle: bool = True,
-               droplast: bool = True
+               droplast: bool = True,
+               rank: int | None = 0,
+               world_size: int = 1
                ) -> DataLoader[EssentialBatch, DepDataset]:
     ...
 
@@ -984,7 +989,9 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
                bucket: bool = True, min_size: int = 5,
                max_size: int = 50, device: str = "cuda",
                shuffle: bool = True,
-               droplast: bool = True
+               droplast: bool = True,
+               rank: int | None = 0,
+               world_size: int = 1
                ) -> (DataLoader[CoNNLUTokenisedBatch, DepDataset]
                      | DataLoader[EssentialBatch, DepDataset]):
 
@@ -993,6 +1000,8 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
     assert dataset.mapped is True
 
     if bucket:
+        assert world_size == 1, ("Distributed sampling not implemented"
+                                 "for bucketed sampling.")
         return DataLoader(
             dataset,
             batch_sampler=BySequenceLengthSampler(
@@ -1005,16 +1014,25 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
                 ))
 
     else:
+        sampler: DistributedSampler | None
+        if rank is None:
+            sampler = None
+        else:
+            sampler = DistributedSampler(
+                dataset, num_replicas=world_size,
+                rank=rank, shuffle=shuffle, drop_last=False)
+
         return DataLoader(
             dataset,
-            shuffle=shuffle,
+            shuffle=False if sampler is not None else shuffle,
             batch_size=batch_size,
             drop_last=droplast,
             collate_fn=create_padding_collate_func(
                 dataset.keys_for_tensors,
                 dataset.keys_for_padding,
                 dataset.keys_for_mask_padding,
-                device=device))
+                device=device),
+            sampler=sampler)
 
 
 def load_conllu(
