@@ -1,10 +1,10 @@
 import torch
 
 from data import load_dataset, dataset_details_full, DatasetDictTrain
-from trainer import LMTrainer, TrainConfig, MITransformerConfig, Metric, MetricWriter
+from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
+                     Metric, MetricWriter)
 import pandas as pd
-from hyperopt import hp, fmin, tpe, Trials, STATUS_OK
-import pickle
+from hyperopt import hp, fmin, tpe, Trials, STATUS_OK  # type: ignore
 import os.path
 
 
@@ -23,10 +23,10 @@ def train(mode: Literal["standard", "input", "supervised"], dataset_name: str):
         loss_alpha = None
 
     train_config = TrainConfig(
-        batch_size=10,
+        batch_size=256,
         eval_interval=5,
-        abort_after=1,
-        epochs=50,
+        abort_after=5,
+        epochs=10,
         learning_rate=1e-3,
         mode=mode,
         loss_alpha=loss_alpha,
@@ -44,11 +44,12 @@ def train(mode: Literal["standard", "input", "supervised"], dataset_name: str):
     details["dirs"] = details["dirs"][0:2]  # type: ignore
 
     datasets = load_dataset(details,
-                            max_len_train=40,
+                            max_len_train=50,
                             max_len_eval_test=40,
                             vocab_size=50_000,
                             triangulate=0,
-                            first_k=100,
+                            first_k=100_000,
+                            first_k_eval_test=100,
                             connect_with_dummy=True,
                             connect_with_self=False)
 
@@ -74,14 +75,12 @@ def train(mode: Literal["standard", "input", "supervised"], dataset_name: str):
 
     trainer = LMTrainer.new(transformer_config, train_config)
 
-    trainer.train(**datasets)
+    m = trainer.train(**datasets)
 
     generated = []
     for _ in range(20):
         generated.append(trainer.generate(datasets["token_mapper"]))
-
-    logits, arc_scores = trainer.predict(datasets["eval"])
-    return trainer, generated, logits, arc_scores
+    return trainer, m, generated
 
 
 def test_subset(batch_size: int = 100,
@@ -289,3 +288,7 @@ def test_multiple(result_file: str = "./resultsUAS.csv",
                     result_file, index=False,
                     mode="w")
             writer.close()
+
+
+if __name__ == "__main__":
+    print(train("supervised", "Wikitext"))
