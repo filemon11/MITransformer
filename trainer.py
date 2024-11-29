@@ -1,6 +1,6 @@
 from model import MITransformer, MITransformerLM, MITransformerConfig
 from data import (DepDataset, DUMMY, ROOT, EOS,
-                  get_transform_mask_head_child, CoNLLUDataset,
+                  TransformMaskHeadChild, CoNLLUDataset,
                   DataLoader, get_loader, IDSen, IDBatch,
                   CoNNLUTokenisedBatch, EssentialBatch, D)
 from tokeniser import TokenMapper
@@ -28,8 +28,8 @@ import pickle
 
 from dataclasses import dataclass, fields
 from functools import total_ordering
-from collections import defaultdict
 from contextlib import contextmanager
+from collections import defaultdict
 
 from typing import (Self, TypedDict, Literal, cast,
                     Container, Iterable, Mapping,
@@ -241,6 +241,17 @@ class MetricWriter(SummaryWriter):
             {f"_{key}": value for key, value in metric.to_dict().items()})
 
 
+@contextmanager
+def metric_writer(*args, **kwds):
+    # Code to acquire resource, e.g.:
+    writer = MetricWriter(*args, **kwds)
+    try:
+        yield writer
+    finally:
+        # Code to release resource, e.g.:
+        writer.flush()
+
+
 # TODO: in Python 3.14 set extra_items=float
 class GeneralConfig(TypedDict):
     batch_size: int
@@ -250,6 +261,7 @@ class GeneralConfig(TypedDict):
     device: str
     rank: int | None
     world_size: int
+    n_workers: int
 
 
 class TrainConfig(GeneralConfig):
@@ -272,6 +284,7 @@ class OptionalConfig(TypedDict):
     abort_after: NotRequired[int | None]
     rank: NotRequired[int | None]
     world_size: NotRequired[int]
+    n_workers: NotRequired[int]
 
 
 class LMTrainer():
@@ -291,20 +304,16 @@ class LMTrainer():
 
         rank = config["rank"]
         device = config["device"]
-        self.use_ddp = self.setup_ddp(rank, config["world_size"])
+        self.use_ddp = config["world_size"] > 1
 
+        self.transformerlm.to(config["device"])
         if self.use_ddp:
-            self.transformerlm.to(rank)
             self.transformerlm = DDP(
                 self.transformerlm,
                 device_ids=[rank],
                 output_device=device,
                 find_unused_parameters=True)
             self.use_ddp = True
-
-        else:
-            self.transformerlm.to(config["device"])
-            return
 
     @property
     def config(self) -> GeneralConfig:
@@ -369,10 +378,11 @@ class LMTrainer():
 
     def save(self) -> None:
         assert self.train_config is not None
+        if self.use_ddp:
+            dist.barrier()
         if not self.use_ddp or self.config["rank"] == 0:
             model = self.transformerlm
             if self.use_ddp:
-                dist.barrier()
                 model = self.transformerlm.module
             dir = os.path.join(self.model_dir, self.train_config["model_name"])
             Path(dir).mkdir(parents=True, exist_ok=True)
@@ -543,12 +553,20 @@ class LMTrainer():
             not_to_ignore_sq2)
         return ~not_to_ignore  # type: ignore
 
+    @classmethod
+    def batch_to(cls, batch: dict, device) -> None:
+        for key, value in batch.items():
+            if isinstance(value, torch.Tensor):
+                batch[key] = value.to(device, non_blocking=True)
+            elif isinstance(value, dict):
+                cls.batch_to(value, device)
+
     def train_step(self,
                    batch: CoNNLUTokenisedBatch | EssentialBatch,
                    ignore_index: int) -> Metric:
         assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
-
+        self.batch_to(batch, device=self.config["device"])  # type: ignore
         logits, arc_scores = self.transformerlm(**batch)
         # remove from arc_scores those that should not be used...
         lm_loss = self.loss(
@@ -594,6 +612,8 @@ class LMTrainer():
                   batch: CoNNLUTokenisedBatch | EssentialBatch,
                   mode: Mode,
                   ignore_index: int) -> Metric:
+        self.batch_to(batch, device=self.config["device"])  # type: ignore
+
         logits, arc_scores = self.transformerlm(**batch)
         # remove from arc_scores those that should not be used...
 
@@ -682,22 +702,27 @@ class LMTrainer():
               test: DepDataset[IDSen] | None = None,
               **kwargs) -> tuple[Metric, Metric] | tuple[
                   Metric, Metric, Metric]:
+        if self.use_ddp:
+            print(self.config["rank"], self.config["device"],
+                  torch.cuda.current_device(), torch.distributed.get_rank())
         assert self.train_config is not None, "Config missing training params."
         assert self.train_config["batch_size"] <= len(train), (
             "Batch size larger than dataset.")
         train_config = self.train_config
         device = train_config["device"]
-
+        assert device is not None
         train_loader = get_loader(
             train, batch_size=train_config["batch_size"],
             bucket=False, device=device, rank=train_config["rank"],
-            world_size=train_config["world_size"])
+            world_size=train_config["world_size"],
+            n_workers=self.config["n_workers"])
 
         eval_loader = get_loader(
             eval, batch_size=train_config["batch_size"],
             bucket=False, device=device,
             shuffle=False, droplast=False, rank=train_config["rank"],
-            world_size=train_config["world_size"])
+            world_size=train_config["world_size"],
+            n_workers=self.config["n_workers"])
 
         best: float | Metric = math.inf
         evals_without_improvement: int = 0
@@ -705,6 +730,7 @@ class LMTrainer():
 
         self.transformerlm.train()
         for epoch in range(1, train_config["epochs"]+1):
+            print("Epoch", epoch)
             if self.use_ddp:
                 train_loader.sampler.set_epoch(epoch)  # type: ignore
 
@@ -830,7 +856,8 @@ class LMTrainer():
             bucket=False, device=self.config["device"],
             shuffle=False, droplast=False,
             world_size=self.config["world_size"],
-            rank=self.config["rank"])
+            rank=self.config["rank"],
+            n_workers=self.config["n_workers"])
 
         metric = self._eval(loader)
         return metric
@@ -844,7 +871,8 @@ class LMTrainer():
         loader = get_loader(
             dataset, batch_size=self.config["batch_size"],
             bucket=False, device=self.config["device"],
-            shuffle=False, droplast=False)
+            shuffle=False, droplast=False,
+            n_workers=self.config["n_workers"])
 
         ignore_index = dataset.keys_for_padding["label_ids"]
 
@@ -900,7 +928,7 @@ class LMTrainer():
         else:
             conllu = parse_list_of_words_with_spacy(start.split(), min_len=0)
 
-            transform = get_transform_mask_head_child(
+            transform = TransformMaskHeadChild(
                 keys_for_head={"head"},
                 keys_for_child={"child"},
                 triangulate=True)
@@ -913,7 +941,8 @@ class LMTrainer():
                 dataset, batch_size=1,                  # type: ignore
                 bucket=False, min_size=0, max_size=50,
                 device=self.config["device"],
-                shuffle=False, droplast=False)
+                shuffle=False, droplast=False,
+                n_workers=self.config["n_workers"])
 
             for batch in dataloader:
                 # take last batch, i.e. last sentence
@@ -929,21 +958,7 @@ class LMTrainer():
         g = g[:first_eos + 1]
         return token_mapper.decode([g], to_string=True)[0]
 
-    @staticmethod
-    def setup_ddp(rank, world_size) -> bool:
-        if rank is not None and world_size > 1:
-            os.environ['MASTER_ADDR'] = 'localhost'
-            os.environ['MASTER_PORT'] = '12355'
-            dist.init_process_group(
-                "nccl", rank=rank, world_size=world_size)
-            return True
-        else:
-            return False
-
     def __del__(self) -> None:
-        if self.use_ddp:
-            dist.destroy_process_group()
-
         self.writer.flush()
 
     def gather_ddp(self, data: N) -> list[N]:

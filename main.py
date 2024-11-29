@@ -1,12 +1,15 @@
 import torch
 import torch.multiprocessing as mp
+import torch.distributed as dist
 
-from data import load_dataset, dataset_details_full, DatasetDictTrain
+from data import (load_dataset, dataset_details_full, DatasetDictTrain,
+                  dataset_details_full_memmaped)
 from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
                      Metric, MetricWriter)
 import pandas as pd
 from hyperopt import hp, fmin, tpe, Trials, STATUS_OK  # type: ignore
 import os.path
+import sys
 
 
 from typing import Literal, Any, Iterable, cast
@@ -15,7 +18,7 @@ from typing import Literal, Any, Iterable, cast
 torch.manual_seed(42)
 
 
-def train(rank: int | None, world_size: int,
+def train(rank: int | None, world_size: int, n_workers: int,
           mode: Literal["standard", "input", "supervised"], dataset_name: str):
     # device: where to execute computation
     loss_alpha: float | None
@@ -23,39 +26,47 @@ def train(rank: int | None, world_size: int,
         loss_alpha = 0.5
     else:
         loss_alpha = None
-
+    if world_size > 1:
+        assert rank is not None
+        device = rank % torch.cuda.device_count()
+    else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     train_config = TrainConfig(
         batch_size=10,
         eval_interval=5,
-        abort_after=5,
-        epochs=10,
+        abort_after=1,
+        epochs=100,
         learning_rate=1e-3,
         mode=mode,
         loss_alpha=loss_alpha,
         model_name="experiment",
         arc_loss_weighted=False,
-        device="cuda" if torch.cuda.is_available() else "cpu",
+        device=device,
         rank=rank,
-        world_size=world_size
+        world_size=world_size,
+        n_workers=n_workers
         )
 
     # dropout rate (variable p) fquit(or dropout units
-    dropout = 0.1
-    n_embd = 400
+    dropout = 0.0002
+    n_embd = 500
     block_size = 500
 
-    details = dataset_details_full[dataset_name]
-    details["dirs"] = details["dirs"][0:2]  # type: ignore
-
+    datasets: DatasetDictTrain
+    # TODO: do this entirely in the load dataset method
+    # load memmap
+    details = dataset_details_full_memmaped[dataset_name]
+    details["memmaped"] = details["memmaped"][0:2]  # type: ignore
     datasets = load_dataset(details,
-                            max_len_train=50,
+                            max_len_train=40,
                             max_len_eval_test=40,
                             vocab_size=50_000,
                             triangulate=0,
-                            first_k=1000,
-                            first_k_eval_test=100,
+                            first_k=100_000,
+                            first_k_eval_test=None,
                             connect_with_dummy=True,
                             connect_with_self=False)
+    assert isinstance(datasets, dict)
 
     # Model
     transformer_description = ((("head", "child"), 1),)
@@ -150,7 +161,8 @@ def test_subset(batch_size: int = 100,
             device=device if device is not None else (
                 "cuda" if torch.cuda.is_available() else "cpu"),
             rank=0,
-            world_size=1
+            world_size=1,
+            n_workers=0
             )
 
         if datasets is None:
@@ -301,11 +313,72 @@ def test_multiple(result_file: str = "./resultsUAS.csv",
             writer.close()
 
 
-if __name__ == "__main__":
-    n_devices = torch.cuda.device_count()
-    if n_devices == 0:
-        train(None, 1, "supervised", "Wikitext")
+def setup_ddp(rank, world_size) -> tuple[bool, int | None]:
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '65035'
+    if world_size > 1:
+        print("initialising process", world_size, rank)
+        dist.init_process_group("nccl", world_size=world_size, rank=rank)
+        torch.cuda.set_device(torch.distributed.get_rank())
+        return True, torch.distributed.get_rank()
     else:
-        mp.spawn(  # type: ignore
-            train,
-            args=(n_devices, "supervised", "Wikitext",), nprocs=n_devices)
+        return False, None
+
+
+def clean_ddp(world_size) -> None:
+    if world_size > 1:
+        dist.destroy_process_group()
+
+
+def main(rank, n_devices) -> None:
+    use_ddp, rank = setup_ddp(rank, n_devices)
+    mode = sys.argv[1]
+    n_workers = int(sys.argv[2])
+    if mode == "train":
+        train(rank, n_devices, n_workers, "supervised", "Wikitext",)
+    else:
+        test_multiple()
+
+    clean_ddp(n_devices)
+
+
+if __name__ == "__main__":
+    # tokenise dataset
+    # TODO: do this automatically
+    # problem: cannot do in parallel and
+    # therefore leads to timeout when doing
+    # on only one rank.
+    # details = dataset_details_full["Wikitext"]
+    # details["dirs"] = details["dirs"][0:2]  # type: ignore
+    # 
+    # datasets = load_dataset(details,
+    #                         max_len_train=40,
+    #                         max_len_eval_test=40,
+    #                         vocab_size=50_000,
+    #                         triangulate=0,
+    #                         first_k=100_000,
+    #                         first_k_eval_test=None,
+    #                         connect_with_dummy=True,
+    #                         connect_with_self=False)
+
+    n_devices = torch.cuda.device_count()
+    print("n_devices", n_devices)
+    if n_devices > 1:
+        processes = []
+        try:
+            mp.set_start_method('spawn')
+        except RuntimeError:
+            pass
+
+        for rank in range(n_devices):
+            p = mp.Process(target=main, args=(rank, n_devices))
+            p.start()
+            processes.append(p)
+        for p in processes:
+            p.join()
+    else:
+        main(None, n_devices)
+    # if n_devices > 1:
+    #     mp.spawn(main, args=(n_devices,), nprocs=n_devices)  # type: ignore
+    # else:
+    #     main(None, n_devices)

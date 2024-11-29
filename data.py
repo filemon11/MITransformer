@@ -65,20 +65,35 @@ def filldict(keys: Sequence[Z],
     return out_dict
 
 
-def get_transform_mask_head_child(
-        keys_for_head: set[str] = {"head"},
-        keys_for_child: set[str] = {"child"},
-        triangulate: int | None = 0,
-        connect_with_dummy: bool = True,
-        connect_with_self: bool = False,
-        ) -> Callable[[npt.NDArray[np.bool_]],
-                      dict[str, npt.NDArray[np.bool_]]]:
-    assert not (connect_with_dummy and connect_with_self), (
-        "You cannot represent non-existant arcs both with "
-        "arcs to the dummy node and with self-arcs."
+class MaskTransform(ABC):
+    @abstractmethod
+    def __call__(
+            self, mask: npt.NDArray[np.bool_],
+            ) -> dict[str, npt.NDArray[np.bool_]]:
+        ...
+
+
+class TransformMaskHeadChild(MaskTransform):
+    def __init__(
+            self,
+            keys_for_head: set[str] = {"head"},
+            keys_for_child: set[str] = {"child"},
+            triangulate: int | None = 0,
+            connect_with_dummy: bool = True,
+            connect_with_self: bool = False,):
+        assert not (connect_with_dummy and connect_with_self), (
+            "You cannot represent non-existant arcs both with "
+            "arcs to the dummy node and with self-arcs."
         )
 
-    def transform_mask_head_child(
+        self.keys_for_head = keys_for_head
+        self.keys_for_child = keys_for_child
+        self.triangulate = triangulate
+        self.connect_with_dummy = connect_with_dummy
+        self.connect_with_self = connect_with_self
+
+    def __call__(
+            self,
             mask: npt.NDArray[np.bool_],
             ) -> dict[str, npt.NDArray[np.bool_]]:
         """Assumes a dummy token in the beginning. Therefore: one needs to
@@ -93,7 +108,7 @@ def get_transform_mask_head_child(
         # head[range(len(head)), range(len(head))] = True
         # child[range(len(child)), range(len(child))] = True
 
-        if connect_with_dummy:
+        if self.connect_with_dummy:
             tril_head = np.tril(head, -1)
             set_true = ~tril_head.any(1)
             head[:, 0] = np.logical_or(set_true, head[:, 0])
@@ -102,7 +117,7 @@ def get_transform_mask_head_child(
             set_true = ~tril_child.any(1)
             child[:, 0] = np.logical_or(set_true, child[:, 0])
 
-        if connect_with_self:
+        if self.connect_with_self:
             tril_head = np.tril(head, -1)
             length = head.shape[0]
             set_true = ~tril_head.any(1)
@@ -124,39 +139,37 @@ def get_transform_mask_head_child(
                           axis2=-2
                       ))
 
-        if triangulate is not None:
-            head = np.tril(head, triangulate)
-            child = np.tril(child, triangulate)
+        if self.triangulate is not None:
+            head = np.tril(head, self.triangulate)
+            child = np.tril(child, self.triangulate)
 
         out_dict: dict[str, npt.NDArray[np.bool_]] = {}
 
-        for key in keys_for_head:
+        for key in self.keys_for_head:
             out_dict[key] = head
 
-        for key in keys_for_child:
+        for key in self.keys_for_child:
             out_dict[key] = child
         # print(head)
         # print(child)
 
         return out_dict
 
-    return transform_mask_head_child
 
+class TransformMaskFull(MaskTransform):
+    def __init__(
+            self, keys_for_empty: set[str] = {"standard"}):
+        self.keys_for_empty = keys_for_empty
 
-def get_transform_mask_full(
-        keys_for_empty: set[str] = {"standard"}
-    ) -> Callable[[npt.NDArray[np.bool_]],
-                  dict[str, npt.NDArray[np.bool_]]]:
-    def transform_mask_full(
+    def __call__(
+            self,
             mask: npt.NDArray[np.bool_],
             ) -> dict[str, npt.NDArray[np.bool_]]:
         """No arcs are masked"""
 
         # maybe this should produce all True matrices to easy collation
         trues = np.full(mask.shape, True)
-        return {key: trues for key in keys_for_empty}
-
-    return transform_mask_full
+        return {key: trues for key in self.keys_for_empty}
 
 
 def transform_combined(
@@ -483,13 +496,16 @@ class MemMapDataset(DepDataset[EssentialSentence]):
                     npt.NDArray[np.bool_]]] | None = None,
             masks_setting: Literal['complete', 'current', 'next'] = "current",
             pad_id: int = 0,
-            max_len: int | None = 40):
+            max_len: int | None = 40,
+            first_k: int | None = None):
 
         id_hl = RaggedMmap(path)
+
         dataset = cls(transform_masks,
                       masks_setting=masks_setting,
                       id_hl=id_hl,
-                      max_len=max_len)
+                      max_len=max_len,
+                      first_k=first_k)
         dataset.keys_for_tensors = {"input_ids", "masks", "label_ids"}
         dataset.keys_for_padding = {"input_ids": pad_id,
                                     "label_ids": -100}
@@ -499,7 +515,10 @@ class MemMapDataset(DepDataset[EssentialSentence]):
 
     def __len__(self) -> int:
         assert self.id_hl is not None
-        return len(self.id_hl)
+        if self.first_k is not None:
+            return min(len(self.id_hl), self.first_k)
+        else:
+            return len(self.id_hl)
 
     def __getitem__(self, idx) -> EssentialSentence:
         # creates mask dynamically
@@ -609,7 +628,9 @@ class MemMapWindowDataset(MemMapDataset):
                     npt.NDArray[np.bool_]]] | None = None,
             masks_setting: Literal['complete', 'current', 'next'] = "current",
             pad_id: int = 0,
-            max_len: int | None = 40):
+            max_len: int | None = 40,
+            first_k: int | None = None):
+        assert first_k is None, "first_k not implemented for MMWD."
         assert max_len is not None
         dataset = cls(transform_masks,
                       masks_setting=masks_setting,
@@ -816,18 +837,31 @@ class BySequenceLengthSampler(Sampler):
         return bucket_id
 
 
-def create_collate_func(
-        keys_to_torch: set[str] = set(),
-        device: str = "cuda"
-        ) -> Callable[[list[dict[str, object]]],
-                      dict[str, list[object] | torch.Tensor]]:
-    """Does not support masks of different types for
-    (e.g. None and array) for individual sentences"""
-    device_type = 'cuda' if device != 'cpu' else 'cpu'
+class CollateBase(ABC):
+    @abstractmethod
+    def __call__(
+            self,
+            list_of_sentences: list[dict[str, object]]
+            ) -> dict[str, Any]:
+        ...
 
-    def collate_fn(
-            list_of_sentences: list[dict[str, object]]) -> dict[str, Any]:
 
+class Collate(CollateBase):
+    def __init__(
+            self,
+            keys_to_torch: set[str] = set(),
+            device: str | int = "cuda"
+            ):
+        """Does not support masks of different types for
+        (e.g. None and array) for individual sentences"""
+        self.keys_to_torch = keys_to_torch
+        self.device_type = 'cuda' if device != 'cpu' else 'cpu'
+        self.device = device
+
+    def __call__(
+            self,
+            list_of_sentences: list[dict[str, object]]
+            ) -> dict[str, Any]:
         output: dict[str, dict[str, list] | list] = defaultdict(list)
         for sentence in list_of_sentences:
             for key, content in sentence.items():
@@ -850,11 +884,11 @@ def create_collate_func(
                 if isinstance(dictionary[key], np.ndarray):
                     dictionary[key] = torch.from_numpy(
                         dictionary[key])
-                    if device_type == 'cuda':
+                    if self.device_type == 'cuda':
                         dictionary[key] = dictionary[
-                            key].pin_memory().to(device, non_blocking=True)
+                            key]
                     else:
-                        dictionary[key] = dictionary[key].to(device)
+                        dictionary[key] = dictionary[key]
 
                 elif isinstance(dictionary[key], dict):
                     dict_to_torch(dictionary[key], set(dictionary[key].keys()))
@@ -869,49 +903,51 @@ def create_collate_func(
                     if isinstance(dictionary[key][0], np.ndarray):
                         dictionary[key] = torch.from_numpy(
                             np.stack(dictionary[key]))
-                        if device_type == 'cuda':
+                        if self.device_type == 'cuda':
                             dictionary[key] = dictionary[
-                                key].pin_memory().to(device, non_blocking=True)
+                                key]
                         else:
                             dictionary[key] = dictionary[
-                                key].to(device).to(device)
+                                key]
 
                     else:
                         dictionary[key] = torch.from_numpy(
                             np.array(dictionary[key]))
-                        if device_type == 'cuda':
+                        if self.device_type == 'cuda':
                             dictionary[key] = dictionary[
-                                key].pin_memory().to(device, non_blocking=True)
+                                key]
                         else:
-                            dictionary[key] = dictionary[key].to(device)
+                            dictionary[key] = dictionary[key]
 
         output_dict: dict[str, Any] = dict(output)
-        dict_to_torch(output_dict, keys_to_torch)
+        dict_to_torch(output_dict, self.keys_to_torch)
 
         return output_dict
 
-    return collate_fn
 
+class PaddingCollate(Collate):
+    def __init__(
+            self,
+            keys_to_torch: set[str] = set(),
+            pad_with: dict[str, int] = dict(),
+            pad_mask_with: dict[str, bool] = dict(),
+            device: str | int = "cuda"
+            ):
+        super().__init__(keys_to_torch, device)
+        self.pad_with = pad_with
+        self.pad_mask_with = pad_mask_with
 
-def create_padding_collate_func(
-        keys_to_torch: set[str] = set(),
-        pad_with: dict[str, int] = dict(),
-        pad_mask_with: dict[str, bool] = dict(),
-        device: str = "cuda"
-        ) -> Callable[[list[dict[str, object]]],
-                      dict[str, list[object] | torch.Tensor]]:
-
-    standard_collate = create_collate_func(keys_to_torch, device)
-
-    def collate_fn(
-            list_of_sentences: list[dict[str, object]]) -> dict[str, Any]:
+    def __call__(
+            self,
+            list_of_sentences: list[dict[str, object]]
+            ) -> dict[str, Any]:
 
         max_lens: defaultdict[str, int] = defaultdict(int)
         for sentence in list_of_sentences:
-            for key in pad_with.keys():
+            for key in self.pad_with.keys():
                 max_lens[key] = max(max_lens[key],
                                     len(sentence[key]))  # type: ignore
-            for key in pad_mask_with.keys():
+            for key in self.pad_mask_with.keys():
                 max_lens[key] = max(
                     max_lens[key],
                     len(next(iter(sentence[key].values()))))  # type: ignore
@@ -920,7 +956,7 @@ def create_padding_collate_func(
         new_sentence_list: list[dict[str, object]] = []
         for sentence in list_of_sentences:
             new_sentence = dict(sentence)
-            for key, pad in pad_with.items():
+            for key, pad in self.pad_with.items():
                 max_len = max_lens[key]
                 if isinstance(new_sentence[key], list):
                     new_sentence[key] = (
@@ -935,7 +971,7 @@ def create_padding_collate_func(
                 else:
                     raise Exception("Unknown type. Given:",
                                     type(new_sentence[key]))
-            for key, b in pad_mask_with.items():
+            for key, b in self.pad_mask_with.items():
                 for mask_k, mask in new_sentence[key].items():  # type: ignore
                     new_mask = np.full((max_lens[key], max_lens[key]), b)
                     new_mask[:mask.shape[0], :mask.shape[1]] = mask
@@ -943,9 +979,7 @@ def create_padding_collate_func(
 
             new_sentence_list.append(new_sentence)
 
-        return standard_collate(new_sentence_list)
-
-    return collate_fn
+        return super().__call__(new_sentence_list)
 
 
 Batch = TypeVar("Batch", bound=CoNNLUTokenisedBatch | EssentialBatch)
@@ -962,11 +996,12 @@ class DataLoader(torchDataLoader[Batch], Generic[Batch, D]):
 @overload
 def get_loader(dataset: DepDataset[CoNNLUTokenisedSentence], batch_size: int,
                bucket: bool = True, min_size: int = 5,
-               max_size: int = 50, device: str = "cuda",
+               max_size: int = 50, device: str | int = "cuda",
                shuffle: bool = True,
                droplast: bool = True,
                rank: int | None = 0,
-               world_size: int = 1
+               world_size: int = 1,
+               n_workers: int = 0,
                ) -> DataLoader[CoNNLUTokenisedBatch, DepDataset]:
     ...
 
@@ -974,11 +1009,12 @@ def get_loader(dataset: DepDataset[CoNNLUTokenisedSentence], batch_size: int,
 @overload
 def get_loader(dataset: DepDataset[EssentialSentence], batch_size: int,
                bucket: bool = True, min_size: int = 5,
-               max_size: int = 50, device: str = "cuda",
+               max_size: int = 50, device: str | int = "cuda",
                shuffle: bool = True,
                droplast: bool = True,
                rank: int | None = 0,
-               world_size: int = 1
+               world_size: int = 1,
+               n_workers: int = 0,
                ) -> DataLoader[EssentialBatch, DepDataset]:
     ...
 
@@ -987,11 +1023,12 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
                          | DepDataset[EssentialSentence]),
                batch_size: int,
                bucket: bool = True, min_size: int = 5,
-               max_size: int = 50, device: str = "cuda",
+               max_size: int = 50, device: str | int = "cuda",
                shuffle: bool = True,
                droplast: bool = True,
                rank: int | None = 0,
-               world_size: int = 1
+               world_size: int = 1,
+               n_workers: int = 0,
                ) -> (DataLoader[CoNNLUTokenisedBatch, DepDataset]
                      | DataLoader[EssentialBatch, DepDataset]):
 
@@ -1008,14 +1045,17 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
                 dataset,
                 np.arange(min_size, max_size, 1),
                 batch_size),
-            collate_fn=create_collate_func(
+            collate_fn=Collate(
                 dataset.keys_for_tensors,
                 device=device
-                ))
+                ),
+            pin_memory=True,
+            persistent_workers=True,
+            num_workers=n_workers,)
 
     else:
         sampler: DistributedSampler | None
-        if rank is None:
+        if world_size == 1:
             sampler = None
         else:
             sampler = DistributedSampler(
@@ -1027,12 +1067,15 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
             shuffle=False if sampler is not None else shuffle,
             batch_size=batch_size,
             drop_last=droplast,
-            collate_fn=create_padding_collate_func(
+            collate_fn=PaddingCollate(
                 dataset.keys_for_tensors,
                 dataset.keys_for_padding,
                 dataset.keys_for_mask_padding,
                 device=device),
-            sampler=sampler)
+            sampler=sampler,
+            pin_memory=True,
+            num_workers=n_workers,
+            persistent_workers=True)
 
 
 def load_conllu(
@@ -1192,6 +1235,12 @@ Wikitext = DatasetDetailsFull(
     tokmap_dir="./processed/Wikitext/"
     )
 
+Wikitext_memmapped = DatasetDetailsFull(
+    memmaped=("train", "eval", "test"),
+    memmap_dir="./processed/Wikitext/memmap",
+    tokmap_dir="./processed/Wikitext/"
+    )
+
 Sample = DatasetDetailsFull(
     dirs=tuple(3*["./sample.conllu"]),  # type: ignore
     memmap_dir="./processed/Sample/memmap",
@@ -1208,6 +1257,10 @@ dataset_details_full = dict(
     EWT=EWT,
     Wikitext=Wikitext,
     Sample=Sample
+    )
+
+dataset_details_full_memmaped = dict(
+    Wikitext=Wikitext_memmapped
     )
 
 dataset_details = (dataset_details_full
@@ -1259,7 +1312,7 @@ def load_dataset(details: DatasetDetails,       # type: ignore
                  ) -> DatasetDictTrain | DatasetDictTest:
     # TODO: implement option to read raw string data and parse,
     # to accept raw string as input and to save parsed data
-    transform = get_transform_mask_head_child(
+    transform = TransformMaskHeadChild(
         keys_for_head={"head"},
         keys_for_child={"child"},
         triangulate=triangulate,
@@ -1290,10 +1343,9 @@ def load_dataset(details: DatasetDetails,       # type: ignore
     def load_dataset(dir: str, is_train: bool,
                      max_len: int | None = None) -> MemMapDataset:
         if load_memmap:
-            assert first_k is None, (
-                "Loading only part of memmap is not implemented")
             return MemMapDataset.from_memmap(dir, transform,
-                                             max_len=max_len)
+                                             max_len=max_len,
+                                             first_k=first_k)
         else:
             first_k_param = first_k if is_train else first_k_eval_test
             return MemMapDataset.from_file(dir, transform,
@@ -1339,7 +1391,7 @@ def load_dataset(details: DatasetDetails,       # type: ignore
         token_mapper.save(os.path.join(tokmap_dir, "mapper"))
 
     else:
-        token_mapper = TokenMapper.load(tokmap_dir)
+        token_mapper = TokenMapper.load(os.path.join(tokmap_dir, "mapper"))
 
     for split, split_name in zip(sets, splits):
         if split is not None and not split.mapped:
