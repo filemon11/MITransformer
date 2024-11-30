@@ -1050,7 +1050,7 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
                 device=device
                 ),
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=True if n_workers > 0 else False,
             num_workers=n_workers,)
 
     else:
@@ -1065,7 +1065,7 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
         return DataLoader(
             dataset,
             shuffle=False if sampler is not None else shuffle,
-            batch_size=batch_size,
+            batch_size=batch_size // world_size,
             drop_last=droplast,
             collate_fn=PaddingCollate(
                 dataset.keys_for_tensors,
@@ -1075,7 +1075,7 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
             sampler=sampler,
             pin_memory=True,
             num_workers=n_workers,
-            persistent_workers=True)
+            persistent_workers=True if n_workers > 0 else False)
 
 
 def load_conllu(
