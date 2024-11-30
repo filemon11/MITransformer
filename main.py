@@ -10,9 +10,11 @@ import pandas as pd
 from hyperopt import hp, fmin, tpe, Trials, STATUS_OK  # type: ignore
 import os.path
 import sys
-
+from logmaker import getLogger, log, basicConfig, INFO, info
 
 from typing import Literal, Any, Iterable, cast
+
+logger = getLogger(__name__)
 
 # set the random seed, for reproducibility
 torch.manual_seed(42)
@@ -95,7 +97,7 @@ def train(rank: int | None, world_size: int, n_workers: int,
         generated = []
         for _ in range(20):
             generated.append(trainer.generate(datasets["token_mapper"]))
-        print(generated)
+        info(rank, logger, f"Generated model output sample: {generated}")
 
     del trainer
 
@@ -335,14 +337,18 @@ def main(rank, n_devices) -> None:
     mode = sys.argv[1]
     n_workers = int(sys.argv[2])
     if mode == "train":
+        info(rank, logger, "Launching model training.")
         train(rank, n_devices, n_workers, "supervised", "Wikitext",)
     else:
+        info(rank, logger, "Launching hyperparameter tuning.")
         test_multiple()
 
     clean_ddp(n_devices)
 
 
 if __name__ == "__main__":
+    basicConfig(stream=sys.stdout, level=INFO)
+
     # tokenise dataset
     # TODO: do this automatically
     # problem: cannot do in parallel and
@@ -350,7 +356,7 @@ if __name__ == "__main__":
     # on only one rank.
     # details = dataset_details_full["Wikitext"]
     # details["dirs"] = details["dirs"][0:2]  # type: ignore
-    # 
+    #
     # datasets = load_dataset(details,
     #                         max_len_train=40,
     #                         max_len_eval_test=40,
@@ -362,7 +368,8 @@ if __name__ == "__main__":
     #                         connect_with_self=False)
 
     n_devices = torch.cuda.device_count()
-    print("n_devices", n_devices)
+    info(None, logger, "Recognised {n_devices} CUDA devices.")
+
     if n_devices > 1:
         processes = []
         try:
@@ -370,6 +377,7 @@ if __name__ == "__main__":
         except RuntimeError:
             pass
 
+        info(None, logger, "Starting {n_devices} processes.")
         for rank in range(n_devices):
             p = mp.Process(target=main, args=(rank, n_devices))
             p.start()
@@ -377,6 +385,8 @@ if __name__ == "__main__":
         for p in processes:
             p.join()
     else:
+        info(None, logger,
+             "Running one process without multiprocessing module.")
         main(None, n_devices)
     # if n_devices > 1:
     #     mp.spawn(main, args=(n_devices,), nprocs=n_devices)  # type: ignore

@@ -36,6 +36,10 @@ from typing import (Self, TypedDict, Literal, cast,
                     ClassVar, TypeVar, Callable,
                     NotRequired, Any)
 
+from logmaker import getLogger, log, basicConfig, INFO, info, warning
+
+logger = getLogger(__name__)
+
 Mode = Literal["standard", "input", "supervised"]
 M = TypeVar("M", bound="Metric")
 N = TypeVar("N")
@@ -163,7 +167,8 @@ class SupervisedMetric(Metric):
     @property
     def _loss(self) -> torch.Tensor:
         if self.alpha is None:
-            print("self.alpha is None!")
+
+            warning(None, logger, "SupervisedMetric.alpha is None!")
             return (self._lm_loss
                     + self._arc_loss)
         else:
@@ -258,7 +263,7 @@ class GeneralConfig(TypedDict):
     mode: Mode
     loss_alpha: float | None
     arc_loss_weighted: bool
-    device: str
+    device: str | int
     rank: int | None
     world_size: int
     n_workers: int
@@ -373,7 +378,7 @@ class LMTrainer():
         model_parameters = filter(
             lambda p: p.requires_grad, model.parameters())
         params = sum([np.prod(p.size()) for p in model_parameters])
-        print(f"Number of parameters: {params}")
+        info(config["rank"], logger, f"Number of parameters: {params}")
         return cls(model, trainsformer_config, config)
 
     def save(self) -> None:
@@ -702,9 +707,6 @@ class LMTrainer():
               test: DepDataset[IDSen] | None = None,
               **kwargs) -> tuple[Metric, Metric] | tuple[
                   Metric, Metric, Metric]:
-        if self.use_ddp:
-            print(self.config["rank"], self.config["device"],
-                  torch.cuda.current_device(), torch.distributed.get_rank())
         assert self.train_config is not None, "Config missing training params."
         assert self.train_config["batch_size"] <= len(train), (
             "Batch size larger than dataset.")
@@ -730,7 +732,8 @@ class LMTrainer():
 
         self.transformerlm.train()
         for epoch in range(1, train_config["epochs"]+1):
-            print("Epoch", epoch)
+            info(self.config["rank"],
+                 logger, f"Epoch: {epoch}")
             if self.use_ddp:
                 train_loader.sampler.set_epoch(epoch)  # type: ignore
 
@@ -746,7 +749,8 @@ class LMTrainer():
                 if eval_metric > best:       # greater means better
                     best = eval_metric
                     self.save()
-                    print(f"Saving model at epoch {epoch}...")
+                    info(self.config["rank"], logger,
+                         f"Saving model at epoch {epoch}...")
                     evals_without_improvement = 0
                 else:
                     evals_without_improvement += 1
@@ -759,7 +763,8 @@ class LMTrainer():
             if early_stop:
                 no_change_epochs = (evals_without_improvement
                                     * eval_interval)
-                print(f"Aborting training after {no_change_epochs} epochs.")
+                info(self.config["rank"], logger,
+                     f"Aborting training after {no_change_epochs} epochs.")
                 break
 
         # load best (saved) into transformerlm
