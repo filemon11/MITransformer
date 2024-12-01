@@ -888,7 +888,7 @@ class LMTrainer():
         """Returns logits and arc scores"""
         loader = get_loader(
             dataset, batch_size=self.config.batch_size,
-            bucket=False, device=self.config.device,
+            bucket=False,
             shuffle=False, droplast=False,
             n_workers=self.config.n_workers)
 
@@ -958,7 +958,6 @@ class LMTrainer():
             dataloader: DataLoader = get_loader(        # type: ignore
                 dataset, batch_size=1,                  # type: ignore
                 bucket=False, min_size=0, max_size=50,
-                device=self.config.device,
                 shuffle=False, droplast=False,
                 n_workers=self.config.n_workers)
 
@@ -1002,7 +1001,7 @@ class LMTrainer():
         if not isinstance(data, DataLoader):
             return get_loader(
                 data, batch_size=self.config.batch_size,
-                bucket=False, device=self.config.device,
+                bucket=False,
                 shuffle=False, droplast=False,
                 world_size=self.config.world_size,
                 rank=self.config.rank,

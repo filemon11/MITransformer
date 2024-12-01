@@ -849,14 +849,11 @@ class CollateBase(ABC):
 class Collate(CollateBase):
     def __init__(
             self,
-            keys_to_torch: set[str] = set(),
-            device: str | int = "cuda"
+            keys_to_torch: set[str] = set()
             ):
         """Does not support masks of different types for
         (e.g. None and array) for individual sentences"""
         self.keys_to_torch = keys_to_torch
-        self.device_type = 'cuda' if device != 'cpu' else 'cpu'
-        self.device = device
 
     def __call__(
             self,
@@ -884,11 +881,6 @@ class Collate(CollateBase):
                 if isinstance(dictionary[key], np.ndarray):
                     dictionary[key] = torch.from_numpy(
                         dictionary[key])
-                    if self.device_type == 'cuda':
-                        dictionary[key] = dictionary[
-                            key]
-                    else:
-                        dictionary[key] = dictionary[key]
 
                 elif isinstance(dictionary[key], dict):
                     dict_to_torch(dictionary[key], set(dictionary[key].keys()))
@@ -903,21 +895,10 @@ class Collate(CollateBase):
                     if isinstance(dictionary[key][0], np.ndarray):
                         dictionary[key] = torch.from_numpy(
                             np.stack(dictionary[key]))
-                        if self.device_type == 'cuda':
-                            dictionary[key] = dictionary[
-                                key]
-                        else:
-                            dictionary[key] = dictionary[
-                                key]
 
                     else:
                         dictionary[key] = torch.from_numpy(
                             np.array(dictionary[key]))
-                        if self.device_type == 'cuda':
-                            dictionary[key] = dictionary[
-                                key]
-                        else:
-                            dictionary[key] = dictionary[key]
 
         output_dict: dict[str, Any] = dict(output)
         dict_to_torch(output_dict, self.keys_to_torch)
@@ -930,10 +911,9 @@ class PaddingCollate(Collate):
             self,
             keys_to_torch: set[str] = set(),
             pad_with: dict[str, int] = dict(),
-            pad_mask_with: dict[str, bool] = dict(),
-            device: str | int = "cuda"
+            pad_mask_with: dict[str, bool] = dict()
             ):
-        super().__init__(keys_to_torch, device)
+        super().__init__(keys_to_torch)
         self.pad_with = pad_with
         self.pad_mask_with = pad_mask_with
 
@@ -996,7 +976,7 @@ class DataLoader(torchDataLoader[Batch], Generic[Batch, D]):
 @overload
 def get_loader(dataset: DepDataset[CoNNLUTokenisedSentence], batch_size: int,
                bucket: bool = True, min_size: int = 5,
-               max_size: int = 50, device: str | int = "cuda",
+               max_size: int = 50,
                shuffle: bool = True,
                droplast: bool = True,
                rank: int | None = 0,
@@ -1009,7 +989,7 @@ def get_loader(dataset: DepDataset[CoNNLUTokenisedSentence], batch_size: int,
 @overload
 def get_loader(dataset: DepDataset[EssentialSentence], batch_size: int,
                bucket: bool = True, min_size: int = 5,
-               max_size: int = 50, device: str | int = "cuda",
+               max_size: int = 50,
                shuffle: bool = True,
                droplast: bool = True,
                rank: int | None = 0,
@@ -1023,7 +1003,7 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
                          | DepDataset[EssentialSentence]),
                batch_size: int,
                bucket: bool = True, min_size: int = 5,
-               max_size: int = 50, device: str | int = "cuda",
+               max_size: int = 50,
                shuffle: bool = True,
                droplast: bool = True,
                rank: int | None = 0,
@@ -1046,8 +1026,7 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
                 np.arange(min_size, max_size, 1),
                 batch_size),
             collate_fn=Collate(
-                dataset.keys_for_tensors,
-                device=device
+                dataset.keys_for_tensors
                 ),
             pin_memory=True,
             persistent_workers=True if n_workers > 0 else False,
@@ -1070,8 +1049,7 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
             collate_fn=PaddingCollate(
                 dataset.keys_for_tensors,
                 dataset.keys_for_padding,
-                dataset.keys_for_mask_padding,
-                device=device),
+                dataset.keys_for_mask_padding),
             sampler=sampler,
             pin_memory=True,
             num_workers=n_workers,
