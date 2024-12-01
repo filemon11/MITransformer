@@ -7,6 +7,7 @@ from tokeniser import TokenMapper
 from parse import parse_list_of_words_with_spacy
 from dependencies import (plot_tree, mst, merge_head_child_scores,
                           dummy_mask_removal, mask_to_headlist, uas_absolute)
+from params import Params
 
 import seaborn as sns   # type: ignore
 import matplotlib.pyplot as plt   # type: ignore
@@ -31,12 +32,12 @@ from functools import total_ordering
 from contextlib import contextmanager
 from collections import defaultdict
 
-from typing import (Self, TypedDict, Literal, cast,
+from typing import (Self, Literal, cast,
                     Container, Iterable, Mapping,
                     ClassVar, TypeVar, Callable,
-                    NotRequired, Any)
+                    Any)
 
-from logmaker import getLogger, log, basicConfig, INFO, info, warning
+from logmaker import getLogger, info, warning
 
 logger = getLogger(__name__)
 
@@ -154,7 +155,7 @@ class Metric:
                 return False
 
     def to_dict(self) -> dict[str, float]:
-        return {attr: round(float(getattr(self, attr)), 2)
+        return {attr: float(getattr(self, attr))
                 for attr in self._to_mean}
 
 
@@ -257,39 +258,25 @@ def metric_writer(*args, **kwds):
         writer.flush()
 
 
-# TODO: in Python 3.14 set extra_items=float
-class GeneralConfig(TypedDict):
-    batch_size: int
-    mode: Mode
-    loss_alpha: float | None
-    arc_loss_weighted: bool
-    device: str | int
-    rank: int | None
-    world_size: int
-    n_workers: int
+@dataclass
+class GeneralConfig(Params):
+    batch_size: int = 16
+    mode: Mode = "supervised"
+    loss_alpha: float | None = 0.5
+    arc_loss_weighted: bool = False
+    device: str | int = "cpu"
+    rank: int | None = None
+    world_size: int = 1
+    n_workers: int = 0
 
 
+@dataclass
 class TrainConfig(GeneralConfig):
-    eval_interval: int
-    epochs: int
-    learning_rate: float
-    model_name: str
-    abort_after: int | None
-
-
-class OptionalConfig(TypedDict):
-    batch_size: NotRequired[int]
-    mode: NotRequired[Mode]
-    arc_loss_weighted: NotRequired[bool]
-    eval_interval: NotRequired[int]
-    epochs: NotRequired[int]
-    learning_rate: NotRequired[float]
-    model_name: NotRequired[str]
-    device: NotRequired[str]
-    abort_after: NotRequired[int | None]
-    rank: NotRequired[int | None]
-    world_size: NotRequired[int]
-    n_workers: NotRequired[int]
+    eval_interval: int = 1
+    epochs: int = 100
+    learning_rate: float = 1e-3
+    model_name: str = "experiment"
+    abort_after: int | None = 1
 
 
 class LMTrainer():
@@ -300,18 +287,18 @@ class LMTrainer():
                  config: GeneralConfig):
         self.writer = MetricWriter()
         self.transformerlm: MITransformerLM | DDP = transformerlm
-        self.transformerlm.to(config["device"])
+        self.transformerlm.to(config.device)
         self.transformer_config: MITransformerConfig = transformer_config
 
         self.optimiser: Optimizer | None
         self.__config: GeneralConfig
         self.config = config
 
-        rank = config["rank"]
-        device = config["device"]
-        self.use_ddp = config["world_size"] > 1
+        rank = config.rank
+        device = config.device
+        self.use_ddp = config.world_size > 1
 
-        self.transformerlm.to(config["device"])
+        self.transformerlm.to(config.device)
         if self.use_ddp:
             self.transformerlm = DDP(
                 self.transformerlm,
@@ -327,16 +314,16 @@ class LMTrainer():
     @config.setter
     def config(self, config: GeneralConfig) -> None:
         self.__config = config
-        if "learning_rate" in config:
+        if hasattr(config, "learning_rate"):
             self.optimiser = Adam(
                 self.transformerlm.parameters(),
-                lr=config["learning_rate"])  # type: ignore
+                lr=config.learning_rate)  # type: ignore
         else:
             self.optimiser = None
 
     @property
     def train_config(self) -> TrainConfig | None:
-        if "learning_rate" in self.config:
+        if hasattr(self.config, "learning_rate"):
             return cast(TrainConfig, self.config)
         else:
             return None
@@ -348,13 +335,13 @@ class LMTrainer():
             os.path.join(cls.model_dir, model_name, "model")).values()
         transformer_config = cast(MITransformerConfig, transformer_config)
         model: MITransformerLM = MITransformerLM(
-            MITransformer(**transformer_config))
+            MITransformer(transformer_config))
         model.load_state_dict(state_dict)
         return model, transformer_config
 
     @classmethod
     def load(cls, model_name: str,
-             optional_config: OptionalConfig | None = None) -> Self:
+             optional_config: dict | GeneralConfig = dict()) -> Self:
 
         model, transformer_config = cls.load_model(model_name)
 
@@ -362,34 +349,51 @@ class LMTrainer():
                     cls.model_dir, model_name, "config"), 'rb') as handle:
             config = pickle.load(handle)
 
-        if optional_config is not None:
+        if isinstance(optional_config, GeneralConfig):
+            config = optional_config
+        else:
             for key, value in optional_config.items():
-                config[key] = value
+                setattr(config, key, value)
+
+        cls.model_info(model, transformer_config, config)
 
         return cls(model, transformer_config, config)
 
     @classmethod
-    def new(cls, trainsformer_config: MITransformerConfig,
+    def new(cls, transformer_config: MITransformerConfig,
             config: GeneralConfig) -> Self:
 
         model: MITransformerLM = MITransformerLM(
-            MITransformer(**trainsformer_config))
+            MITransformer(transformer_config))
+
+        cls.model_info(model, transformer_config, config)
+        return cls(model, transformer_config, config)
+
+    @classmethod
+    def model_info(cls, model: MITransformerLM,
+                   transformer_config: MITransformerConfig,
+                   config: GeneralConfig) -> None:
+        info(config.rank, logger,
+             "Initialised model with params:\n" +
+             transformer_config.info)
 
         model_parameters = filter(
             lambda p: p.requires_grad, model.parameters())
         params = sum([np.prod(p.size()) for p in model_parameters])
-        info(config["rank"], logger, f"Number of parameters: {params}")
-        return cls(model, trainsformer_config, config)
+        info(config.rank, logger, f"Number of parameters: {params}")
+
+        info(config.rank, logger,
+             "Initialised trainer with params:\n" + config.info)
 
     def save(self) -> None:
         assert self.train_config is not None
         if self.use_ddp:
             dist.barrier()
-        if not self.use_ddp or self.config["rank"] == 0:
+        if not self.use_ddp or self.config.rank == 0:
             model = self.transformerlm
             if self.use_ddp:
                 model = self.transformerlm.module
-            dir = os.path.join(self.model_dir, self.train_config["model_name"])
+            dir = os.path.join(self.model_dir, self.train_config.model_name)
             Path(dir).mkdir(parents=True, exist_ok=True)
             torch.save(
                 {"model": model.state_dict(),
@@ -463,7 +467,7 @@ class LMTrainer():
             score_gold.to(score_preds.dtype),
             reduction='none')
 
-        if self.config["arc_loss_weighted"]:
+        if self.config.arc_loss_weighted:
             true_el = torch.sum(score_gold)
             false_el = num_scores - true_el
             f_true = 0.5*num_scores/true_el
@@ -571,7 +575,7 @@ class LMTrainer():
                    ignore_index: int) -> Metric:
         assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
-        self.batch_to(batch, device=self.config["device"])  # type: ignore
+        self.batch_to(batch, device=self.config.device)  # type: ignore
         logits, arc_scores = self.transformerlm(**batch)
         # remove from arc_scores those that should not be used...
         lm_loss = self.loss(
@@ -582,7 +586,7 @@ class LMTrainer():
 
         score_preds, score_gold = self.prepare_scores(
             arc_scores, batch["masks"])
-        if (self.train_config["mode"] == "supervised"
+        if (self.train_config.mode == "supervised"
                 and score_preds is not None
                 and score_gold is not None):
 
@@ -603,7 +607,7 @@ class LMTrainer():
             metric = Metric(num_instances, lm_loss)
         else:
             metric = SupervisedMetric(num_instances, lm_loss, arc_loss,
-                                      self.train_config["loss_alpha"])
+                                      self.train_config.loss_alpha)
 
         metric.loss.backward()   # backward pass
         self.optimiser.step()   # update parameters
@@ -617,7 +621,7 @@ class LMTrainer():
                   batch: CoNNLUTokenisedBatch | EssentialBatch,
                   mode: Mode,
                   ignore_index: int) -> Metric:
-        self.batch_to(batch, device=self.config["device"])  # type: ignore
+        self.batch_to(batch, device=self.config.device)  # type: ignore
 
         logits, arc_scores = self.transformerlm(**batch)
         # remove from arc_scores those that should not be used...
@@ -688,97 +692,113 @@ class LMTrainer():
                 # add 1 for dummy mask since metric divides through
                 # the number of all tokens
 
-            assert self.config["loss_alpha"] is not None
+            assert self.config.loss_alpha is not None
             m = SupervisedEvalMetric(
                 num_instances,
                 lm_loss.detach().cpu(),
                 surprisal_sum.detach().cpu().item(),
                 arc_loss.detach().cpu(),
-                self.config["loss_alpha"],
+                self.config.loss_alpha,
                 uas_abs)
             return m
 
         return EvalMetric(num_instances, lm_loss.detach().cpu(),
                           surprisal_sum.detach().cpu().item())
 
-    def train(self,
-              train: DepDataset[IDSen],
-              eval: DepDataset[IDSen],
-              test: DepDataset[IDSen] | None = None,
-              **kwargs) -> tuple[Metric, Metric] | tuple[
-                  Metric, Metric, Metric]:
+    def train_iter(
+            self,
+            train: DepDataset[IDSen] | DataLoader,
+            eval: DepDataset[IDSen] | DataLoader,
+            **kwargs) -> Iterable[tuple[Metric, Metric]]:
         assert self.train_config is not None, "Config missing training params."
-        assert self.train_config["batch_size"] <= len(train), (
+        assert self.train_config.batch_size <= len(train), (
             "Batch size larger than dataset.")
         train_config = self.train_config
-        device = train_config["device"]
+        device = train_config.device
         assert device is not None
-        train_loader = get_loader(
-            train, batch_size=train_config["batch_size"],
-            bucket=False, device=device, rank=train_config["rank"],
-            world_size=train_config["world_size"],
-            n_workers=self.config["n_workers"])
 
-        eval_loader = get_loader(
-            eval, batch_size=train_config["batch_size"],
-            bucket=False, device=device,
-            shuffle=False, droplast=False, rank=train_config["rank"],
-            world_size=train_config["world_size"],
-            n_workers=self.config["n_workers"])
+        train = self.get_loader(train)
+        eval = self.get_loader(eval)
 
-        best: float | Metric = math.inf
-        evals_without_improvement: int = 0
-        eval_interval = train_config["eval_interval"]
+        eval_interval = train_config.eval_interval
 
         self.transformerlm.train()
-        for epoch in range(1, train_config["epochs"]+1):
-            info(self.config["rank"],
+        for epoch in range(1, train_config.epochs+1):
+            info(self.config.rank,
                  logger, f"Epoch: {epoch}")
             if self.use_ddp:
-                train_loader.sampler.set_epoch(epoch)  # type: ignore
+                train.sampler.set_epoch(epoch)  # type: ignore
 
-            train_metric = self._train(train_loader)
+            train_metric = self._train(train)
             self.log_metric(train_metric, epoch, "train")
 
             if epoch % eval_interval == 0:
-                eval_metric = self._eval(eval_loader)
+                eval_metric = self._eval(eval)
                 self.log_metric(eval_metric, epoch, "eval")
 
                 self.transformerlm.train()
 
-                if eval_metric > best:       # greater means better
-                    best = eval_metric
-                    self.save()
-                    info(self.config["rank"], logger,
-                         f"Saving model at epoch {epoch}...")
-                    evals_without_improvement = 0
-                else:
-                    evals_without_improvement += 1
+                yield train_metric, eval_metric
 
-            abort_after = train_config["abort_after"]
+    def train(self,
+              train: DepDataset[IDSen] | DataLoader,
+              eval: DepDataset[IDSen] | DataLoader,
+              test: DepDataset[IDSen] | DataLoader | None = None,
+              **kwargs) -> tuple[Metric, Metric] | tuple[
+                  Metric, Metric, Metric]:
+        assert self.train_config is not None, "Config missing training params."
+        assert self.train_config.batch_size <= len(train), (
+            "Batch size larger than dataset.")
+        train_config = self.train_config
+        device = train_config.device
+
+        train = self.get_loader(train)
+        eval = self.get_loader(eval)
+
+        best: float | Metric = math.inf
+        evals_without_improvement: int = 0
+
+        epoch = 0
+        for eval_step, (_, eval_metric) in enumerate(
+                self.train_iter(train, eval, **kwargs)):
+            epoch = eval_step*train_config.eval_interval
+            if eval_metric > best:       # greater means better
+                best = eval_metric
+                self.save()
+                info(self.config.rank, logger,
+                     "Saving model at epoch "
+                     f"{epoch}...")
+                evals_without_improvement = 0
+            else:
+                evals_without_improvement += 1
+
+            abort_after = train_config.abort_after
             early_stop = (abort_after is not None
                           and abort_after <= evals_without_improvement)
             early_stop = sum(self.gather_ddp(early_stop)) > 0
 
             if early_stop:
                 no_change_epochs = (evals_without_improvement
-                                    * eval_interval)
-                info(self.config["rank"], logger,
+                                    * train_config.eval_interval)
+                info(self.config.rank, logger,
                      f"Aborting training after {no_change_epochs} epochs.")
                 break
+        # If eval interval is larger than number of epochs
+        if epoch == 0:
+            epoch = train_config.epochs
 
         # load best (saved) into transformerlm
         if self.use_ddp:
             self.transformerlm.module = self.load_model(
-                self.train_config["model_name"])[0]   # type: ignore
-            self.transformerlm.module.to(self.config["rank"])
+                self.train_config.model_name)[0]   # type: ignore
+            self.transformerlm.module.to(self.config.rank)
         else:
             self.transformerlm = self.load_model(
-                self.train_config["model_name"])[0]   # type: ignore
+                self.train_config.model_name)[0]   # type: ignore
             self.transformerlm.to(device)
 
-        final_train = self._eval(train_loader)
-        final_eval = self._eval(eval_loader)
+        final_train = self._eval(train)
+        final_eval = self._eval(eval)
         self.log_metric(final_train, epoch, "train")
         self.log_metric(final_eval, epoch, "eval")
 
@@ -850,21 +870,14 @@ class LMTrainer():
             metrics = [
                 self.eval_step(
                     batch,
-                    self.config["mode"],
+                    self.config.mode,
                     loader.dataset.keys_for_padding["label_ids"])
                 for batch in loader]
         return self.gather_metrics(sum_metrics(metrics))
 
-    def test(self, dataset: DepDataset) -> Metric:
-        loader = get_loader(
-            dataset, batch_size=self.config["batch_size"],
-            bucket=False, device=self.config["device"],
-            shuffle=False, droplast=False,
-            world_size=self.config["world_size"],
-            rank=self.config["rank"],
-            n_workers=self.config["n_workers"])
-
-        metric = self._eval(loader)
+    def test(self, dataset: DepDataset | DataLoader) -> Metric:
+        dataset = self.get_loader(dataset)
+        metric = self._eval(dataset)
         return metric
 
     def predict(
@@ -874,10 +887,10 @@ class LMTrainer():
             ) -> tuple[list[torch.Tensor], dict[str, list[torch.Tensor]]]:
         """Returns logits and arc scores"""
         loader = get_loader(
-            dataset, batch_size=self.config["batch_size"],
-            bucket=False, device=self.config["device"],
+            dataset, batch_size=self.config.batch_size,
+            bucket=False, device=self.config.device,
             shuffle=False, droplast=False,
-            n_workers=self.config["n_workers"])
+            n_workers=self.config.n_workers)
 
         ignore_index = dataset.keys_for_padding["label_ids"]
 
@@ -924,7 +937,7 @@ class LMTrainer():
         if start is None:
             idx = torch.zeros((1, 2),
                               dtype=torch.long,
-                              device=self.config["device"])
+                              device=self.config.device)
             idx[0, 0] = token_mapper.token2id[DUMMY]
             idx[0, 1] = token_mapper.token2id[ROOT]
             g = model.generate(
@@ -945,9 +958,9 @@ class LMTrainer():
             dataloader: DataLoader = get_loader(        # type: ignore
                 dataset, batch_size=1,                  # type: ignore
                 bucket=False, min_size=0, max_size=50,
-                device=self.config["device"],
+                device=self.config.device,
                 shuffle=False, droplast=False,
-                n_workers=self.config["n_workers"])
+                n_workers=self.config.n_workers)
 
             for batch in dataloader:
                 # take last batch, i.e. last sentence
@@ -968,7 +981,7 @@ class LMTrainer():
 
     def gather_ddp(self, data: N) -> list[N]:
         if self.use_ddp:
-            outputs = [data]*self.config["world_size"]
+            outputs = [data]*self.config.world_size
             dist.all_gather_object(outputs, data)
             return outputs
         return [data]
@@ -982,8 +995,19 @@ class LMTrainer():
     def log_metric(self, metric: Metric,
                    epoch: int,
                    split: Literal["train", "eval", "test"]) -> None:
-        if not self.use_ddp or self.config["rank"] == 0:
+        if not self.use_ddp or self.config.rank == 0:
             self.writer.add_metric(metric, epoch, split)
+
+    def get_loader(self, data: DataLoader | DepDataset) -> DataLoader:
+        if not isinstance(data, DataLoader):
+            return get_loader(
+                data, batch_size=self.config.batch_size,
+                bucket=False, device=self.config.device,
+                shuffle=False, droplast=False,
+                world_size=self.config.world_size,
+                rank=self.config.rank,
+                n_workers=self.config.n_workers)
+        return data
 
 
 #def logits_to_probs(logits: torch.Tensor,

@@ -1,5 +1,4 @@
 import torch
-import torch.multiprocessing as mp
 import torch.distributed as dist
 
 from data import (load_dataset, dataset_details_full, DatasetDictTrain,
@@ -7,10 +6,9 @@ from data import (load_dataset, dataset_details_full, DatasetDictTrain,
 from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
                      Metric, MetricWriter)
 import pandas as pd
-from hyperopt import hp, fmin, tpe, Trials, STATUS_OK  # type: ignore
 import os.path
 import sys
-from logmaker import getLogger, log, basicConfig, INFO, info
+from logmaker import getLogger, basicConfig, INFO, info
 
 from typing import Literal, Any, Iterable, cast
 
@@ -34,9 +32,9 @@ def train(rank: int | None, world_size: int, n_workers: int,
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     train_config = TrainConfig(
-        batch_size=10,
-        eval_interval=5,
-        abort_after=1,
+        batch_size=40,
+        eval_interval=1,
+        abort_after=5,
         epochs=100,
         learning_rate=1e-3,
         mode=mode,
@@ -334,8 +332,8 @@ def clean_ddp(world_size) -> None:
 
 def main(rank, n_devices) -> None:
     use_ddp, rank = setup_ddp(rank, n_devices)
-    mode = sys.argv[1]
-    n_workers = int(sys.argv[2])
+    mode = sys.argv[2]
+    n_workers = int(sys.argv[3])
     if mode == "train":
         info(rank, logger, "Launching model training.")
         train(rank, n_devices, n_workers, "supervised", "Wikitext",)
@@ -354,36 +352,28 @@ if __name__ == "__main__":
     # problem: cannot do in parallel and
     # therefore leads to timeout when doing
     # on only one rank.
-    # details = dataset_details_full["Wikitext"]
-    # details["dirs"] = details["dirs"][0:2]  # type: ignore
-    #
-    # datasets = load_dataset(details,
-    #                         max_len_train=40,
-    #                         max_len_eval_test=40,
-    #                         vocab_size=50_000,
-    #                         triangulate=0,
-    #                         first_k=100_000,
-    #                         first_k_eval_test=None,
-    #                         connect_with_dummy=True,
-    #                         connect_with_self=False)
+    print(sys.argv)
+    if sys.argv[1] == "dataprep":
+        details = dataset_details_full["Wikitext"]
+        details["dirs"] = details["dirs"][0:2]  # type: ignore
+        datasets = load_dataset(details,
+                                max_len_train=40,
+                                max_len_eval_test=40,
+                                vocab_size=50_000,
+                                triangulate=0,
+                                first_k=100_000,
+                                first_k_eval_test=None,
+                                connect_with_dummy=True,
+                                connect_with_self=False)
+        raise Exception
 
     n_devices = torch.cuda.device_count()
-    info(None, logger, "Recognised {n_devices} CUDA devices.")
+    info(None, logger, f"Recognised {n_devices} CUDA devices.")
 
     if n_devices > 1:
-        processes = []
-        try:
-            mp.set_start_method('spawn')
-        except RuntimeError:
-            pass
-
-        info(None, logger, "Starting {n_devices} processes.")
-        for rank in range(n_devices):
-            p = mp.Process(target=main, args=(rank, n_devices))
-            p.start()
-            processes.append(p)
-        for p in processes:
-            p.join()
+        info(None, logger,
+             f"Running {n_devices} processes with multiprocessing module.")
+        main(int(sys.argv[1].split("=")[-1]), n_devices)
     else:
         info(None, logger,
              "Running one process without multiprocessing module.")

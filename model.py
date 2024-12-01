@@ -2,6 +2,8 @@
 Snippets taken from
 https://github.com/karpathy/nanoGPT/blob/master/model.py"""
 
+from params import Params
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,6 +12,7 @@ import einops
 import math
 
 from collections import defaultdict
+from dataclasses import dataclass
 
 from typing import (TypedDict, NotRequired, Sequence, Unpack,
                     Literal)
@@ -285,68 +288,56 @@ class MILayer(nn.Module):
 
 TransformerDescription = tuple[LayerDescription, ...]
 
-ProbMethod = Literal["sigmoid", "softmax"]
 
-
-class TransformerDescription2(TypedDict):
-    layers: tuple[LayerDescription, ...]
-    prob_methods: dict[tuple[str, str] | str, ProbMethod]
-
-
-class MITransformerConfig(TypedDict):
-    transformer_description: TransformerDescription
-    d_ff: int
-    attn_dropout: float
-    resid_dropout: float
-    dropout_ff: float
-    embd_dropout: float
-    block_size: int
-    n_embd: int
-    dropout_embd: float
-    vocab_size: int
-    overlay_causal: bool
-    use_input_mask: bool
-    use_dual_fixed: bool
-    bias: bool
-    use_lstm: bool
-    # I would like to make these optional
-    # in the class constructor but still
-    # type them; dataclass is not unpackable
-    # and NotRequired necessitates conditional
-    # assignment inside constructor which the
-    # type checker does not recognise.
+@dataclass
+class MITransformerConfig(Params):
+    transformer_description: TransformerDescription = ((("head", "child"), 1),)
+    d_ff: int = 400*4
+    attn_dropout: float = 0.3
+    resid_dropout: float = 0.3
+    dropout_ff: float = 0.3
+    embd_dropout: float = 0.3
+    block_size: int = 500
+    n_embd: int = 400
+    dropout_embd: float = 0.3
+    vocab_size: int = 50_000
+    overlay_causal: bool = True
+    use_input_mask: bool = False
+    use_dual_fixed: bool = False
+    bias: bool = False
+    use_lstm: bool = True
 
 
 class MITransformer(nn.Module):
-    def __init__(self, **kwargs: Unpack[MITransformerConfig]):
+    def __init__(self, config: MITransformerConfig):
         super().__init__()
 
-        n_embd = kwargs["n_embd"]
-        transformer_description = kwargs["transformer_description"]
+        n_embd = config.n_embd
+        transformer_description = config.transformer_description
 
         self.layers = nn.ModuleList([MILayer(
-            n_embd, layer_description, kwargs["d_ff"],
-            kwargs["block_size"], kwargs["attn_dropout"],
-            kwargs["resid_dropout"], kwargs["dropout_ff"],
-            kwargs["overlay_causal"], kwargs["use_dual_fixed"],
-            kwargs["bias"])
+            n_embd, layer_description, config.d_ff,
+            config.block_size, config.attn_dropout,
+            config.resid_dropout, config.dropout_ff,
+            config.overlay_causal, config.use_dual_fixed,
+            config.bias)
             for layer_description in transformer_description])
 
-        self.block_size = kwargs["block_size"]
+        self.block_size = config.block_size
 
-        self.vocab_size = kwargs["vocab_size"]
+        self.vocab_size = config.vocab_size
 
         # vocabulary embedding and positional embedding
         self.token_embedder = Encoder(self.vocab_size, n_embd,
-                                      kwargs["dropout_embd"])
+                                      config.dropout_embd)
 
-        self.wte = nn.Embedding(kwargs["vocab_size"], n_embd)
+        self.wte = nn.Embedding(config.vocab_size, n_embd)
         # self.wpe = PositionalEncoding(n_embd, 0, self.block_size)
         self.wpe = nn.Embedding(self.block_size, n_embd)
 
-        self.embd_dropout = nn.Dropout(kwargs["embd_dropout"])
+        self.embd_dropout = nn.Dropout(config.embd_dropout)
 
-        self.use_input_mask: bool = kwargs["use_input_mask"]
+        self.use_input_mask: bool = config.use_input_mask
 
         # init all weights
         self.apply(self._init_weights)
@@ -359,11 +350,10 @@ class MITransformer(nn.Module):
                     std=0.02/math.sqrt(2 * len(transformer_description)))
 
         self.lstm = None
-        if kwargs["use_lstm"]:
+        if config.use_lstm:
             self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
-            self.lstm_dropout = nn.Dropout(kwargs["attn_dropout"])
+            self.lstm_dropout = nn.Dropout(config.attn_dropout)
             # TODO separate dropout for LSTM
-        # self.transformer = torch.nn.Transformer(400, 1, 1, 1, 4*400, 0, batch_first=True)
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
