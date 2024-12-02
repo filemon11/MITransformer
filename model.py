@@ -14,8 +14,7 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 
-from typing import (TypedDict, NotRequired, Sequence, Unpack,
-                    Literal)
+from typing import (TypedDict, NotRequired, Sequence)
 
 
 def combine_scores(
@@ -293,13 +292,13 @@ TransformerDescription = tuple[LayerDescription, ...]
 class MITransformerConfig(Params):
     transformer_description: TransformerDescription = ((("head", "child"), 1),)
     d_ff: int = 400*4
-    attn_dropout: float = 0.3
-    resid_dropout: float = 0.3
+    dropout_attn: float = 0.3
+    dropout_resid: float = 0.3
     dropout_ff: float = 0.3
-    embd_dropout: float = 0.3
+    dropout_embd: float = 0.3
+    dropout_lstm: float = 0.3
     block_size: int = 500
     n_embd: int = 400
-    dropout_embd: float = 0.3
     vocab_size: int = 50_000
     overlay_causal: bool = True
     use_input_mask: bool = False
@@ -317,8 +316,8 @@ class MITransformer(nn.Module):
 
         self.layers = nn.ModuleList([MILayer(
             n_embd, layer_description, config.d_ff,
-            config.block_size, config.attn_dropout,
-            config.resid_dropout, config.dropout_ff,
+            config.block_size, config.dropout_attn,
+            config.dropout_resid, config.dropout_ff,
             config.overlay_causal, config.use_dual_fixed,
             config.bias)
             for layer_description in transformer_description])
@@ -327,15 +326,11 @@ class MITransformer(nn.Module):
 
         self.vocab_size = config.vocab_size
 
-        # vocabulary embedding and positional embedding
-        self.token_embedder = Encoder(self.vocab_size, n_embd,
-                                      config.dropout_embd)
-
         self.wte = nn.Embedding(config.vocab_size, n_embd)
         # self.wpe = PositionalEncoding(n_embd, 0, self.block_size)
         self.wpe = nn.Embedding(self.block_size, n_embd)
 
-        self.embd_dropout = nn.Dropout(config.embd_dropout)
+        self.embd_dropout = nn.Dropout(config.dropout_embd)
 
         self.use_input_mask: bool = config.use_input_mask
 
@@ -352,7 +347,7 @@ class MITransformer(nn.Module):
         self.lstm = None
         if config.use_lstm:
             self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
-            self.lstm_dropout = nn.Dropout(config.attn_dropout)
+            self.lstm_dropout = nn.Dropout(config.dropout_lstm)
             # TODO separate dropout for LSTM
 
     def _init_weights(self, module):

@@ -27,7 +27,7 @@ from pathlib import Path
 import os
 import pickle
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, field
 from functools import total_ordering
 from contextlib import contextmanager
 from collections import defaultdict
@@ -37,7 +37,7 @@ from typing import (Self, Literal, cast,
                     ClassVar, TypeVar, Callable,
                     Any)
 
-from logmaker import getLogger, info, warning
+from logmaker import getLogger, info, warning, get_timestr
 
 logger = getLogger(__name__)
 
@@ -261,13 +261,14 @@ def metric_writer(*args, **kwds):
 @dataclass
 class GeneralConfig(Params):
     batch_size: int = 16
-    mode: Mode = "supervised"
+    dependency_mode: Mode = "supervised"
     loss_alpha: float | None = 0.5
     arc_loss_weighted: bool = False
     device: str | int = "cpu"
     rank: int | None = None
     world_size: int = 1
     n_workers: int = 0
+    model_name: str = field(default_factory=get_timestr)
 
 
 @dataclass
@@ -275,7 +276,6 @@ class TrainConfig(GeneralConfig):
     eval_interval: int = 1
     epochs: int = 100
     learning_rate: float = 1e-3
-    model_name: str = "experiment"
     abort_after: int | None = 1
 
 
@@ -285,7 +285,8 @@ class LMTrainer():
     def __init__(self, transformerlm: MITransformerLM,
                  transformer_config: MITransformerConfig,
                  config: GeneralConfig):
-        self.writer = MetricWriter()
+        self.writer = MetricWriter(
+            log_dir=os.path.join("./runs", config.model_name))
         self.transformerlm: MITransformerLM | DDP = transformerlm
         self.transformerlm.to(config.device)
         self.transformer_config: MITransformerConfig = transformer_config
@@ -586,7 +587,7 @@ class LMTrainer():
 
         score_preds, score_gold = self.prepare_scores(
             arc_scores, batch["masks"])
-        if (self.train_config.mode == "supervised"
+        if (self.train_config.dependency_mode == "supervised"
                 and score_preds is not None
                 and score_gold is not None):
 
@@ -725,7 +726,7 @@ class LMTrainer():
         self.transformerlm.train()
         for epoch in range(1, train_config.epochs+1):
             info(self.config.rank,
-                 logger, f"Epoch: {epoch}")
+                 logger, f"Epoch: {epoch}/{train_config.epochs}")
             if self.use_ddp:
                 train.sampler.set_epoch(epoch)  # type: ignore
 
@@ -760,7 +761,8 @@ class LMTrainer():
 
         epoch = 0
         for eval_step, (_, eval_metric) in enumerate(
-                self.train_iter(train, eval, **kwargs)):
+                self.train_iter(train, eval, **kwargs),
+                start=1):
             epoch = eval_step*train_config.eval_interval
             if eval_metric > best:       # greater means better
                 best = eval_metric
@@ -784,8 +786,7 @@ class LMTrainer():
                      f"Aborting training after {no_change_epochs} epochs.")
                 break
         # If eval interval is larger than number of epochs
-        if epoch == 0:
-            epoch = train_config.epochs
+        epoch = train_config.epochs
 
         # load best (saved) into transformerlm
         if self.use_ddp:
@@ -870,7 +871,7 @@ class LMTrainer():
             metrics = [
                 self.eval_step(
                     batch,
-                    self.config.mode,
+                    self.config.dependency_mode,
                     loader.dataset.keys_for_padding["label_ids"])
                 for batch in loader]
         return self.gather_metrics(sum_metrics(metrics))

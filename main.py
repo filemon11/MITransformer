@@ -5,12 +5,22 @@ from data import (load_dataset, dataset_details_full, DatasetDictTrain,
                   dataset_details_full_memmaped)
 from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
                      Metric, MetricWriter)
+from params import Params
+
+from hyperopt import hyperopt
 import pandas as pd
 import os.path
 import sys
-from logmaker import getLogger, basicConfig, INFO, info
+from contextlib import contextmanager
+from dataclasses import dataclass
+import argparse
+from ast import literal_eval as make_tuple
 
-from typing import Literal, Any, Iterable, cast
+
+from logmaker import getLogger, info, logging_config, get_timestr
+
+from typing import (
+    Literal, Any, Iterable, cast, Iterator, Type, TypeVar, Generic)
 
 logger = getLogger(__name__)
 
@@ -18,207 +28,110 @@ logger = getLogger(__name__)
 torch.manual_seed(42)
 
 
-def train(rank: int | None, world_size: int, n_workers: int,
-          mode: Literal["standard", "input", "supervised"], dataset_name: str):
-    # device: where to execute computation
-    loss_alpha: float | None
-    if mode == "supervised":
-        loss_alpha = 0.5
-    else:
-        loss_alpha = None
-    if world_size > 1:
-        assert rank is not None
-        device = rank % torch.cuda.device_count()
-    else:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    train_config = TrainConfig(
-        batch_size=40,
-        eval_interval=1,
-        abort_after=5,
-        epochs=100,
-        learning_rate=1e-3,
-        mode=mode,
-        loss_alpha=loss_alpha,
-        model_name="experiment",
-        arc_loss_weighted=False,
-        device=device,
-        rank=rank,
-        world_size=world_size,
-        n_workers=n_workers
-        )
+T = TypeVar("T")
 
-    # dropout rate (variable p) fquit(or dropout units
-    dropout = 0.0002
-    n_embd = 500
-    block_size = 500
+class OptNone(Generic[T]):
+    def __init__(self, type: Type[T]):
+        self.type = type
+
+    def __call__(self, value: str) -> None | T:
+        if value.lower() == 'none':
+            return None
+        try:
+            return self.type(value)  # type: ignore
+        except TypeError:
+            raise Exception(
+                f"Constructor for {self.type} does not accept an argument")
+
+
+def make_device_str(string: str) -> str:
+    try:
+        return "cuda:" + str(int(string))
+    except ValueError:
+        return string
+
+
+"""
+TOOD:
+- establish dataset naming and loading by name
+- save loading config with dataset
+- if no name: save as Wikitext_1, _2 etc.
+- when loading look for all datasets in dataset folder
+and check if there is a config that fits;
+then load this dataset
+and if no, search for dataset having this name
+if no, search for preset datasets and load new
+if not, search on huggingface and parse and load new.
+"""
+
+
+def main_dataprep(args: "ParserArgs") -> None:
+    details = dataset_details_full[args.dataset_name]
+    details["dirs"] = details["dirs"][0:2]  # type: ignore
+    load_dataset(
+        details,
+        args.max_len_train,
+        args.max_len_eval_test,
+        args.vocab_size,
+        args.triangulate,
+        args.first_k,
+        args.first_k_eval_test,
+        args.connect_with_dummy,
+        args.connect_with_self)
+
+
+def main_train(
+        args: "TrainParserArgs",
+        world_size: int) -> None:
+    args.vocab_size = None
+    # device: where to execute computation
+    if world_size > 1:
+        assert args.rank is not None, "Rank cannot be None if word_size > 1."
+
+    train_config = TrainConfig.from_kwargs(
+        **args.to_dict())
 
     datasets: DatasetDictTrain
     # TODO: do this entirely in the load dataset method
     # load memmap
-    details = dataset_details_full_memmaped[dataset_name]
+    details = dataset_details_full_memmaped[args.dataset_name]
     details["memmaped"] = details["memmaped"][0:2]  # type: ignore
-    datasets = load_dataset(details,
-                            max_len_train=40,
-                            max_len_eval_test=40,
-                            vocab_size=50_000,
-                            triangulate=0,
-                            first_k=100_000,
-                            first_k_eval_test=None,
-                            connect_with_dummy=True,
-                            connect_with_self=False)
+    datasets = load_dataset(
+        details,
+        max_len_train=args.max_len_train,
+        max_len_eval_test=args.max_len_eval_test,
+        vocab_size=args.vocab_size,
+        triangulate=args.triangulate,
+        first_k=args.first_k,
+        first_k_eval_test=args.first_k_eval_test,
+        connect_with_dummy=args.connect_with_dummy,
+        connect_with_self=args.connect_with_self)
     assert isinstance(datasets, dict)
 
     # Model
-    transformer_description = ((("head", "child"), 1),)
     # 24 heads, one layer approximately matches CBR-RRN
-
     # TODO: Make this a proper config
-    transformer_config = MITransformerConfig(
-        transformer_description=transformer_description,
-        d_ff=4*n_embd,
-        attn_dropout=dropout,
-        resid_dropout=dropout,
-        dropout_ff=dropout,
-        embd_dropout=dropout,
-        block_size=block_size,
-        n_embd=n_embd,
-        dropout_embd=dropout,
-        vocab_size=datasets["token_mapper"].vocab_size,
-        overlay_causal=True, use_input_mask=(mode == "input"),
-        use_dual_fixed=True, bias=False,
-        use_lstm=False)
+    args.vocab_size = datasets["token_mapper"].vocab_size
+    transformer_config = MITransformerConfig.from_kwargs(
+        **args.to_dict(),
+        use_input_mask=(args.mode == "input"))
 
     trainer = LMTrainer.new(transformer_config, train_config)
     trainer.train(**datasets)
 
-    if rank is None or rank == 0:
+    if args.rank is None or args.rank == 0:
         generated = []
         for _ in range(20):
             generated.append(trainer.generate(datasets["token_mapper"]))
-        info(rank, logger, f"Generated model output sample: {generated}")
+        info(args.rank, logger, f"Generated model output sample: {generated}")
 
     del trainer
 
 
-def test_subset(batch_size: int = 100,
-                first_k: int | None = 1_000,
-                depth: int = 1,
-                width: int = 1,
-                stand: bool = False,
-                lstm: bool = False,
-                unr_bef: int = 0,
-                unr_aft: int = 0,
-                alpha: float = 1.0,
-                dropout: float = 0.0,
-                lr: float = 1e-3,
-                n_embd=400,
-                datasets: DatasetDictTrain | None = None,
-                num_tries: int = 1,
-                device: str | None = None,
-                writer: MetricWriter | None = None
-                ) -> dict[str, dict[str, Any]]:
-    info_dict = dict(
-        alpha=alpha,
-        batch_size=batch_size,
-        sentences=first_k,
-        depth=depth,
-        width=width,
-        stand=stand,
-        lstm=lstm,
-        unr_bef=unr_bef,
-        unr_aft=unr_aft,
-        n_embd=n_embd,
-        learning_rate=lr,
-        dropout=dropout,
-    )
-
-    metrics_tries: list[tuple[Metric, ...]] = []
-
-    for _ in range(num_tries):
-        layer_design = (("head", "child", "standard")
-                        if stand else ("head", "child"))
-        n_embd = int(n_embd // (len(layer_design)*width)
-                     // 2 * len(layer_design)*width * 2)
-        block_size = 500
-        core = tuple([(layer_design, width)
-                      ] * depth)
-        before = tuple([(("standard",), len(layer_design)*width)
-                        ] * unr_bef)
-        after = tuple([(("standard",), len(layer_design)*width)
-                       ] * unr_aft)
-        transformer_description = before + core + after
-
-        train_config = TrainConfig(
-            batch_size=batch_size,
-            eval_interval=5,
-            abort_after=3,
-            epochs=100,
-            learning_rate=lr,
-            mode="supervised",
-            loss_alpha=alpha,
-            model_name="experiment",
-            arc_loss_weighted=False,
-            device=device if device is not None else (
-                "cuda" if torch.cuda.is_available() else "cpu"),
-            rank=0,
-            world_size=1,
-            n_workers=0
-            )
-
-        if datasets is None:
-            ds_det = dataset_details_full["Wikitext"]
-            ds_det["dirs"] = ds_det["dirs"][0:2]  # type: ignore
-            datasets = load_dataset(ds_det,
-                                    max_len_train=40,
-                                    max_len_eval_test=40,
-                                    vocab_size=50_000,
-                                    first_k=first_k,
-                                    first_k_eval_test=None,
-                                    triangulate=0,
-                                    connect_with_dummy=True,
-                                    connect_with_self=False)
-
-        transformer_config = MITransformerConfig(
-            transformer_description=transformer_description,
-            d_ff=4*n_embd,
-            attn_dropout=dropout,
-            resid_dropout=dropout,
-            dropout_ff=dropout,
-            embd_dropout=dropout,
-            block_size=block_size,
-            n_embd=n_embd,
-            dropout_embd=dropout,
-            vocab_size=datasets["token_mapper"].vocab_size,
-            overlay_causal=True, use_input_mask=False,
-            use_dual_fixed=False, bias=False,
-            use_lstm=lstm)
-
-        # Experiments
-        trainer = LMTrainer.new(transformer_config, train_config)
-        metrics = trainer.train(**datasets)
-        metrics_tries.append(metrics)
-
-        del trainer
-
-    metrics_mean: list[Metric] = []
-    for split_metrics in zip(*metrics_tries):
-        summed = split_metrics[0]
-        for m in split_metrics[1:]:
-            summed = summed + m
-        metrics_mean.append(summed)
-
-    if writer is not None:
-        writer.add_params(
-            info_dict,
-            metrics_mean[1])
-
-    metric_dicts: dict[str, dict[str, Any]] = {}
-    for d, s in zip([cast(dict[str, Any], metric.to_dict())
-                     for metric in metrics_mean],
-                    ("train", "eval", "test")):
-        d["split"] = s
-        metric_dicts[s] = d | info_dict
-    return metric_dicts
+def main_hyperopt(args: "HyperoptParserArgs",
+                  world_size: int) -> None:
+    hyperopt(args.rank, world_size, args.objective,
+             10, args.dataset_name, args.n_trials)
 
 
 def options(seq_of_items: list[tuple[str, Iterable[Any]]]
@@ -233,96 +146,16 @@ def options(seq_of_items: list[tuple[str, Iterable[Any]]]
                 yield d
 
 
-def test_multiple(result_file: str = "./resultsUAS.csv",
-                  tries: int = 3,
-                  max_evals: int = 50,
-                  objective_col: str = "uas",
-                  device: str | None = None):
-    # TODO: make usable with DDP
-    sent_num_and_bs = [(100_000, 256)]
-    params = dict(
-        depth=[1],
-        width=[1],
-        stand=[False],
-        lstm=[True],
-        unr_bef=[0],
-        unr_aft=[0],
-        alpha=[0.0]
-    )
-    hyperopt_params = dict(
-        n_embd=hp.quniform("n_embd", 300, 600, q=100),
-        lr=hp.uniform("lr", 1e-5, 1e-2),
-        dropout=hp.quniform("dropout", 0, 0.6, q=0.1)
-    )
-    objective_maximize = (False if objective_col in ("perplexity", "loss",
-                                                     "arc_loss", "lm_loss")
-                          else True)
-    factor = -1 if objective_maximize else 1
-
-    for sent_num, batch_size in sent_num_and_bs:
-        ds_det = dataset_details_full["Wikitext"]
-        ds_det["dirs"] = ds_det["dirs"][0:2]  # type: ignore
-        # TODO: remove restriction 40 for eval; restrict at 500
-        # -> switch from uint8 to uint16 for memmap
-        datasets = load_dataset(ds_det,
-                                max_len_train=40,
-                                max_len_eval_test=40,
-                                vocab_size=50_000,
-                                first_k=sent_num,
-                                first_k_eval_test=None,
-                                triangulate=0,
-                                connect_with_dummy=True,
-                                connect_with_self=False)
-
-        for kwargs in options(list(params.items())):  # type: ignore
-            writer = MetricWriter()
-
-            def objective(hyperopt_params):
-                d = test_subset(
-                    batch_size=batch_size,
-                    first_k=sent_num,
-                    datasets=datasets,
-                    num_tries=tries,
-                    device=device,
-                    writer=writer,
-                    **kwargs,
-                    **hyperopt_params)
-                return {"loss": factor*d["eval"][objective_col],
-                        "attachments": d,
-                        'status': STATUS_OK}
-
-            trials = Trials()
-            fmin(
-                objective,
-                space=hyperopt_params,
-                algo=tpe.suggest,
-                max_evals=max_evals,
-                trials=trials)
-            writer.flush()
-
-            old_df = (pd.read_csv(result_file) if os.path.exists(result_file)
-                      else pd.DataFrame())
-            tid = trials.best_trial["tid"]  # type: ignore
-            pd.concat([
-                old_df,
-                pd.DataFrame([trials.attachments[f"ATTACH::{tid}::train"],
-                              trials.attachments[f"ATTACH::{tid}::eval"]])
-                ]).to_csv(
-                    result_file, index=False,
-                    mode="w")
-            writer.close()
-
-
-def setup_ddp(rank, world_size) -> tuple[bool, int | None]:
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '65035'
+def setup_ddp(rank, world_size) -> bool:
     if world_size > 1:
-        print("initialising process", world_size, rank)
+        info(rank, logger,
+             ("Initialising process with world_size "
+              f"{world_size} and rank {rank}."))
         dist.init_process_group("nccl", world_size=world_size, rank=rank)
         torch.cuda.set_device(torch.distributed.get_rank())
-        return True, torch.distributed.get_rank()
+        return True
     else:
-        return False, None
+        return False
 
 
 def clean_ddp(world_size) -> None:
@@ -330,54 +163,291 @@ def clean_ddp(world_size) -> None:
         dist.destroy_process_group()
 
 
-def main(rank, n_devices) -> None:
-    use_ddp, rank = setup_ddp(rank, n_devices)
-    mode = sys.argv[2]
-    n_workers = int(sys.argv[3])
-    if mode == "train":
-        info(rank, logger, "Launching model training.")
-        train(rank, n_devices, n_workers, "supervised", "Wikitext",)
-    else:
-        info(rank, logger, "Launching hyperparameter tuning.")
-        test_multiple()
+@contextmanager
+def ddp(rank: int | None, world_size: int) -> Iterator[bool]:
+    try:
+        yield setup_ddp(rank, world_size)
+    finally:
+        clean_ddp(world_size)
 
-    clean_ddp(n_devices)
+
+def main(args: "ParserArgs") -> None:
+    if args.mode == "dataprep":
+        main_dataprep(args)
+    else:
+        n_devices = torch.cuda.device_count() if args.use_ddp else 1
+        info(None, logger, f"Running on {n_devices} devices.")
+        with ddp(args.rank, n_devices) as ddp_status:
+            info(args.rank, logger, f"Using DDP: {ddp_status}")
+            mode = args.mode
+            if mode == "train":
+                assert isinstance(args, TrainParserArgs)
+                info(args.rank, logger, "Launching model training.")
+                main_train(args, n_devices)
+            else:
+                assert isinstance(args, HyperoptParserArgs)
+                info(args.rank, logger, "Launching hyperparameter tuning.")
+                main_hyperopt()
+
+
+@dataclass
+class ParserArgs(Params):
+    mode: Literal["train", "hyperopt"]
+    rank: int | None
+    n_workers: int
+    name: str
+    device: str
+    use_ddp: bool
+    dataset_name: str
+    max_len_train: None | int
+    max_len_eval_test: None | int
+    vocab_size: int
+    triangulate: bool
+    first_k: int | None
+    first_k_eval_test: int | None
+    connect_with_dummy: bool
+    connect_with_self: bool
+
+
+@dataclass
+class TrainParserArgs(ParserArgs):
+    dependency_mode: Literal["supervised", "input", "standard"]
+    batch_size: int
+    eval_interval: int
+    abort_after: int | None
+    epochs: int
+    learning_rate: float
+    loss_alpha: float | None
+    arc_loss_weighted: bool
+
+    transformer_description: str
+    d_ff: int
+    dropout: float | None
+    dropout_attn: float | None
+    dropout_resid: float | None
+    dropout_ff: float | None
+    dropout_embd: float | None
+    dropout_lstm: float | None
+    block_size: int
+    n_embd: int
+    overlay_causal: bool
+    use_dual_fixed: bool
+    bias: bool
+
+
+@dataclass
+class HyperoptParserArgs(ParserArgs):
+    pass
+
+
+@dataclass
+class DataprepParserArgs(ParserArgs):
+    pass
+
+
+def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--rank', '--local-rank', type=OptNone(int), default=None,
+        help="which rank this process runs on; set by torchrun.")
+    parser.add_argument(
+        '--n_workers', type=OptNone(int), default=None,
+        help="number of workers for the dataloader")
+    parser.add_argument(
+        '--name', type=str,
+        default=get_timestr(),
+        help="experiment name. Defaults to current time")
+    parser.add_argument(
+        '--device', type=str,
+        default="cuda" if torch.cuda.is_available() else "cpu",
+        help="device to run models on; must be 'cuda' if --use_ddp is set"
+    )
+    parser.add_argument(
+        '--use_ddp', type=bool, default=torch.cuda.device_count() > 1,
+        help="whether to use distributed GPU training"
+    )
+
+    # Data parser group
+    data_group = parser.add_argument_group('data')
+    data_group.add_argument(
+        '--dataset_name', type=str, help='name of the dataset to load',
+        default='Wikitext')
+    data_group.add_argument(
+        '--max_len_train', type=OptNone(int), default=40,
+        help='maximum number of tokens in training set')
+    data_group.add_argument(
+        '--max_len_eval_test', type=OptNone(int), default=None,
+        help='maximum number of tokens in eval set')
+    data_group.add_argument(
+        '--triangulate', type=bool, default=True,
+        help='TODO')
+    data_group.add_argument(
+        '--vocab_size', type=OptNone(int), default=50_000,
+        help=('number of most frequent tokens to embed; all other '
+              'tokens are replaced with an UNK token'))
+    data_group.add_argument(
+        '--first_k', type=OptNone(int), default=None,
+        help='only load first k sentences of the training set')
+    data_group.add_argument(
+        '--first_k_eval_test', type=OptNone(int), default=None,
+        help='only load first k sentences of the eval and test sets')
+    data_group.add_argument(
+        '--connect_with_dummy', type=bool, default=True,
+        help=('Establish an arc to a dummy token when there is no '
+              'parent/child among the precedents?'))
+    data_group.add_argument(
+        '--connect_with_self', type=bool, default=False,
+        help=('Establish a recursive arc to the token itself when there '
+              'is not parent/child among the precedents?'))
+
+    # Subparsers
+    # # Training Parser
+    subparsers = parser.add_subparsers(dest="mode")
+    train_parser = subparsers.add_parser(
+        "train", help="training mode")
+
+    # # # Trainer parser group
+    trainer_group = train_parser.add_argument_group('trainer')
+    trainer_group.add_argument(
+        '--dependency_mode', type=str,
+        choices=("supervised", "input", "standard"),
+        default="supervised",
+        help="how to use dependency information")
+    trainer_group.add_argument(
+        '--batch_size', type=int, default=32,
+        help=("batch size; in case of multiple GPUs it is"
+              "chunked across the devices"))
+    trainer_group.add_argument(
+        '--eval_interval', type=int,
+        default=1, help="frequency to perform evaluations in")
+    trainer_group.add_argument(
+        '--abort_after', type=OptNone(int), default=None,
+        help=("abort training after x evaluations without"
+              "improvement on the eval score"))
+    trainer_group.add_argument(
+        '--epochs', type=int, default=100,
+        help="how many epochs to train for")
+    trainer_group.add_argument(
+        '--learning_rate', type=float, default=1e-3,
+        help="learning rate for the optimiser")
+    trainer_group.add_argument(
+        '--loss_alpha', type=OptNone(float), default=0.5,
+        help=("loss weight for supervised learning; 1.0 is only"
+              "language model training while 0.0 is only arc training"))
+    trainer_group.add_argument(
+        '--arc_loss_weighted', type=bool, default=False,
+        help="Overrepresent arcs against non-arcs in arc loss calculation")
+
+    # # # Model parser group
+    model_group = train_parser.add_argument_group('model')
+    model_group.add_argument(
+        '--transformer_description',
+        type=str, default="((('head', 'child'), 1),)",
+        help=("Architecture of the transformer model. Tuple of layers "
+              "where each layer is a tuple of a tuple of "
+              "head types and a width."
+              "The width is applied to every head type in the layer."))
+    model_group.add_argument(
+        '--d_ff', type=int, default=2000,
+        help="hidden dimensionality of the feed-forward layers")
+    model_group.add_argument(
+        '--dropout', type=OptNone(float), default=0.3,
+        help=("hidden dimensionality of the feed-forward layers; "
+              "can be further specified by additional dropout params"))
+    model_group.add_argument(
+        '--dropout_attn', type=OptNone(float), default=-1,
+        help=("dropout for the attention module; "
+              "overridden by --dropout if set to -1"))
+    model_group.add_argument(
+        '--dropout_resid', type=OptNone(float), default=-1,
+        help=("dropout for the residual connections; "
+              "overridden by --dropout if set to -1"))
+    model_group.add_argument(
+        '--dropout_ff', type=OptNone(float), default=-1,
+        help=("dropout for the feed-forward layers; "
+              "overridden by --dropout if set to -1"))
+    model_group.add_argument(
+        '--dropout_embd', type=OptNone(float), default=-1,
+        help=("dropout for the embedding layer; "
+              "overridden by --dropout if set to -1"))
+    model_group.add_argument(
+        '--dropout_lstm', type=OptNone(float), default=-1,
+        help=("dropout for the LSTM (if existant); "
+              "overridden by --dropout if set to -1"))
+    model_group.add_argument(
+        '--block_size', type=int, default=500,
+        help="maximum sequence length of the model")
+    model_group.add_argument(
+        '--n_embd', type=int, default=500,
+        help="model embedding size")
+    model_group.add_argument(
+        '--overlay_causal', type=bool, default=True,
+        help=("whether to overlay a casual mask if providing"
+              "masks as additional inputs"))
+    model_group.add_argument(
+        '--use_dual_fixed', type=bool, default=False,
+        help=("whether to cross-fix key and query weights of "
+              "the head and child attention heads. Only allowed "
+              "if both are present in the description with width 1"))
+    model_group.add_argument(
+        '--bias', type=bool, default=False,
+        help="Whether to use bias in all of the model weights")
+
+    # # Hyperopt Parser
+    hyperopt = subparsers.add_parser(
+        "hyperopt", help="hyperopt mode")
+
+    # # Dataprep Parser
+    dataprep = subparsers.add_parser(
+        "dataprep", help="dataprep mode")
+
+    args = parser.parse_args()
+    match args.mode:
+        case "train":
+            return TrainParserArgs(**vars(args))
+        case "hyperopt":
+            return HyperoptParserArgs(**vars(args))
+        case _:
+            return DataprepParserArgs(**vars(args))
 
 
 if __name__ == "__main__":
-    basicConfig(stream=sys.stdout, level=INFO)
+    args: TrainParserArgs | HyperoptParserArgs | DataprepParserArgs
+    args = parse_args()
+    logging_config(logname=args.name)
+    # logging_config(
+    #     logname="log",
+    #     logpath=os.path.join(LMTrainer.model_dir, name))
+    #  TODO: save trainer and model log in model dir
+    #  but general and hyperopt log in normal logdir
 
     # tokenise dataset
     # TODO: do this automatically
     # problem: cannot do in parallel and
     # therefore leads to timeout when doing
     # on only one rank.
-    print(sys.argv)
-    if sys.argv[1] == "dataprep":
-        details = dataset_details_full["Wikitext"]
-        details["dirs"] = details["dirs"][0:2]  # type: ignore
-        datasets = load_dataset(details,
-                                max_len_train=40,
-                                max_len_eval_test=40,
-                                vocab_size=50_000,
-                                triangulate=0,
-                                first_k=100_000,
-                                first_k_eval_test=None,
-                                connect_with_dummy=True,
-                                connect_with_self=False)
-        raise Exception
 
-    n_devices = torch.cuda.device_count()
-    info(None, logger, f"Recognised {n_devices} CUDA devices.")
+    args.device = make_device_str(args.device)
 
-    if n_devices > 1:
-        info(None, logger,
-             f"Running {n_devices} processes with multiprocessing module.")
-        main(int(sys.argv[1].split("=")[-1]), n_devices)
-    else:
-        info(None, logger,
-             "Running one process without multiprocessing module.")
-        main(None, n_devices)
+    if isinstance(args, TrainParserArgs):
+        # parse transformer description
+        args.transformer_description = make_tuple(args.transformer_description)
+
+        # override dropout that was not set specifically
+        for specific_dropout in ("dropout_attn", "dropout_resid",
+                                 "dropout_ff", "dropout_embd",
+                                 "dropout_lstm"):
+            if getattr(args, specific_dropout) == -1:
+                setattr(args, specific_dropout, args.dropout)
+
+    # Some checks
+    assert not (args.use_ddp and args.device == "cpu"), (
+        "Must set --device to a GPU when setting --use_ddp. "
+        f"Received --device {args.device}, --use_ddp {args.use_ddp}"
+    )
+
+    info(None, logger, f"Arguments provided: {str(sys.argv)}")
+    main(args)
     # if n_devices > 1:
     #     mp.spawn(main, args=(n_devices,), nprocs=n_devices)  # type: ignore
     # else:
