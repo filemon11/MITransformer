@@ -284,7 +284,8 @@ class Objective:
 
         args = TrainParserArgs.from_kwargs(**{
             name: hyperopt_args_sampler(name, arg, trial) for
-            name, arg in self.args.to_dict().items()})
+            name, arg in self.args.to_dict().items()},
+            model_name=f"{self.args.name}_{trial.number}")
         args_logic(args)
 
         train_iterator = main_train(
@@ -435,6 +436,7 @@ class ParserArgs(Params):
 
 @dataclass
 class TrainParserArgs(ParserArgs):
+    model_name: str
     dependency_mode: Literal["supervised", "input", "standard"]
     batch_size: int
     eval_interval: int
@@ -576,6 +578,10 @@ def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
 
     # # # Trainer parser group
     trainer_group = train_parser.add_argument_group('trainer')
+    trainer_group.add_argument(
+        '--mode_name', type=OptNone(str),
+        default=None,
+        help="model name. Set to experiment name if None")
     trainer_group.add_argument(
         '--dependency_mode', type=str,
         choices=("supervised", "input", "standard"),
@@ -869,6 +875,9 @@ def args_logic(args: TrainParserArgs | HyperoptParserArgs | DataprepParserArgs
                                  "dropout_lstm"):
             if getattr(args, specific_dropout) == -1:
                 setattr(args, specific_dropout, args.dropout)
+
+        if args.model_name is None:
+            args.model_name = args.experiment_name
 
 
 if __name__ == "__main__":

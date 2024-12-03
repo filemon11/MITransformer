@@ -722,6 +722,9 @@ class LMTrainer():
         eval_interval = train_config.eval_interval
 
         self.transformerlm.train()
+
+        best: float | Metric = math.inf
+        evals_without_improvement: int = 0
         for epoch in range(1, train_config.epochs+1):
             info(self.config.rank,
                  logger, f"Epoch: {epoch}/{train_config.epochs}")
@@ -737,7 +740,29 @@ class LMTrainer():
 
                 self.transformerlm.train()
 
+                if eval_metric > best:       # greater means better
+                    best = eval_metric
+                    self.save()
+                    info(self.config.rank, logger,
+                         "Saving model at epoch "
+                         f"{epoch}...")
+                    evals_without_improvement = 0
+                else:
+                    evals_without_improvement += 1
+
                 yield train_metric, eval_metric
+
+                abort_after = train_config.abort_after
+                early_stop = (abort_after is not None
+                              and abort_after <= evals_without_improvement)
+                early_stop = sum(self.gather_ddp(early_stop)) > 0
+
+                if early_stop:
+                    no_change_epochs = (evals_without_improvement
+                                        * train_config.eval_interval)
+                    info(self.config.rank, logger,
+                         f"Aborting training after {no_change_epochs} epochs.")
+                    break
 
     def train(self,
               train: DepDataset[IDSen] | DataLoader,
@@ -752,35 +777,8 @@ class LMTrainer():
         train = self.get_loader(train)
         eval = self.get_loader(eval)
 
-        best: float | Metric = math.inf
-        evals_without_improvement: int = 0
-
-        epoch = 0
-        for eval_step, (_, eval_metric) in enumerate(
-                self.train_iter(train, eval, **kwargs),
-                start=1):
-            epoch = eval_step*train_config.eval_interval
-            if eval_metric > best:       # greater means better
-                best = eval_metric
-                self.save()
-                info(self.config.rank, logger,
-                     "Saving model at epoch "
-                     f"{epoch}...")
-                evals_without_improvement = 0
-            else:
-                evals_without_improvement += 1
-
-            abort_after = train_config.abort_after
-            early_stop = (abort_after is not None
-                          and abort_after <= evals_without_improvement)
-            early_stop = sum(self.gather_ddp(early_stop)) > 0
-
-            if early_stop:
-                no_change_epochs = (evals_without_improvement
-                                    * train_config.eval_interval)
-                info(self.config.rank, logger,
-                     f"Aborting training after {no_change_epochs} epochs.")
-                break
+        for _ in self.train_iter(train, eval, **kwargs):
+            pass
         # If eval interval is larger than number of epochs
         epoch = train_config.epochs
 
