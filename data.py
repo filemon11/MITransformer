@@ -192,7 +192,7 @@ def transform_combined(
 
 class CoNNLUDict(TypedDict):
     tokens: list[list[str]]
-    heads: list[npt.NDArray[np.int8]]  # max 127 sequence length
+    heads: list[npt.NDArray[np.uint8]]  # max 127 sequence length
     space_after: NotRequired[list[npt.NDArray[np.bool_]]]
 
 
@@ -201,8 +201,8 @@ class MaskedSentence(TypedDict):
 
 
 class IDDict(TypedDict):
-    input_ids: npt.NDArray[np.uint16]
-    label_ids: npt.NDArray[np.uint16]
+    input_ids: npt.NDArray[np.int16]
+    label_ids: npt.NDArray[np.int16]
 
 
 class CoNNLUSentence(MaskedSentence):
@@ -289,7 +289,7 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
         self.mapped: bool = False
 
         self.tokens: list[list[str]] = data["tokens"]
-        self.heads: list[npt.NDArray[np.int8]] = data["heads"]
+        self.heads: list[npt.NDArray[np.uint8]] = data["heads"]
         self.space_after: list[npt.NDArray[np.bool_]] | None
         self.space_after = data.get("space_after", None)
 
@@ -365,7 +365,7 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
         sentence: list[str] = self.tokens[idx][:-1]
         label: list[str] = self.tokens[idx][1:]
 
-        heads: npt.NDArray[np.int16] = self.heads[idx]      # is not output
+        heads: npt.NDArray[np.uint8] = self.heads[idx]      # is not output
         masks: dict[str, npt.NDArray[np.bool_] | None] = dict()
         if self.transform_mask is not None:
             masks.update(
@@ -442,7 +442,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
 
     @property
     def sentences(self) -> Iterator[tuple[list[str],
-                                    npt.NDArray[np.int8]]]:
+                                    npt.NDArray[np.uint8]]]:
         assert self.file is not None
         return (self.get_sentence(tl) for tl in load_conllu(
             self.file,
@@ -458,7 +458,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
             first_k=self.first_k))
 
     @property
-    def heads(self) -> Iterator[npt.NDArray[np.int8]]:
+    def heads(self) -> Iterator[npt.NDArray[np.uint8]]:
         assert self.file is not None
         return (get_head_list(tl) for tl in load_conllu(
             self.file,
@@ -468,7 +468,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
     @staticmethod
     def get_sentence(
             tokenlist: conllu.TokenList
-            ) -> tuple[list[str], npt.NDArray[np.int8]]:
+            ) -> tuple[list[str], npt.NDArray[np.uint8]]:
         return get_tokens(tokenlist), get_head_list(tokenlist)
 
     @classmethod
@@ -524,7 +524,6 @@ class MemMapDataset(DepDataset[EssentialSentence]):
         # creates mask dynamically
         assert self.id_hl is not None
         ids, heads = self.id_hl[idx]
-
         masks: dict[str, npt.NDArray[np.bool_] | None] = dict()
         if self.transform_mask is not None:
             masks.update(
@@ -548,7 +547,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
     def map_to_ids(self, token_mapper: TokenMapper, memdir: str) -> None:
         assert self.file is not None
         id_head_list_generator = (np.stack((
-            np.array(token_mapper([tokens])[0], dtype=np.uint16),
+            np.array(token_mapper([tokens])[0], dtype=np.int16),
             headlist))
             for tokens, headlist in self.sentences)
 
@@ -655,7 +654,7 @@ class MemMapWindowDataset(MemMapDataset):
 
         i = self.max_len * idx
         data = np.memmap(self.memdir,
-                         dtype=np.uint16,
+                         dtype=np.int16,
                          mode='r',
                          shape=(self.arr_len, 2))   # type: ignore
         ids = np.concat(
@@ -702,7 +701,7 @@ class MemMapWindowDataset(MemMapDataset):
             arr_len += len(tokens)
         self.arr_len = arr_len
 
-        arr = np.memmap(memdir, dtype=np.uint16, mode='w+', shape=(arr_len, 2))
+        arr = np.memmap(memdir, dtype=np.int16, mode='w+', shape=(arr_len, 2))
 
         idx = 0
         for tokens, headlist in self.sentences:
@@ -710,7 +709,7 @@ class MemMapWindowDataset(MemMapDataset):
                 len(headlist))[headlist == 0] + 1
             headlist -= np.arange(headlist.shape[-1]) + 1
             arr[idx:idx+len(tokens), 0] = np.array(token_mapper([tokens])[0],
-                                                   dtype=np.uint16)
+                                                   dtype=np.int16)
             arr[idx:idx+len(tokens), 1] = headlist
             idx += len(tokens)
         arr.flush()
@@ -729,12 +728,12 @@ class MemMapWindowDataset(MemMapDataset):
     @staticmethod
     def get_sentence(
             tokenlist: conllu.TokenList
-            ) -> tuple[list[str], npt.NDArray[np.int8]]:
+            ) -> tuple[list[str], npt.NDArray[np.uint8]]:
         return get_tokens(tokenlist, False), get_head_list(tokenlist, False)
 
     @property
     def sentences(self) -> Iterator[tuple[list[str],
-                                    npt.NDArray[np.int8]]]:
+                                    npt.NDArray[np.uint8]]]:
         assert self.file is not None
         return (self.get_sentence(tl) for tl in load_conllu(self.file,
                                                             self.max_len//10,
@@ -748,7 +747,7 @@ class MemMapWindowDataset(MemMapDataset):
                                                             self.first_k))
 
     @property
-    def heads(self) -> Iterator[npt.NDArray[np.int8]]:
+    def heads(self) -> Iterator[npt.NDArray[np.uint8]]:
         assert self.file is not None
         return (get_head_list(tl, False) for tl in load_conllu(self.file,
                                                                self.max_len,
@@ -880,7 +879,7 @@ class Collate(CollateBase):
             for key in keys_to_torch:
                 if isinstance(dictionary[key], np.ndarray):
                     dictionary[key] = torch.from_numpy(
-                        dictionary[key])
+                        dictionary[key].astype(np.int64))
 
                 elif isinstance(dictionary[key], dict):
                     dict_to_torch(dictionary[key], set(dictionary[key].keys()))
@@ -894,11 +893,11 @@ class Collate(CollateBase):
 
                     if isinstance(dictionary[key][0], np.ndarray):
                         dictionary[key] = torch.from_numpy(
-                            np.stack(dictionary[key]))
+                            np.stack(dictionary[key]).astype(np.int64))
 
                     else:
                         dictionary[key] = torch.from_numpy(
-                            np.array(dictionary[key]))
+                            np.array(dictionary[key]).astype(np.int64))
 
         output_dict: dict[str, Any] = dict(output)
         dict_to_torch(output_dict, self.keys_to_torch)
@@ -1090,7 +1089,7 @@ def get_tokens(tokenlist: conllu.TokenList,
 
 
 def get_head_list(tokenlist: conllu.TokenList,
-                  add_dummy_and_root: bool = True) -> npt.NDArray[np.int8]:
+                  add_dummy_and_root: bool = True) -> npt.NDArray[np.uint8]:
     heads = [0, 0] if add_dummy_and_root else []
     heads.extend(
         token["head"]+(1 if add_dummy_and_root else 0) if token["head"]
@@ -1098,7 +1097,7 @@ def get_head_list(tokenlist: conllu.TokenList,
         for token in tokenlist)
     # 0 is already root; therefore add 1 because of dummy # +1
     heads.append(0+(1 if add_dummy_and_root else 0))  # (1)   # EOS token
-    return np.asarray(heads, dtype=np.int8)
+    return np.asarray(heads, dtype=np.uint8)
 
 
 def get_space_after(tokenlist: conllu.TokenList) -> npt.NDArray[np.bool_]:
@@ -1116,7 +1115,7 @@ def get_space_after(tokenlist: conllu.TokenList) -> npt.NDArray[np.bool_]:
 
 
 def head_list_to_adjacency_matrix(
-        headlist: Sequence[int] | npt.NDArray[np.int_],
+        headlist: Sequence[int] | npt.NDArray[np.uint],
         correct_underflow_overflow: bool = False,
         ) -> npt.NDArray[np.bool_]:
     sen_len = len(headlist)

@@ -413,7 +413,7 @@ class LMTrainer():
              ) -> torch.Tensor:
         logits = torch.swapaxes(logits, 1, 2)
         loss = F.cross_entropy(
-            logits, labels.to(torch.long),
+            logits, labels,
             ignore_index=ignore_index,
             reduction=reduction)
         return loss
@@ -713,7 +713,9 @@ class LMTrainer():
             **kwargs) -> Iterable[tuple[Metric, Metric]]:
         assert self.train_config is not None, "Config missing training params."
         assert self.train_config.batch_size <= len(train), (
-            "Batch size larger than dataset.")
+            "Batch size larger than dataset."
+            f"dataset size: {len(train)}, batch size: "
+            f"{self.train_config.batch_size}")
         train_config = self.train_config
         device = train_config.device
         assert device is not None
@@ -749,7 +751,9 @@ class LMTrainer():
                   Metric, Metric, Metric]:
         assert self.train_config is not None, "Config missing training params."
         assert self.train_config.batch_size <= len(train), (
-            "Batch size larger than dataset.")
+            "Batch size larger than dataset."
+            f"dataset size: {len(train)}, batch size: "
+            f"{self.train_config.batch_size}")
         train_config = self.train_config
         device = train_config.device
 
@@ -1036,7 +1040,7 @@ def select_true(preds: torch.Tensor,
     if ignore_index is not None:
         labels = labels.clone()
         labels[labels == ignore_index] = 0
-    return torch.gather(preds, -1, labels.to(torch.int64)).squeeze(-1)
+    return torch.gather(preds, -1, labels).squeeze(-1)
 
 
 def logits_to_probs(logits: torch.Tensor) -> torch.Tensor:

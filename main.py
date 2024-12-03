@@ -136,17 +136,18 @@ def _load_dataset(args: "ParserArgs", memmaped: bool = False
                   ) -> DatasetDictTrain:
     if memmaped:
         details = dataset_details_full_memmaped[args.dataset_name]
+        details["memmaped"] = details["memmaped"][0:2]  # type: ignore
     else:
         details = dataset_details_full[args.dataset_name]
-    details["dirs"] = details["dirs"][0:2]  # type: ignore
+        details["dirs"] = details["dirs"][0:2]  # type: ignore
     return load_dataset(
         details,
         args.max_len_train,
         args.max_len_eval_test,
         args.vocab_size,
-        args.triangulate,
         args.first_k,
         args.first_k_eval_test,
+        args.triangulate,
         args.connect_with_dummy,
         args.connect_with_self)
 
