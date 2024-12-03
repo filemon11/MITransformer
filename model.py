@@ -462,3 +462,22 @@ class MITransformerLM(nn.Module):
             input_ids = torch.cat([input_ids, input_ids_next], dim=-1)
             # shape (B, T+1)
         return input_ids
+
+
+def description_builder(
+        layer_design: tuple[str, ...] = ("head", "child"),
+        use_standard: bool = False,
+        width: int = 1,
+        depth: int = 1,
+        unrestricted_before: int = 0,
+        unrestricted_after: int = 0
+        ):
+    if use_standard:
+        layer_design += ("standard",)
+    core = tuple([(layer_design, width)
+                  ] * depth)
+    before = tuple([(("standard",), len(layer_design)*width)
+                    ] * unrestricted_before)
+    after = tuple([(("standard",), len(layer_design)*width)
+                   ] * unrestricted_after)
+    return before + core + after
