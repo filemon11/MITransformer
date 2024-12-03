@@ -196,6 +196,9 @@ def main_train(
             args.unrestricted_before,
             args.unrestricted_after
         )
+    # make n_embd divisible by number of heads
+    n_heads = len(args.transformer_description[0][0])
+    args.n_embd = args.n_embd // n_heads * n_heads
 
     transformer_config = MITransformerConfig.from_kwargs(
         **args.to_dict(),
@@ -323,6 +326,7 @@ def main_hyperopt(args: "HyperoptParserArgs",
         objective: Objective = Objective(world_size, args, writer)
         if args.rank == 0 or args.rank is None:
             study = optuna.create_study(
+                study_name=args.name,
                 direction=direction,
                 sampler=optuna.samplers.RandomSampler(
                     seed=seed),  # TODO: normal sampler
@@ -453,7 +457,7 @@ class TrainParserArgs(ParserArgs):
     depth: int
     unrestricted_before: int
     unrestricted_after: int
-    d_ff: int
+    d_ff_factor: int
     dropout: float | None
     dropout_attn: float | None
     dropout_resid: float | None
@@ -495,7 +499,7 @@ class HyperoptParserArgs(ParserArgs):
     depth: int | tuple[int, int] | list[int]
     unrestricted_before: int | tuple[int, int] | list[int]
     unrestricted_after: int | tuple[int, int] | list[int]
-    d_ff: int | tuple[int, int] | list[int]
+    d_ff_factor: int | tuple[int, int] | list[int]
     dropout: float | tuple[int, int] | list[int | None] | None
     dropout_attn: float | tuple[int, int] | list[int | None] | None
     dropout_resid: float | tuple[int, int] | list[int | None] | None
@@ -653,8 +657,8 @@ def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
         help=("number of unrestricted layers above the core transformer; "
               "is overriden if --transformer_description is provided"))
     model_group.add_argument(
-        '--d_ff', type=int, default=2000,
-        help="hidden dimensionality of the feed-forward layers")
+        '--d_ff_factor', type=int, default=4,
+        help="hidden dimensionality of the feed-forward layers (*n_embd)")
     model_group.add_argument(
         '--dropout', type=OptNone(float), default=0.3,
         help=("hidden dimensionality of the feed-forward layers; "
@@ -809,8 +813,8 @@ def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
         help=("number of unrestricted layers above the core transformer; "
               "is overriden if --transformer_description is provided"))
     hyperopt_flexbile_model_group.add_argument(
-        '--d_ff', type=HyperoptSpace(int), default=2000,
-        help="hidden dimensionality of the feed-forward layers")
+        '--d_ff_factor', type=HyperoptSpace(int), default=4,
+        help="hidden dimensionality of the feed-forward layers (*n_embd)")
     hyperopt_flexbile_model_group.add_argument(
         '--dropout', type=HyperoptSpace(OptNone(float)), default=0.3,
         help=("hidden dimensionality of the feed-forward layers; "

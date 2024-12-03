@@ -93,12 +93,12 @@ class Encoder(nn.Module):
 
 
 class FeedForward(nn.Module):
-    def __init__(self, n_embd, d_ff, dropout, bias: bool = True):
+    def __init__(self, n_embd, d_ff_factor, dropout, bias: bool = True):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(n_embd, d_ff, bias=bias),
+            nn.Linear(n_embd, d_ff_factor*n_embd, bias=bias),
             nn.GELU(),
-            nn.Linear(d_ff, n_embd, bias=bias),
+            nn.Linear(d_ff_factor*n_embd, n_embd, bias=bias),
             nn.Dropout(dropout)
         )
 
@@ -254,7 +254,7 @@ class MILayer(nn.Module):
 
     def __init__(
             self, n_embd, layer_description: LayerDescription,
-            d_ff, block_size, attn_dropout, resid_dropout,
+            d_ff_factor, block_size, attn_dropout, resid_dropout,
             dropout_ff, overlay_causal: bool = False,
             use_dual_fixed: bool = False, bias: bool = False):
         # n_embd: embedding dimensionType[DependencyMultiHeadAttention]
@@ -267,7 +267,7 @@ class MILayer(nn.Module):
                                 resid_dropout, overlay_causal,
                                 use_dual_fixed)
         self.ln_2 = nn.LayerNorm(n_embd, bias=bias)
-        self.ff = FeedForward(n_embd, d_ff, dropout_ff, bias)
+        self.ff = FeedForward(n_embd, d_ff_factor, dropout_ff, bias)
 
     def forward(
             self,
@@ -291,7 +291,7 @@ TransformerDescription = tuple[LayerDescription, ...]
 @dataclass
 class MITransformerConfig(Params):
     transformer_description: TransformerDescription = ((("head", "child"), 1),)
-    d_ff: int = 400*4
+    d_ff_factor: int = 4
     dropout_attn: float = 0.3
     dropout_resid: float = 0.3
     dropout_ff: float = 0.3
@@ -315,7 +315,7 @@ class MITransformer(nn.Module):
         transformer_description = config.transformer_description
 
         self.layers = nn.ModuleList([MILayer(
-            n_embd, layer_description, config.d_ff,
+            n_embd, layer_description, config.d_ff_factor,
             config.block_size, config.dropout_attn,
             config.dropout_resid, config.dropout_ff,
             config.overlay_causal, config.use_dual_fixed,
