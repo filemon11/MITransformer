@@ -2,7 +2,7 @@ import torch
 import torch.distributed as dist
 
 from data import (load_dataset, dataset_details_full, DatasetDictTrain,
-                  dataset_details_full_memmaped)
+                  dataset_details_full_memmaped, get_loader)
 from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
                      Metric, MetricWriter, metric_writer)
 from model import TransformerDescription, description_builder
@@ -247,6 +247,29 @@ class Objective:
         self.writer = writer
 
         self.datasets = _load_dataset(args, memmaped=True)
+
+        # Since pin_memory=True, persistent_workers=True lead to too many files
+        # error when creating a lot of dataloaders, we need to construct
+        # dataloaders here
+        # Remove this if https://github.com/pytorch/pytorch/issues/91252
+        # is resolved
+        self.datasets["train"] = get_loader(  # type: ignore
+                self.datasets["train"],  # type: ignore
+                batch_size=self.args.batch_size,
+                bucket=False,
+                shuffle=True, droplast=True,
+                world_size=self.n_devices,
+                rank=self.args.rank,
+                n_workers=self.args.n_workers)
+
+        self.datasets["eval"] = get_loader(  # type: ignore
+                self.datasets["eval"],  # type: ignore
+                batch_size=self.args.batch_size,
+                bucket=False,
+                shuffle=False, droplast=False,
+                world_size=self.n_devices,
+                rank=self.args.rank,
+                n_workers=self.args.n_workers)
 
     def __call__(self, trial) -> float:
         if self.n_devices > 1:
