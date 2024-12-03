@@ -251,14 +251,13 @@ class Objective:
     def __call__(self, trial) -> float:
         if self.n_devices > 1:
             trial = optuna.integration.TorchDistributedTrial(
-                trial, torch.cuda.current_device())  # type: ignore
+                trial, None)  # type: ignore
 
         args = TrainParserArgs.from_kwargs(**{
             name: hyperopt_args_sampler(name, arg, trial) for
             name, arg in self.args.to_dict().items()})
         args_logic(args)
 
-        pruned = False
         train_iterator = main_train(
             args, self.n_devices,
             iterate=True, datasets=self.datasets)
@@ -270,7 +269,8 @@ class Objective:
                 args.eval_interval*step)
 
             if trial.should_prune():
-                pruned = True
+                del train_iterator
+                raise optuna.exceptions.TrialPruned()
 
         if self.writer is not None:
             self.writer.add_params(
@@ -278,9 +278,6 @@ class Objective:
                 metrics[1])
 
         # trial.set_user_attr("metric_dicts", metric_dicts)
-
-        if pruned:
-            raise optuna.exceptions.TrialPruned()
 
         loss: float = getattr(metrics[1], self.args.optimise)
         return loss
