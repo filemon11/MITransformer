@@ -712,10 +712,6 @@ class LMTrainer():
             eval: DepDataset[IDSen] | DataLoader,
             **kwargs) -> Iterable[tuple[Metric, Metric]]:
         assert self.train_config is not None, "Config missing training params."
-        assert self.train_config.batch_size <= len(train), (
-            "Batch size larger than dataset. "
-            f"dataset size: {len(train)}, batch size: "
-            f"{self.train_config.batch_size}")
         train_config = self.train_config
         device = train_config.device
         assert device is not None
@@ -750,10 +746,6 @@ class LMTrainer():
               **kwargs) -> tuple[Metric, Metric] | tuple[
                   Metric, Metric, Metric]:
         assert self.train_config is not None, "Config missing training params."
-        assert self.train_config.batch_size <= len(train), (
-            "Batch size larger than dataset."
-            f"dataset size: {len(train)}, batch size: "
-            f"{self.train_config.batch_size}")
         train_config = self.train_config
         device = train_config.device
 
@@ -1004,6 +996,10 @@ class LMTrainer():
 
     def get_loader(self, data: DataLoader | DepDataset) -> DataLoader:
         if not isinstance(data, DataLoader):
+            assert self.config.batch_size <= len(data), (
+                "Batch size larger than dataset. "
+                f"dataset size: {len(data)}, batch size: "
+                f"{self.config.batch_size}")
             return get_loader(
                 data, batch_size=self.config.batch_size,
                 bucket=False,
