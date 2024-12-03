@@ -2,7 +2,7 @@ import torch
 import torch.distributed as dist
 
 from data import (load_dataset, dataset_details_full, DatasetDictTrain,
-                  dataset_details_full_memmaped, get_loader)
+                  dataset_details_full_memmaped, get_loader, Dataset)
 from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
                      Metric, MetricWriter, metric_writer)
 from model import TransformerDescription, description_builder
@@ -140,7 +140,7 @@ def _load_dataset(args: "ParserArgs", memmaped: bool = False
     else:
         details = dataset_details_full[args.dataset_name]
         details["dirs"] = details["dirs"][0:2]  # type: ignore
-    return load_dataset(
+    datasets = load_dataset(
         details,
         args.max_len_train,
         args.max_len_eval_test,
@@ -150,6 +150,12 @@ def _load_dataset(args: "ParserArgs", memmaped: bool = False
         args.triangulate,
         args.connect_with_dummy,
         args.connect_with_self)
+    info(args.rank, logger, (
+        "Loaded datasets with "
+        + ', '.join([str(len(ds)) for ds  # type: ignore
+                     in datasets.values() if isinstance(ds, Dataset)])
+        + " sentences."))
+    return datasets
 
 
 def main_dataprep(args: "ParserArgs") -> None:

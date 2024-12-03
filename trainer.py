@@ -713,7 +713,7 @@ class LMTrainer():
             **kwargs) -> Iterable[tuple[Metric, Metric]]:
         assert self.train_config is not None, "Config missing training params."
         assert self.train_config.batch_size <= len(train), (
-            "Batch size larger than dataset."
+            "Batch size larger than dataset. "
             f"dataset size: {len(train)}, batch size: "
             f"{self.train_config.batch_size}")
         train_config = self.train_config

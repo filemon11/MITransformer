@@ -1319,12 +1319,12 @@ def load_dataset(details: DatasetDetails,       # type: ignore
 
     def load_dataset(dir: str, is_train: bool,
                      max_len: int | None = None) -> MemMapDataset:
+        first_k_param = first_k if is_train else first_k_eval_test
         if load_memmap:
             return MemMapDataset.from_memmap(dir, transform,
                                              max_len=max_len,
-                                             first_k=first_k)
+                                             first_k=first_k_param)
         else:
-            first_k_param = first_k if is_train else first_k_eval_test
             return MemMapDataset.from_file(dir, transform,
                                            max_len=max_len,
                                            first_k=first_k_param)
