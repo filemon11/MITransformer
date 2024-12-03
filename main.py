@@ -132,10 +132,14 @@ if not, search on huggingface and parse and load new.
 """
 
 
-def main_dataprep(args: "ParserArgs") -> None:
-    details = dataset_details_full[args.dataset_name]
+def _load_dataset(args: "ParserArgs", memmaped: bool = False
+                  ) -> DatasetDictTrain:
+    if memmaped:
+        details = dataset_details_full_memmaped[args.dataset_name]
+    else:
+        details = dataset_details_full[args.dataset_name]
     details["dirs"] = details["dirs"][0:2]  # type: ignore
-    load_dataset(
+    return load_dataset(
         details,
         args.max_len_train,
         args.max_len_eval_test,
@@ -147,10 +151,15 @@ def main_dataprep(args: "ParserArgs") -> None:
         args.connect_with_self)
 
 
+def main_dataprep(args: "ParserArgs") -> None:
+    _load_dataset(args, memmaped=False)
+
+
 def main_train(
         args: "TrainParserArgs",
         world_size: int,
-        iterate: bool = False
+        iterate: bool = False,
+        datasets: DatasetDictTrain | None = None
         ) -> Iterator[tuple[Metric, Metric]] | None:
     # device: where to execute computation
     if world_size > 1:
@@ -159,21 +168,10 @@ def main_train(
     train_config = TrainConfig.from_kwargs(
         **args.to_dict())
 
-    datasets: DatasetDictTrain
-    # TODO: do this entirely in the load dataset method
-    # load memmap
-    details = dataset_details_full_memmaped[args.dataset_name]
-    details["memmaped"] = details["memmaped"][0:2]  # type: ignore
-    datasets = load_dataset(
-        details,
-        max_len_train=args.max_len_train,
-        max_len_eval_test=args.max_len_eval_test,
-        vocab_size=args.vocab_size,
-        triangulate=args.triangulate,
-        first_k=args.first_k,
-        first_k_eval_test=args.first_k_eval_test,
-        connect_with_dummy=args.connect_with_dummy,
-        connect_with_self=args.connect_with_self)
+    if datasets is None:
+        # TODO: do this entirely in the load dataset method
+        # load memmap
+        datasets = _load_dataset(args, memmaped=True)
     assert isinstance(datasets, dict)
 
     # Model
@@ -214,6 +212,7 @@ def main_train(
             yield metrics
 
     del trainer
+    del datasets
 
 
 def hyperopt_args_sampler(
@@ -246,6 +245,8 @@ class Objective:
         self.args = args
         self.writer = writer
 
+        self.datasets = _load_dataset(args, memmaped=True)
+
     def __call__(self, trial) -> float:
         if self.n_devices > 1:
             trial = optuna.integration.TorchDistributedTrial(
@@ -259,7 +260,7 @@ class Objective:
         pruned = False
         train_iterator = main_train(
             args, self.n_devices,
-            iterate=True)
+            iterate=True, datasets=self.datasets)
         assert train_iterator is not None
         for step, metrics in enumerate(train_iterator, start=1):
             # Handle pruning based on the intermediate value.
@@ -338,7 +339,7 @@ def options(seq_of_items: list[tuple[str, Iterable[Any]]]
 
 def setup_ddp(rank, world_size) -> bool:
     if world_size > 1:
-        info(rank, logger,
+        info(None, logger,
              ("Initialising process with world_size "
               f"{world_size} and rank {rank}."))
         dist.init_process_group("nccl", world_size=world_size, rank=rank)
