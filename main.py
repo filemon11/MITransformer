@@ -352,7 +352,8 @@ class Objective:
         args = TrainParserArgs.from_kwargs(**{
             name: hyperopt_args_sampler(name, arg, trial) for
             name, arg in self.args.to_dict().items()},
-            model_name=f"{self.args.name}_{trial.number}")
+            model_name=f"{self.args.name}_{trial.number}",
+            n_runs=1)
         args.seed = args.seed + trial.number
         args_logic(args)
 
@@ -510,6 +511,8 @@ class TrainParserArgs(ParserArgs):
     model_name: str
     dependency_mode: Literal["supervised", "input", "standard"]
     batch_size: int
+    use_steps: bool
+    max_steps: int | None
     eval_interval: int
     early_stop_after: int | None
     early_stop_metric: str | None
@@ -548,6 +551,8 @@ class HyperoptParserArgs(ParserArgs):
 
     dependency_mode: Literal["supervised", "input", "standard"]
     batch_size: int
+    use_steps: bool
+    max_steps: int | None
     eval_interval: int
     early_stop_after: int | None
     early_stop_metric: str | None
@@ -670,6 +675,15 @@ def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
         '--batch_size', type=int, default=32,
         help=("batch size; in case of multiple GPUs it is "
               "chunked across the devices"))
+    trainer_group.add_argument(
+        '--use_steps', type=str_to_bool, default=False,
+        help=("Where the unit of evaluation are steps (i.e. batches) "
+              "instead of epochs. If true, --eval_interval "
+              "refers to number of batches processed."))
+    trainer_group.add_argument(
+        '--max_steps', type=OptNone(int), default=100_000,
+        help=("maximum number of steps (batches) to process "
+              "if --use_steps is set to true"))
     trainer_group.add_argument(
         '--eval_interval', type=int,
         default=1, help="frequency to perform evaluations in")
@@ -815,6 +829,15 @@ def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
         '--batch_size', type=int, default=32,
         help=("batch size; in case of multiple GPUs it is"
               "chunked across the devices"))
+    hyperopt_fixed_trainer_group.add_argument(
+        '--use_steps', type=str_to_bool, default=False,
+        help=("Where the unit of evaluation are steps (i.e. batches) "
+              "instead of epochs. If true, --eval_interval "
+              "and n_warmup_steps refer to number of batches processed."))
+    hyperopt_fixed_trainer_group.add_argument(
+        '--max_steps', type=OptNone(int), default=100_000,
+        help=("maximum number of steps (batches) to process "
+              "if --use_steps is set to true"))
     hyperopt_fixed_trainer_group.add_argument(
         '--eval_interval', type=int,
         default=1, help="frequency to perform evaluations in")

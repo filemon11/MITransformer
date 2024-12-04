@@ -35,7 +35,7 @@ from collections import defaultdict
 from typing import (Self, Literal, cast,
                     Container, Iterable, Mapping,
                     ClassVar, TypeVar, Callable,
-                    Any)
+                    Any, Generator)
 
 from logmaker import getLogger, info, warning, get_timestr
 
@@ -115,6 +115,18 @@ class Metric(Params):
             raise AttributeError(
                 f"'{self.__class__}' has no attribute '{prop}' or '_{prop}'.")
 
+    def _add_fields(self,
+                    name: str,
+                    m1: "Metric",
+                    m2: "Metric") -> float | torch.Tensor:
+        val1 = getattr(m1, name)
+        val2 = getattr(m2, name)
+        if name == "main_metric":
+            assert val1 == val2, "Main metrics do not correspond!"
+            return val1
+        else:
+            return val1 + val2
+
     def __add__(self, other: "Metric") -> "Metric":
         # other must be a lower type or Self
 
@@ -129,9 +141,8 @@ class Metric(Params):
                                     f"and {other.__class__}")
 
         return higher.__class__(
-            **{f.name: getattr(self, f.name) + getattr(other, f.name)
-               for f in fields(higher)},
-            main_metric=self.main_metric)
+            **{f.name: self._add_fields(f.name, self, other)  # type: ignore
+               for f in fields(higher)})
 
     def __radd__(self, other: "Metric") -> "Metric":
         return self + other
@@ -207,9 +218,13 @@ class Metric(Params):
             except ValueError:
                 return False
 
-    def to_dict(self) -> dict[str, float]:
-        return {attr: float(getattr(self, attr))
-                for attr in self._to_mean}
+    def to_dict(self, as_str: bool = False) -> dict[str, Any]:
+        if as_str:
+            return {attr: str(getattr(self, attr))
+                    for attr in self._to_mean}
+        else:
+            return {attr: float(getattr(self, attr))
+                    for attr in self._to_mean}
 
 
 @dataclass
@@ -229,6 +244,21 @@ class SupervisedMetric(Metric):
             return (self.alpha*self._lm_loss
                     + (1-self.alpha)*self._arc_loss)
 
+    def _add_fields(self,
+                    name: str,
+                    m1: "Metric",
+                    m2: "Metric") -> float | torch.Tensor:
+        if name == "alpha":
+            val1 = getattr(m1, name)
+            val2 = getattr(m2, name)
+            assert (val1 == val2 or val2 is None
+                    or val1 is None), (
+                        "Cannot combine metrics with different alpha."
+                    )
+            return val2 if val2 is not None else val1
+
+        return super()._add_fields(name, m1, m2)
+
     def __add__(self, other: Metric) -> Metric:
         # other must be a lower type or Self
 
@@ -243,17 +273,9 @@ class SupervisedMetric(Metric):
                                     f"and {other.__class__}")
         other = cast(Self, other)
 
-        assert (other.alpha == self.alpha or other.alpha is None
-                or self.alpha is None), (
-                    "Cannot combine metrics with different alpha."
-                )
-
-        alpha = other.alpha if other.alpha is not None else self.alpha
-
-        fs = fields(higher)
         return higher.__class__(
-            **{f.name: getattr(self, f.name) + getattr(other, f.name)
-               for f in fs if f.name != "alpha"}, alpha=alpha)
+            **{f.name: self._add_fields(f.name, self, other)  # type: ignore
+               for f in fields(higher)})
 
 
 @dataclass
@@ -331,6 +353,8 @@ class TrainConfig(GeneralConfig):
     epochs: int = 100
     learning_rate: float = 1e-3
     early_stop_after: int | None = 1
+    use_steps: bool = False
+    max_steps: int | None = None
 
 
 class LMTrainer():
@@ -460,6 +484,18 @@ class LMTrainer():
                 pickle.dump(self.train_config,
                             handle,
                             protocol=pickle.HIGHEST_PROTOCOL)
+
+    def load_state(
+            self, model_name: str | None = None) -> None:
+        if model_name is None:
+            model_name = self.config.model_name
+        state_dict, _ = torch.load(
+            os.path.join(self.model_dir, model_name, "model")).values()
+        if self.use_ddp:
+            self.transformerlm.module.load_state_dict(state_dict)
+        else:
+            self.transformerlm.load_state_dict(state_dict)
+        self.transformerlm.to(self.config.device)
 
     def loss(self, logits: torch.Tensor, labels: torch.Tensor,
              ignore_index: int = -100,
@@ -631,7 +667,6 @@ class LMTrainer():
                    arc_loss: torch.Tensor | None = None,
                    perplexity: float | None = None,
                    uas: float | None = None) -> Metric:
-
         if perplexity is not None:
             if arc_loss is not None:
                 assert uas is not None
@@ -795,11 +830,29 @@ class LMTrainer():
         metric.detach()
         return metric
 
+    def check_early_stop(
+            self,
+            evals_without_improvement: int) -> bool:
+        assert self.train_config is not None
+        early_stop_after = self.train_config.early_stop_after
+        early_stop = (
+            early_stop_after is not None
+            and early_stop_after <= evals_without_improvement)
+        early_stop = sum(self.gather_ddp(early_stop)) > 0
+        if early_stop:
+            no_change_epochs = (evals_without_improvement
+                                * self.train_config.eval_interval)
+            info(self.config.rank, logger,
+                 f"Aborting training after {no_change_epochs} "
+                 "evals without improvement.")
+            return True
+        return False
+
     def train_iter(
             self,
             train: DepDataset[IDSen] | DataLoader,
             eval: DepDataset[IDSen] | DataLoader,
-            **kwargs) -> Iterable[tuple[Metric, Metric]]:
+            **kwargs) -> Generator[tuple[Metric, Metric], None, int]:
         assert self.train_config is not None, "Config missing training params."
         train_config = self.train_config
         device = train_config.device
@@ -814,47 +867,65 @@ class LMTrainer():
 
         best: float | Metric | None = None
         evals_without_improvement: int = 0
-        for epoch in range(1, train_config.epochs+1):
+        total_steps: int = 0
+        break_training: bool = False
+        max_epochs = (train_config.epochs
+                      if train_config is not None
+                      else train_config.max_steps)
+        # since we cannot run out of epochs if we use
+        # max_steps
+        for epoch in range(1, max_epochs+1):
+            if break_training:
+                break
             info(self.config.rank,
-                 logger, f"Epoch: {epoch}/{train_config.epochs}")
+                 logger, f"Epoch: {epoch}/{max_epochs}")
             if self.use_ddp:
                 train.sampler.set_epoch(epoch)  # type: ignore
 
-            train_metric = self._train(train)
-            self.log_metric(train_metric, epoch, "train")
+            # Steps
+            for train_metric in self._train(train):
+                total_steps += 1  # equal epochs in case of not use_steps
 
-            if epoch % eval_interval == 0:
-                eval_metric = self._eval(eval)
-                self.log_metric(eval_metric, epoch, "eval")
-
-                self.transformerlm.train()
-
-                if best is None:
-                    best = eval_metric.minval()
-                if eval_metric > best:       # greater means better
-                    best = eval_metric
-                    self.save()
+                if total_steps % eval_interval == 0:
+                    info(self.config.rank,
+                         logger,
+                         (f"Step: {total_steps}/" +
+                          ('inf' if train_config.max_steps is None
+                           else str(train_config.max_steps))))
+                    self.log_metric(train_metric, total_steps, "train")
                     info(self.config.rank, logger,
-                         "Saving model at epoch "
-                         f"{epoch}...")
-                    evals_without_improvement = 0
-                else:
-                    evals_without_improvement += 1
+                         f"train metric:\n{train_metric.info}")
 
-                yield train_metric, eval_metric
-
-                early_stop_after = train_config.early_stop_after
-                early_stop = (
-                    early_stop_after is not None
-                    and early_stop_after <= evals_without_improvement)
-                early_stop = sum(self.gather_ddp(early_stop)) > 0
-
-                if early_stop:
-                    no_change_epochs = (evals_without_improvement
-                                        * train_config.eval_interval)
+                    eval_metric = self._eval(eval)
+                    self.transformerlm.train()
+                    self.log_metric(eval_metric, total_steps, "eval")
                     info(self.config.rank, logger,
-                         f"Aborting training after {no_change_epochs} epochs.")
-                    break
+                         f"eval metric:\n{eval_metric.info}")
+
+                    if best is None:
+                        best = eval_metric.minval()
+                    if eval_metric > best:       # greater means better
+                        best = eval_metric
+                        self.save()
+
+                        info(self.config.rank, logger,
+                             "Saving model at epoch "
+                             f"{epoch} ({total_steps})...")
+                        evals_without_improvement = 0
+                    else:
+                        evals_without_improvement += 1
+
+                    yield train_metric, eval_metric
+
+                    if self.check_early_stop(evals_without_improvement):
+                        break_training = True
+                        break
+                    if (self.train_config.max_steps is not None
+                            and total_steps
+                            >= self.train_config.max_steps):
+                        break_training = True
+                        break
+        return total_steps
 
     def train(self,
               train: DepDataset[IDSen] | DataLoader,
@@ -864,34 +935,36 @@ class LMTrainer():
                   Metric, Metric, Metric]:
         assert self.train_config is not None, "Config missing training params."
         train_config = self.train_config
-        device = train_config.device
 
         train = self.get_loader(train)
         eval = self.get_loader(eval)
 
-        for _ in self.train_iter(train, eval, **kwargs):
-            pass
-        # If eval interval is larger than number of epochs
-        epoch = train_config.epochs
-
+        # TODO: upgrade to Python 3.13 and replace with gen.report()
+        gen = self.train_iter(train, eval, **kwargs)
+        current_step: int
+        while True:
+            try:
+                _ = next(gen)
+            except StopIteration as e:
+                current_step = e.value
+                break
         # load best (saved) into transformerlm
-        if self.use_ddp:
-            self.transformerlm.module = self.load_model(
-                self.train_config.model_name)[0]   # type: ignore
-            self.transformerlm.module.to(self.config.rank)
-        else:
-            self.transformerlm = self.load_model(
-                self.train_config.model_name)[0]   # type: ignore
-            self.transformerlm.to(device)
+        self.load_state()
 
         final_train = self._eval(train)
         final_eval = self._eval(eval)
-        self.log_metric(final_train, epoch, "train")
-        self.log_metric(final_eval, epoch, "eval")
+        self.log_metric(final_train, current_step, "train")
+        self.log_metric(final_eval, current_step, "eval")
+        info(self.config.rank, logger,
+             f"Final train metric:\n{final_train.info}")
+        info(self.config.rank, logger,
+             f"Final eval metric:\n{final_eval.info}")
 
         if test is not None:
             final_test = self.test(test)
-            self.log_metric(final_test, epoch, "test")
+            self.log_metric(final_test, current_step, "test")
+            info(self.config.rank, logger,
+                 f"Final test metric:\n{final_test.info}")
             return (final_train, final_eval, final_test)
 
         else:
@@ -939,15 +1012,24 @@ class LMTrainer():
         #                  gold_headlist.tolist(),
         #                  labels)
 
-    def _train(self, loader: DataLoader[IDBatch, D]) -> Metric:
+    def _train(self, loader: DataLoader[IDBatch, D]) -> Iterable[Metric]:
         assert self.train_config is not None, "Config missing training params."
         self.transformerlm.train()
-        metrics = [
-            self.train_step(
-                batch,
-                loader.dataset.keys_for_padding["label_ids"])
-            for batch in loader]
-        return self.gather_metrics(sum_metrics(metrics))
+
+        metrics: list[Metric]
+        if self.train_config.use_steps:
+            for batch in loader:
+                metric = self.train_step(
+                    batch,
+                    loader.dataset.keys_for_padding["label_ids"])
+                yield self.gather_metrics(metric)
+        else:
+            metrics = [
+                self.train_step(
+                    batch,
+                    loader.dataset.keys_for_padding["label_ids"])
+                for batch in loader]
+            yield self.gather_metrics(sum_metrics(metrics))
 
     def _eval(self, loader: DataLoader[IDBatch, D]) -> Metric:
         self.transformerlm.eval()
