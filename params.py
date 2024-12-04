@@ -4,6 +4,12 @@ import inspect
 from typing import Any, Self
 
 
+def dict_info(d: dict[str, Any]) -> str:
+    return "\n".join(
+        ["{}={}".format(*item) for item
+         in d.items()])
+
+
 @dataclass
 class Params():
     def to_dict(self, as_str: bool = False) -> dict[str, Any]:
@@ -15,9 +21,7 @@ class Params():
 
     @property
     def info(self) -> str:
-        return "\n".join(
-            ["{}={}".format(*item) for item
-             in self.to_dict(as_str=True).items()])
+        return dict_info(self.to_dict(as_str=True))
 
     @classmethod
     def from_kwargs(cls, **kwargs: Any) -> Self:

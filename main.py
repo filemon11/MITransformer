@@ -4,9 +4,9 @@ import torch.distributed as dist
 from data import (load_dataset, dataset_details_full, DatasetDictTrain,
                   dataset_details_full_memmaped, get_loader, Dataset)
 from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
-                     Metric, MetricWriter, metric_writer)
+                     Metric, MetricWriter, metric_writer, sum_and_std_metrics)
 from model import TransformerDescription, description_builder
-from params import Params
+from params import Params, dict_info
 
 import optuna
 import pandas as pd
@@ -16,13 +16,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 import argparse
 from ast import literal_eval as make_tuple
-
+from copy import copy
 
 from logmaker import getLogger, info, logging_config, get_timestr
 
 from typing import (
     Literal, Any, Iterable, cast, Iterator, TypeVar, Generic,
-    Sequence, Callable)
+    Sequence, Callable, overload)
 
 logger = getLogger(__name__)
 optuna.logging.enable_propagation()  # Propagate logs to the root logger.
@@ -162,12 +162,34 @@ def main_dataprep(args: "ParserArgs") -> None:
     _load_dataset(args, memmaped=False)
 
 
+@overload
+def main_train(
+        args: "TrainParserArgs",
+        world_size: int,
+        iterate: Literal[False] = False,
+        datasets: DatasetDictTrain | None = None
+        ) -> tuple[Metric, Metric] | tuple[Metric, Metric, Metric]:
+    ...
+
+
+@overload
+def main_train(
+        args: "TrainParserArgs",
+        world_size: int,
+        iterate: Literal[True],
+        datasets: DatasetDictTrain | None = None
+        ) -> (Iterator[tuple[Metric, Metric]]
+              | Iterator[tuple[Metric, Metric, Metric]]):
+    ...
+
+
 def main_train(
         args: "TrainParserArgs",
         world_size: int,
         iterate: bool = False,
         datasets: DatasetDictTrain | None = None
-        ) -> Iterator[tuple[Metric, Metric]] | None:
+        ) -> (Iterator[tuple[Metric, Metric]]
+              | Iterator[tuple[Metric, Metric, Metric]]):
     # device: where to execute computation
     if world_size > 1:
         assert args.rank is not None, "Rank cannot be None if word_size > 1."
@@ -208,13 +230,14 @@ def main_train(
 
     # Training setting
     if not iterate:
-        trainer.train(**datasets)
+        metrics = trainer.train(**datasets)
         if args.rank is None or args.rank == 0:
             generated = []
             for _ in range(20):
                 generated.append(trainer.generate(datasets["token_mapper"]))
             info(args.rank, logger,
                  f"Generated model output sample: {generated}")
+        yield metrics  # type: ignore
 
     # Hyperopt setting
     else:
@@ -223,6 +246,55 @@ def main_train(
 
     del trainer
     del datasets
+
+
+MeanStdDict = dict[str, tuple[float, float]]
+
+
+def main_train_multiple(
+        args: "TrainParserArgs",
+        world_size: int,
+        datasets: DatasetDictTrain | None = None
+        ) -> (tuple[MeanStdDict, MeanStdDict]
+              | tuple[MeanStdDict, MeanStdDict, MeanStdDict]):
+    """Calculates the mean and standard deviation of several
+    runs."""
+    # How to keep track of results? We are logging them
+    # but shouldn't we also forward them to tensorboard?
+    # but we only have the final results or should we compute
+    # the mean over the models for each step?
+    datasets = _load_dataset(args, memmaped=True)
+
+    assert args.n_runs != 0, "--n_runs cannot be 0"
+
+    metrics_list: (list[tuple[Metric, Metric]]
+                   | list[tuple[Metric, Metric, Metric]]) = []
+    for n_run in range(args.n_runs):
+        run_args = copy(args)
+        run_args.model_name = f"{args.name}_{n_run}"
+        run_args.seed = args.seed + n_run  # offset seed
+
+        metrics_list.append(
+            next(main_train(
+                run_args,
+                world_size,
+                iterate=False,
+                datasets=datasets)))  # type: ignore
+
+    means_and_stds = tuple(sum_and_std_metrics(seq)
+                           for seq in zip(*metrics_list))
+
+    info(args.rank, logger,
+         f"Performed {args.n_runs} training runs.")
+    info(args.rank, logger,
+         f"Final mean and std train: {dict_info(means_and_stds[0])}")
+    info(args.rank, logger,
+         f"Final mean and std dev: {dict_info(means_and_stds[1])}")
+    if len(means_and_stds) > 2:
+        info(args.rank, logger,
+             f"Final mean and std test: {dict_info(means_and_stds[2])}")
+
+    return means_and_stds  # type: ignore
 
 
 def hyperopt_args_sampler(
@@ -412,7 +484,7 @@ def main(args: "ParserArgs") -> None:
             if mode == "train":
                 assert isinstance(args, TrainParserArgs)
                 info(args.rank, logger, "Launching model training.")
-                main_train(args, n_devices)
+                main_train_multiple(args, n_devices)
             else:
                 assert isinstance(args, HyperoptParserArgs)
                 info(args.rank, logger, "Launching hyperparameter tuning.")
@@ -436,10 +508,13 @@ class ParserArgs(Params):
     first_k_eval_test: int | None
     connect_with_dummy: bool
     connect_with_self: bool
+    seed: int
 
 
 @dataclass
 class TrainParserArgs(ParserArgs):
+    n_runs: int
+
     model_name: str
     dependency_mode: Literal["supervised", "input", "standard"]
     batch_size: int
@@ -535,12 +610,14 @@ def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
     parser.add_argument(
         '--device', type=str,
         default="cuda" if torch.cuda.is_available() else "cpu",
-        help="device to run models on; must be 'cuda' if --use_ddp is set"
-    )
+        help="device to run models on; must be 'cuda' if --use_ddp is set")
     parser.add_argument(
         '--use_ddp', type=str_to_bool, default=torch.cuda.device_count() > 1,
-        help="whether to use distributed GPU training"
-    )
+        help="whether to use distributed GPU training")
+    parser.add_argument(
+        '--seed', type=int, default=1895,
+        help="seed for random processes")
+    # TODO: actually set seed
 
     # Data parser group
     data_group = parser.add_argument_group('data')
@@ -581,11 +658,15 @@ def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
     subparsers = parser.add_subparsers(dest="mode")
     train_parser = subparsers.add_parser(
         "train", help="training mode")
+    train_parser.add_argument(
+        '--n_runs', type=int,
+        default=1,
+        help="Number of runs; if > 1 computes mean and std of final scores.")
 
     # # # Trainer parser group
     trainer_group = train_parser.add_argument_group('trainer')
     trainer_group.add_argument(
-        '--mode_name', type=OptNone(str),
+        '--model_name', type=OptNone(str),
         default=None,
         help="model name. Set to experiment name if None")
     trainer_group.add_argument(
@@ -891,7 +972,7 @@ def args_logic(args: TrainParserArgs | HyperoptParserArgs | DataprepParserArgs
                 setattr(args, specific_dropout, args.dropout)
 
         if args.model_name is None:
-            args.model_name = args.experiment_name
+            args.model_name = args.name
 
 
 if __name__ == "__main__":

@@ -47,6 +47,7 @@ N = TypeVar("N")
 
 
 def sum_metrics(metrics: Iterable[M]) -> M:
+    """Computes mean wrt. elements."""
     s: None | M = None
     for m in metrics:
         if s is None:
@@ -55,6 +56,20 @@ def sum_metrics(metrics: Iterable[M]) -> M:
             s = cast(M, m + s)
     assert s is not None, "Iterable of metrics cannot be empty."
     return s
+
+
+def sum_and_std_metrics(
+        metrics: "Iterable[Metric]"
+        ) -> dict[str, tuple[float, float]]:
+    ms = list(metrics)
+    n = len(ms)
+    out_dict: dict[str, tuple[float, float]] = dict()
+    means: dict[str, float] = sum_metrics(ms).to_dict()
+    for key, mean_value in means.items():
+        xs = [getattr(m, key) for m in ms]
+        out_dict[key] = (mean_value,
+                         math.sqrt(sum([(x-mean_value)**2 for x in xs]) / n))
+    return out_dict
 
 
 minimise = {"lm_loss": True,
@@ -67,7 +82,7 @@ minimise = {"lm_loss": True,
 
 @total_ordering
 @dataclass
-class Metric:
+class Metric(Params):
     num: float = 0
     _lm_loss: torch.Tensor = torch.tensor(0)
 
