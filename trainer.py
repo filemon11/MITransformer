@@ -726,7 +726,7 @@ class LMTrainer():
                 to_ignore,
                 reduction="sum")
 
-        num_instances = (batch["label_ids"] != ignore_index).numel()
+        num_instances = int((batch["label_ids"] != ignore_index).sum().item())
 
         metric = self.get_metric(
             num_instances,
@@ -852,7 +852,9 @@ class LMTrainer():
             self,
             train: DepDataset[IDSen] | DataLoader,
             eval: DepDataset[IDSen] | DataLoader,
-            **kwargs) -> Generator[tuple[Metric, Metric], None, int]:
+            **kwargs) -> Generator[tuple[Metric, Metric],
+                                   None,
+                                   tuple[tuple[int, int], tuple[int, int]]]:
         assert self.train_config is not None, "Config missing training params."
         train_config = self.train_config
         device = train_config.device
@@ -874,8 +876,11 @@ class LMTrainer():
                       else train_config.max_steps)
         # since we cannot run out of epochs if we use
         # max_steps
+        best_epoch: int = 0
+        best_step: int = 0
         for epoch in range(1, max_epochs+1):
             if break_training:
+                epoch -= 1
                 break
             info(self.config.rank,
                  logger, f"Epoch: {epoch}/{max_epochs}")
@@ -908,6 +913,9 @@ class LMTrainer():
                         best = eval_metric
                         self.save()
 
+                        best_epoch = epoch
+                        best_step = total_steps
+
                         info(self.config.rank, logger,
                              "Saving model at epoch "
                              f"{epoch} ({total_steps})...")
@@ -925,7 +933,8 @@ class LMTrainer():
                             >= self.train_config.max_steps):
                         break_training = True
                         break
-        return total_steps
+
+        return (epoch, total_steps), (best_epoch, best_step)
 
     def train(self,
               train: DepDataset[IDSen] | DataLoader,
@@ -934,37 +943,42 @@ class LMTrainer():
               **kwargs) -> tuple[Metric, Metric] | tuple[
                   Metric, Metric, Metric]:
         assert self.train_config is not None, "Config missing training params."
-        train_config = self.train_config
 
         train = self.get_loader(train)
         eval = self.get_loader(eval)
 
         # TODO: upgrade to Python 3.13 and replace with gen.report()
         gen = self.train_iter(train, eval, **kwargs)
-        current_step: int
+        current: tuple[int, int]
+        best: tuple[int, int]
         while True:
             try:
                 _ = next(gen)
             except StopIteration as e:
-                current_step = e.value
+                current, best = e.value
                 break
         # load best (saved) into transformerlm
         self.load_state()
 
         final_train = self._eval(train)
         final_eval = self._eval(eval)
-        self.log_metric(final_train, current_step, "train")
-        self.log_metric(final_eval, current_step, "eval")
+        # Do not log here to not overwrite metrics at this training step
+        # self.log_metric(final_train, current_step, "train")
+        # self.log_metric(final_eval, current_step, "eval")
         info(self.config.rank, logger,
-             f"Final train metric:\n{final_train.info}")
+             f"Ended training after {current[0]} epochs, {current[1]} steps.")
         info(self.config.rank, logger,
-             f"Final eval metric:\n{final_eval.info}")
+             f"Found best model after {best[0]} epochs, {best[1]} steps.")
+        info(self.config.rank, logger,
+             f"Final best model train metric:\n{final_train.info}")
+        info(self.config.rank, logger,
+             f"Final best model eval metric:\n{final_eval.info}")
 
         if test is not None:
             final_test = self.test(test)
-            self.log_metric(final_test, current_step, "test")
+            # self.log_metric(final_test, current_step, "test")
             info(self.config.rank, logger,
-                 f"Final test metric:\n{final_test.info}")
+                 f"Final best model test metric:\n{final_test.info}")
             return (final_train, final_eval, final_test)
 
         else:
