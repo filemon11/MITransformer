@@ -201,8 +201,8 @@ class MaskedSentence(TypedDict):
 
 
 class IDDict(TypedDict):
-    input_ids: npt.NDArray[np.int16]
-    label_ids: npt.NDArray[np.int16]
+    input_ids: npt.NDArray[np.uint16]
+    label_ids: npt.NDArray[np.uint16]
 
 
 class CoNNLUSentence(MaskedSentence):
@@ -306,7 +306,7 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
         self.masks_setting: Literal['complete', 'current', 'next']
         self.masks_setting = masks_setting
 
-        self.tokenised: list[npt.NDArray[np.int16]] | None = None
+        self.tokenised: list[npt.NDArray[np.uint16]] | None = None
 
         self.token_mapper: TokenMapper | None
 
@@ -396,7 +396,7 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
                 label_ids=self.tokenised[idx][1:])
 
     def map_to_ids(self, token_mapper: TokenMapper) -> None:
-        self.tokenised = [np.array(sentence, dtype=np.int16)
+        self.tokenised = [np.array(sentence, dtype=np.uint16)
                           for sentence in token_mapper(self.tokens)]
         self.token_mapper = token_mapper
 
@@ -547,7 +547,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
     def map_to_ids(self, token_mapper: TokenMapper, memdir: str) -> None:
         assert self.file is not None
         id_head_list_generator = (np.stack((
-            np.array(token_mapper([tokens])[0], dtype=np.int16),
+            np.array(token_mapper([tokens])[0], dtype=np.uint16),
             headlist))
             for tokens, headlist in self.sentences)
 
@@ -654,7 +654,7 @@ class MemMapWindowDataset(MemMapDataset):
 
         i = self.max_len * idx
         data = np.memmap(self.memdir,
-                         dtype=np.int16,
+                         dtype=np.uint16,
                          mode='r',
                          shape=(self.arr_len, 2))   # type: ignore
         ids = np.concat(
@@ -701,7 +701,7 @@ class MemMapWindowDataset(MemMapDataset):
             arr_len += len(tokens)
         self.arr_len = arr_len
 
-        arr = np.memmap(memdir, dtype=np.int16, mode='w+', shape=(arr_len, 2))
+        arr = np.memmap(memdir, dtype=np.uint16, mode='w+', shape=(arr_len, 2))
 
         idx = 0
         for tokens, headlist in self.sentences:
@@ -709,7 +709,7 @@ class MemMapWindowDataset(MemMapDataset):
                 len(headlist))[headlist == 0] + 1
             headlist -= np.arange(headlist.shape[-1]) + 1
             arr[idx:idx+len(tokens), 0] = np.array(token_mapper([tokens])[0],
-                                                   dtype=np.int16)
+                                                   dtype=np.uint16)
             arr[idx:idx+len(tokens), 1] = headlist
             idx += len(tokens)
         arr.flush()
