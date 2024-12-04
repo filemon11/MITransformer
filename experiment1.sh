@@ -7,6 +7,8 @@ hyperopt_selection='--n_embd 200:1000 --dropout 0.0:0.6 --learning_rate 1e-6:1e-
 
 core="${general_params} hyperopt ${hyperopt_selection} ${general_hyperopt_params}"
 
+python main.py --first_k none --first_k_eval_test none dataprep
+
 python ${prefix} \
     --name exp1_dep-supervised \
     ${core} \
