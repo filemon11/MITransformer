@@ -944,7 +944,7 @@ class PaddingCollate(Collate):
                         * (max_len - len(new_sentence[key])))  # type: ignore
                 elif isinstance(new_sentence[key], np.ndarray):
                     new_sentence[key] = np.pad(
-                        new_sentence[key],  # type: ignore
+                        new_sentence[key].astype(np.int64),  # type: ignore
                         (0, max_len - len(new_sentence[key])),  # type: ignore
                         constant_values=pad)
                 else:
