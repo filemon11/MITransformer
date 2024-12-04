@@ -444,7 +444,8 @@ class TrainParserArgs(ParserArgs):
     dependency_mode: Literal["supervised", "input", "standard"]
     batch_size: int
     eval_interval: int
-    abort_after: int | None
+    early_stop_after: int | None
+    early_stop_metric: str | None
     epochs: int
     learning_rate: float
     loss_alpha: float | None
@@ -481,7 +482,8 @@ class HyperoptParserArgs(ParserArgs):
     dependency_mode: Literal["supervised", "input", "standard"]
     batch_size: int
     eval_interval: int
-    abort_after: int | None
+    early_stop_after: int | None
+    early_stop_metric: str | None
     epochs: int
 
     learning_rate: float | tuple[float, float] | list[float]
@@ -599,9 +601,13 @@ def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
         '--eval_interval', type=int,
         default=1, help="frequency to perform evaluations in")
     trainer_group.add_argument(
-        '--abort_after', type=OptNone(int), default=None,
+        '--early_stop_after', type=OptNone(int), default=None,
         help=("abort training after x evaluations without "
               "improvement on the eval loss; if None, no early stopping"))
+    trainer_group.add_argument(
+        '--early_stop_metric', type=OptNone(str), default='perplexity',
+        help=("metric to chose for early stopping if "
+              "--early_stop_after is not none"))
     trainer_group.add_argument(
         '--epochs', type=int, default=100,
         help="how many epochs to train for")
@@ -740,9 +746,13 @@ def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
         '--eval_interval', type=int,
         default=1, help="frequency to perform evaluations in")
     hyperopt_fixed_trainer_group.add_argument(
-        '--abort_after', type=OptNone(int), default=None,
+        '--early_stop_after', type=OptNone(int), default=None,
         help=("abort training after x evaluations without"
               "improvement on the eval loss"))
+    hyperopt_fixed_trainer_group.add_argument(
+        '--early_stop_metric', type=str, default='perplexity',
+        help=("metric to chose for early stopping if "
+              "--early_stop_after is not none"))
     hyperopt_fixed_trainer_group.add_argument(
         '--epochs', type=int, default=100,
         help="how many epochs to train for")

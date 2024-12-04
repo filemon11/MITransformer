@@ -57,6 +57,14 @@ def sum_metrics(metrics: Iterable[M]) -> M:
     return s
 
 
+minimise = {"lm_loss": True,
+            "loss": True,
+            "arc_loss": True,
+            "perplexity": True,
+            "uas": False,
+            }
+
+
 @total_ordering
 @dataclass
 class Metric:
@@ -67,9 +75,19 @@ class Metric:
 
     _convert: ClassVar[dict[str, Callable[[N], N]]] = {}    # type: ignore
 
+    main_metric: str = "loss"
+
+    # Whether optimisation means minimising (if False: maximising)
+    minimise: ClassVar[dict[str, bool]] = minimise
     loss: ClassVar[torch.Tensor]
     # just for typing so that we can safely call metric.loss.backward()
     # without the type checker complaining
+
+    def minval(self) -> float:
+        return math.inf if self.minimise[self.main_metric] else -math.inf
+
+    def maxval(self) -> float:
+        return -self.minval()
 
     def __getattr__(self, prop: str):
         """Calculate mean for metrics"""
@@ -97,13 +115,14 @@ class Metric:
 
         return higher.__class__(
             **{f.name: getattr(self, f.name) + getattr(other, f.name)
-               for f in fields(higher)})
+               for f in fields(higher)},
+            main_metric=self.main_metric)
 
     def __radd__(self, other: "Metric") -> "Metric":
         return self + other
 
     def __truediv__(self, other: float) -> "Metric":
-        new = self.__class__() + self
+        new = self.__class__(main_metric=self.main_metric) + self
         new.num *= other
         return new
 
@@ -133,24 +152,43 @@ class Metric:
                 setattr(self, f.name, value.to(device))
 
     @property
-    def main(self) -> torch.Tensor:
-        return getattr(self, "loss")
+    def main_value(self) -> torch.Tensor:
+        return getattr(self, self.main_metric)
 
     def __gt__(self, other: object) -> bool:
+        factor = -1 if self.minimise[self.main_metric] else 1
+
+        self_attr = (self.main_value.item()
+                     if isinstance(self.main_value, torch.Tensor)
+                     else self.main_value)
+
         if isinstance(other, Metric):
-            return self.main.item() < other.main.item()
+            other_attr = (other.main_value.item()
+                          if isinstance(other.main_value, torch.Tensor)
+                          else other.main_value)
+
+            return factor*self_attr > factor*other_attr
         else:
             try:
-                return self.main.item() < float(other)  # type: ignore
+                return (factor*self_attr
+                        > factor*float(other))  # type: ignore
             except ValueError:
                 return False
 
     def __eq__(self, other: object) -> bool:
+        factor = -1 if self.minimise[self.main_metric] else 1
+
+        self_attr = (self.main_value.item()
+                     if isinstance(self.main_value, torch.Tensor)
+                     else self.main_value)
         if isinstance(other, Metric):
-            return self.main.item() == other.main.item()
+            other_attr = (other.main_value.item()
+                          if isinstance(other.main_value, torch.Tensor)
+                          else other.main_value)
+            return factor*self_attr == factor*other_attr
         else:
             try:
-                return self.main.item() == float(other)  # type: ignore
+                return factor*self_attr == factor*float(other)  # type: ignore
             except ValueError:
                 return False
 
@@ -269,6 +307,7 @@ class GeneralConfig(Params):
     world_size: int = 1
     n_workers: int = 0
     model_name: str = field(default_factory=get_timestr)
+    early_stop_metric: str = "loss"
 
 
 @dataclass
@@ -276,7 +315,7 @@ class TrainConfig(GeneralConfig):
     eval_interval: int = 1
     epochs: int = 100
     learning_rate: float = 1e-3
-    abort_after: int | None = 1
+    early_stop_after: int | None = 1
 
 
 class LMTrainer():
@@ -571,6 +610,41 @@ class LMTrainer():
             elif isinstance(value, dict):
                 cls.batch_to(value, device)
 
+    def get_metric(self,
+                   num_instances: int,
+                   lm_loss: torch.Tensor,
+                   arc_loss: torch.Tensor | None = None,
+                   perplexity: float | None = None,
+                   uas: float | None = None) -> Metric:
+
+        if perplexity is not None:
+            if arc_loss is not None:
+                assert uas is not None
+                return SupervisedEvalMetric(
+                    num_instances,
+                    _lm_loss=lm_loss,
+                    _perplexity=perplexity,
+                    _arc_loss=arc_loss,
+                    alpha=self.config.loss_alpha,
+                    _uas=uas,
+                    main_metric=self.config.early_stop_metric
+                    )
+            else:
+                return EvalMetric(
+                    num_instances, _lm_loss=lm_loss,
+                    _perplexity=perplexity,
+                    main_metric=self.config.early_stop_metric)
+
+        if arc_loss is None:
+            return Metric(
+                num_instances, _lm_loss=lm_loss,
+                main_metric=self.config.early_stop_metric)
+        else:
+            return SupervisedMetric(
+                num_instances, _lm_loss=lm_loss, _arc_loss=arc_loss,
+                alpha=self.config.loss_alpha,
+                main_metric=self.config.early_stop_metric)
+
     def train_step(self,
                    batch: CoNNLUTokenisedBatch | EssentialBatch,
                    ignore_index: int) -> Metric:
@@ -604,11 +678,10 @@ class LMTrainer():
 
         num_instances = (batch["label_ids"] != ignore_index).numel()
 
-        if arc_loss is None:
-            metric = Metric(num_instances, lm_loss)
-        else:
-            metric = SupervisedMetric(num_instances, lm_loss, arc_loss,
-                                      self.train_config.loss_alpha)
+        metric = self.get_metric(
+            num_instances,
+            lm_loss=lm_loss,
+            arc_loss=arc_loss)
 
         metric.loss.backward()   # backward pass
         self.optimiser.step()   # update parameters
@@ -638,10 +711,13 @@ class LMTrainer():
 
         num_instances = int((labels != ignore_index).sum().item())
 
-        surprisal_sum = sum_depadded(logits_to_surprisal(logits, labels,
-                                                         ignore_index),
-                                     labels, ignore_index).sum()
-
+        surprisal_sum = sum_depadded(
+            logits_to_surprisal(
+                logits, labels,
+                ignore_index),
+            labels, ignore_index).sum().detach().cpu().item()
+        uas_abs = None
+        arc_loss = None
         if (mode == "supervised"
                 and score_preds is not None
                 and score_gold is not None):
@@ -693,18 +769,16 @@ class LMTrainer():
                 # add 1 for dummy mask since metric divides through
                 # the number of all tokens
 
-            assert self.config.loss_alpha is not None
-            m = SupervisedEvalMetric(
-                num_instances,
-                lm_loss.detach().cpu(),
-                surprisal_sum.detach().cpu().item(),
-                arc_loss.detach().cpu(),
-                self.config.loss_alpha,
-                uas_abs)
-            return m
+            arc_loss = arc_loss
 
-        return EvalMetric(num_instances, lm_loss.detach().cpu(),
-                          surprisal_sum.detach().cpu().item())
+        metric = self.get_metric(
+            num_instances,
+            lm_loss=lm_loss,
+            arc_loss=arc_loss,
+            perplexity=surprisal_sum,
+            uas=uas_abs)
+        metric.detach()
+        return metric
 
     def train_iter(
             self,
@@ -723,7 +797,7 @@ class LMTrainer():
 
         self.transformerlm.train()
 
-        best: float | Metric = math.inf
+        best: float | Metric | None = None
         evals_without_improvement: int = 0
         for epoch in range(1, train_config.epochs+1):
             info(self.config.rank,
@@ -740,6 +814,8 @@ class LMTrainer():
 
                 self.transformerlm.train()
 
+                if best is None:
+                    best = eval_metric.minval()
                 if eval_metric > best:       # greater means better
                     best = eval_metric
                     self.save()
@@ -752,9 +828,10 @@ class LMTrainer():
 
                 yield train_metric, eval_metric
 
-                abort_after = train_config.abort_after
-                early_stop = (abort_after is not None
-                              and abort_after <= evals_without_improvement)
+                early_stop_after = train_config.early_stop_after
+                early_stop = (
+                    early_stop_after is not None
+                    and early_stop_after <= evals_without_improvement)
                 early_stop = sum(self.gather_ddp(early_stop)) > 0
 
                 if early_stop:

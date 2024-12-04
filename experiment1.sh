@@ -2,7 +2,7 @@
 prefix="-m torch.distributed.launch --nproc-per-node=1 main.py"
 
 general_params='--n_workers 32 --device cuda --use_ddp 1 --first_k none --first_k_eval_test none'
-general_hyperopt_params='--batch_size 128 --epochs 100 --abort_after 1 --n_trials=50'
+general_hyperopt_params='--batch_size 128 --epochs 100 --early_stop_after 1 --n_trials=50'
 hyperopt_selection='--n_embd 200:1000 --dropout 0.0:0.6 --learning_rate 1e-6:1e-2'
 
 core="${general_params} hyperopt ${hyperopt_selection} ${general_hyperopt_params}"
