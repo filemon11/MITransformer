@@ -9,8 +9,9 @@ from model import TransformerDescription, description_builder
 from params import Params, dict_info
 
 import optuna
-import pandas as pd
-import os.path
+import random
+import os
+import numpy as np
 import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -29,8 +30,19 @@ optuna.logging.enable_propagation()  # Propagate logs to the root logger.
 optuna.logging.disable_default_handler()  # Stop showing logs in sys.stderr.
 
 
-# set the random seed, for reproducibility
-torch.manual_seed(42)
+def seed_everything(seed: int):
+    """There might be nondeterministic torch algorithms.
+    We're not making them deterministic here."""
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    # according to
+    # https://pytorch.org/docs/stable/data.html#data-loading-randomness
+    # each dataloader worker will have its PyTorch seed set to
+    # base_seed + worker_id. Thus, with the same number
+    # of workers, the process is deterministic
 
 
 T = TypeVar("T")
@@ -162,27 +174,6 @@ def main_dataprep(args: "ParserArgs") -> None:
     _load_dataset(args, memmaped=False)
 
 
-@overload
-def main_train(
-        args: "TrainParserArgs",
-        world_size: int,
-        iterate: Literal[False] = False,
-        datasets: DatasetDictTrain | None = None
-        ) -> tuple[Metric, Metric] | tuple[Metric, Metric, Metric]:
-    ...
-
-
-@overload
-def main_train(
-        args: "TrainParserArgs",
-        world_size: int,
-        iterate: Literal[True],
-        datasets: DatasetDictTrain | None = None
-        ) -> (Iterator[tuple[Metric, Metric]]
-              | Iterator[tuple[Metric, Metric, Metric]]):
-    ...
-
-
 def main_train(
         args: "TrainParserArgs",
         world_size: int,
@@ -273,6 +264,7 @@ def main_train_multiple(
         run_args = copy(args)
         run_args.model_name = f"{args.name}_{n_run}"
         run_args.seed = args.seed + n_run  # offset seed
+        args_logic(run_args)  # also sets seed
 
         metrics_list.append(
             next(main_train(
@@ -361,6 +353,7 @@ class Objective:
             name: hyperopt_args_sampler(name, arg, trial) for
             name, arg in self.args.to_dict().items()},
             model_name=f"{self.args.name}_{trial.number}")
+        args.seed = args.seed + trial.number
         args_logic(args)
 
         train_iterator = main_train(
@@ -393,7 +386,6 @@ def main_hyperopt(args: "HyperoptParserArgs",
     maximise = {"UAS"}
     direction = "maximize" if args.optimise in maximise else "minimize"
 
-    seed = 10  # TODO
     with metric_writer() as writer:
         objective: Objective = Objective(world_size, args, writer)
         if args.rank == 0 or args.rank is None:
@@ -401,7 +393,7 @@ def main_hyperopt(args: "HyperoptParserArgs",
                 study_name=args.name,
                 direction=direction,
                 sampler=optuna.samplers.RandomSampler(
-                    seed=seed),  # TODO: normal sampler
+                    seed=args.seed),  # TODO: normal sampler
                 pruner=optuna.pruners.MedianPruner(
                     n_warmup_steps=args.n_warmup_steps,
                     n_startup_trials=args.n_startup_trials))
@@ -960,6 +952,7 @@ def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
 
 def args_logic(args: TrainParserArgs | HyperoptParserArgs | DataprepParserArgs
                ) -> None:
+    seed_everything(args.seed)
     args.device = make_device_str(args.device)
     if isinstance(args, TrainParserArgs):
         # parse transformer description
