@@ -840,10 +840,8 @@ class LMTrainer():
             and early_stop_after <= evals_without_improvement)
         early_stop = sum(self.gather_ddp(early_stop)) > 0
         if early_stop:
-            no_change_epochs = (evals_without_improvement
-                                * self.train_config.eval_interval)
             info(self.config.rank, logger,
-                 f"Aborting training after {no_change_epochs} "
+                 f"Aborting training after {evals_without_improvement} "
                  "evals without improvement.")
             return True
         return False

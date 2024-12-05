@@ -1,6 +1,6 @@
 import numpy as np
 from ufal.chu_liu_edmonds import chu_liu_edmonds  # type: ignore
-from dsplot.graph import Graph  # type: ignore
+# from dsplot.graph import Graph  # type: ignore
 
 from typing import Sequence
 

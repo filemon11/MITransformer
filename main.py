@@ -23,7 +23,7 @@ from logmaker import getLogger, info, logging_config, get_timestr
 
 from typing import (
     Literal, Any, Iterable, cast, Iterator, TypeVar, Generic,
-    Sequence, Callable, overload)
+    Sequence, Callable)
 
 logger = getLogger(__name__)
 optuna.logging.enable_propagation()  # Propagate logs to the root logger.
@@ -314,7 +314,8 @@ def hyperopt_args_sampler(
 class Objective:
     def __init__(self, n_devices: int,
                  args: "HyperoptParserArgs",
-                 writer: MetricWriter):
+                 writer: MetricWriter,
+                 pg):
         self.n_devices = n_devices
         self.args = args
         self.writer = writer
@@ -344,10 +345,12 @@ class Objective:
                 rank=self.args.rank,
                 n_workers=self.args.n_workers)
 
+        self.pg = pg
+
     def __call__(self, trial) -> float:
         if self.n_devices > 1:
             trial = optuna.integration.TorchDistributedTrial(
-                trial, None)  # type: ignore
+                trial, self.pg)  # type: ignore
 
         args = TrainParserArgs.from_kwargs(**{
             name: hyperopt_args_sampler(name, arg, trial) for
@@ -361,6 +364,8 @@ class Objective:
             args, self.n_devices,
             iterate=True, datasets=self.datasets)
         assert train_iterator is not None
+
+        metrics = None
         for step, metrics in enumerate(train_iterator, start=1):
             # Handle pruning based on the intermediate value.
             trial.report(
@@ -371,6 +376,8 @@ class Objective:
                 del train_iterator
                 raise optuna.exceptions.TrialPruned()
 
+        assert metrics is not None, (
+           "eval_interval is smaller than total number of steps")
         if self.writer is not None:
             self.writer.add_params(
                 args.to_dict(),
@@ -384,11 +391,13 @@ class Objective:
 
 def main_hyperopt(args: "HyperoptParserArgs",
                   world_size: int) -> None:
+    cpu_comm = torch.distributed.new_group(backend="gloo")
+
     maximise = {"UAS"}
     direction = "maximize" if args.optimise in maximise else "minimize"
 
     with metric_writer() as writer:
-        objective: Objective = Objective(world_size, args, writer)
+        objective: Objective = Objective(world_size, args, writer, cpu_comm)
         if args.rank == 0 or args.rank is None:
             study = optuna.create_study(
                 study_name=args.name,
@@ -463,14 +472,17 @@ def main(args: "ParserArgs") -> None:
     if args.mode == "dataprep":
         main_dataprep(args)
     else:
-        n_devices = torch.cuda.device_count() if args.use_ddp else 1
+        try:
+            n_devices = int(os.environ["WORLD_SIZE"]) if args.use_ddp else 1
+        except ValueError:
+            n_devices = torch.cuda.device_count() if args.use_ddp else 1
         assert not ((n_devices == 1 or not args.use_ddp) and
                     (args.rank is not None and args.rank > 0)), (
             "Rank cannot be larger than 0 if only having one device"
             "/not using ddp. "
             f"Received --local-rank {args.rank} --use_ddp {args.use_ddp} "
             f"and number of recognised CUDA devices is {n_devices}.")
-        info(None, logger, f"Running on {n_devices} devices.")
+        info(args.rank, logger, f"Running on {n_devices} devices.")
         with ddp(args.rank, n_devices) as ddp_status:
             info(args.rank, logger, f"Using DDP: {ddp_status}")
             mode = args.mode
@@ -1022,7 +1034,7 @@ if __name__ == "__main__":
         "Must set --device to a GPU when setting --use_ddp. "
         f"Received --device {args.device}, --use_ddp {args.use_ddp}")
 
-    info(None, logger, f"Arguments provided: {str(sys.argv)}")
+    info(args.rank, logger, f"Arguments provided: {str(sys.argv)}")
     main(args)
     # if n_devices > 1:
     #     mp.spawn(main, args=(n_devices,), nprocs=n_devices)  # type: ignore
