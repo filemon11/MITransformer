@@ -1,4 +1,4 @@
-N_GPUS=1 #$(lspci|grep -i nvidia | grep -e VGA -e 3D | wc -l)
+N_GPUS=$(lspci|grep -i nvidia | grep -e VGA -e 3D | wc -l)
 # if not usind nvidia gpus, nede to set manually
 N_THREADS=$(nproc --all)
 THREADS_PER_GPU=$((N_THREADS / N_GPUS))
