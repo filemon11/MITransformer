@@ -990,6 +990,12 @@ def args_logic(args: TrainParserArgs | HyperoptParserArgs | DataprepParserArgs
         if args.model_name is None:
             args.model_name = args.name
 
+    if args.rank is None and args.use_ddp:
+        try:
+            args.rank = int(os.environ["LOCAL_RANK"])
+        except AttributeError:
+            pass
+
 
 if __name__ == "__main__":
     args: TrainParserArgs | HyperoptParserArgs | DataprepParserArgs
