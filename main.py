@@ -380,7 +380,9 @@ class Objective:
         if self.writer is not None:
             self.writer.add_params(
                 args.to_dict(),
-                metrics[1])
+                metrics[1],
+                run_name=str(trial.number),
+                global_step=args.eval_interval*step)
 
         # trial.set_user_attr("metric_dicts", metric_dicts)
 

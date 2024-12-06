@@ -321,7 +321,9 @@ class MetricWriter(SummaryWriter):
     def add_params(
             self,
             params: Mapping[str, Any],
-            metric: Metric
+            metric: Metric,
+            run_name: str | None = None,
+            global_step: int | None = None,
             ) -> None:
         def check_type(value: Any) -> bool:
             if (isinstance(value, float)
@@ -334,7 +336,9 @@ class MetricWriter(SummaryWriter):
         self.add_hparams(
             {key: value for key, value
              in params.items() if check_type(value)},
-            {f"_{key}": value for key, value in metric.to_dict().items()})
+            {f"_{key}": value for key, value in metric.to_dict().items()},
+            run_name=run_name,
+            global_step=global_step)
 
 
 @contextmanager
