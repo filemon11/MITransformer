@@ -315,8 +315,7 @@ def hyperopt_args_sampler(
 class Objective:
     def __init__(self, n_devices: int,
                  args: "HyperoptParserArgs",
-                 writer: MetricWriter,
-                 pg):
+                 writer: MetricWriter):
         self.n_devices = n_devices
         self.args = args
         self.writer = writer
@@ -345,8 +344,6 @@ class Objective:
                 world_size=self.n_devices,
                 rank=self.args.rank,
                 n_workers=self.args.n_workers)
-
-        self.pg = pg
 
     def __call__(self, trial) -> float:
         if self.n_devices > 1:
@@ -391,13 +388,11 @@ class Objective:
 
 def main_hyperopt(args: "HyperoptParserArgs",
                   world_size: int) -> None:
-    cpu_comm = 1 #torch.distributed.new_group(backend="gloo")
-
     maximise = {"UAS"}
     direction = "maximize" if args.optimise in maximise else "minimize"
 
     with metric_writer() as writer:
-        objective: Objective = Objective(world_size, args, writer, cpu_comm)
+        objective: Objective = Objective(world_size, args, writer)
         if args.rank == 0 or args.rank is None:
             study = optuna.create_study(
                 study_name=args.name,
