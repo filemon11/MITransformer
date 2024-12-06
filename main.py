@@ -315,10 +315,12 @@ def hyperopt_args_sampler(
 class Objective:
     def __init__(self, n_devices: int,
                  args: "HyperoptParserArgs",
-                 writer: MetricWriter):
+                 writer: MetricWriter,
+                 pg):
         self.n_devices = n_devices
         self.args = args
         self.writer = writer
+        self.pg = pg
 
         self.datasets = _load_dataset(args, memmaped=True)
 
@@ -348,7 +350,7 @@ class Objective:
     def __call__(self, trial) -> float:
         if self.n_devices > 1:
             trial = optuna.integration.TorchDistributedTrial(
-                trial)  # type: ignore
+                trial, self.pg)  # type: ignore
 
         args = TrainParserArgs.from_kwargs(**{
             name: hyperopt_args_sampler(name, arg, trial) for
@@ -391,8 +393,8 @@ def main_hyperopt(args: "HyperoptParserArgs",
     maximise = {"UAS"}
     direction = "maximize" if args.optimise in maximise else "minimize"
 
-    with metric_writer() as writer:
-        objective: Objective = Objective(world_size, args, writer)
+    with new_pg(world_size, "gloo") as pg, metric_writer() as writer:
+        objective: Objective = Objective(world_size, args, writer, pg)
         if args.rank == 0 or args.rank is None:
             study = optuna.create_study(
                 study_name=args.name,
@@ -438,21 +440,48 @@ def options(seq_of_items: list[tuple[str, Iterable[Any]]]
                 yield d
 
 
-def setup_ddp(rank, world_size) -> bool:
+def setup_group(world_size, backend: str = "gloo") -> dist.ProcessGroup | None:
     if world_size > 1:
         info(None, logger,
-             ("Initialising process with world_size "
-              f"{world_size} and rank {rank}."))
-        dist.init_process_group("nccl", world_size=world_size, rank=rank)
+             f"Initialising process group with backend {backend}")
+        pg = dist.new_group(backend)
+        return pg
+    else:
+        return None
+
+
+def clean_group(world_size, pg) -> None:
+    if world_size > 1:
+        dist.destroy_process_group(pg)
+
+
+@contextmanager
+def new_pg(world_size, backend: str = "gloo") -> Iterator[dist.ProcessGroup
+                                                          | None]:
+    try:
+        pg = setup_group(world_size, backend)
+        yield pg
+    finally:
+        clean_group(world_size, pg)
+
+
+def setup_ddp(rank, world_size, backend: str = "nccl") -> bool:
+    if world_size > 1:
+        info(None, logger,
+             (f"Initialising process group with backend {backend}, "
+              f"world size {world_size} and rank {rank}."))
+        dist.init_process_group(backend, world_size=world_size, rank=rank)
         torch.cuda.set_device(torch.distributed.get_rank())
         return True
     else:
         return False
 
 
-def clean_ddp(world_size) -> None:
+def clean_ddp(world_size, pg=None) -> None:
+    """if None then destroy dist.group.WORLD"""
     if world_size > 1:
-        dist.destroy_process_group()
+        pg = dist.group.WORLD if pg is None else pg
+        clean_group(world_size, pg)
 
 
 @contextmanager
