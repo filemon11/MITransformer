@@ -444,7 +444,7 @@ def setup_group(world_size, backend: str = "gloo") -> dist.ProcessGroup | None:
     if world_size > 1:
         info(None, logger,
              f"Initialising process group with backend {backend}")
-        pg = dist.new_group(backend)
+        pg = dist.new_group(backend=backend)
         return pg
     else:
         return None
