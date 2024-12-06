@@ -399,7 +399,7 @@ class LMTrainer():
                 self.transformerlm,
                 device_ids=[rank],
                 output_device=device,
-                find_unused_parameters=True)
+                find_unused_parameters=False)
 
     @property
     def config(self) -> GeneralConfig:
