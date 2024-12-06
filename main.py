@@ -186,7 +186,8 @@ def main_train(
         assert args.rank is not None, "Rank cannot be None if word_size > 1."
 
     train_config = TrainConfig.from_kwargs(
-        **args.to_dict())
+        **args.to_dict(),
+        world_size=world_size)
 
     if datasets is None:
         # TODO: do this entirely in the load dataset method
@@ -373,7 +374,6 @@ class Objective:
                 args.eval_interval*step)
 
             if trial.should_prune():
-                del train_iterator
                 raise optuna.exceptions.TrialPruned()
 
         assert metrics is not None, (
@@ -489,7 +489,7 @@ def main(args: "ParserArgs") -> None:
             if mode == "train":
                 assert isinstance(args, TrainParserArgs)
                 info(args.rank, logger, "Launching model training.")
-                main_train_multiple(args, n_devices)<
+                main_train_multiple(args, n_devices)
             else:
                 assert isinstance(args, HyperoptParserArgs)
                 info(args.rank, logger, "Launching hyperparameter tuning.")

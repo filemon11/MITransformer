@@ -345,6 +345,7 @@ class GeneralConfig(Params):
     n_workers: int = 0
     model_name: str = field(default_factory=get_timestr)
     early_stop_metric: str = "loss"
+    use_ddp: bool = False
 
 
 @dataclass
@@ -375,7 +376,7 @@ class LMTrainer():
 
         rank = config.rank
         device = config.device
-        self.use_ddp = config.world_size > 1
+        self.use_ddp = config.use_ddp
 
         self.transformerlm.to(config.device)
         if self.use_ddp:
@@ -384,7 +385,6 @@ class LMTrainer():
                 device_ids=[rank],
                 output_device=device,
                 find_unused_parameters=True)
-            self.use_ddp = True
 
     @property
     def config(self) -> GeneralConfig:
