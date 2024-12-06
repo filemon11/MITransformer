@@ -798,9 +798,10 @@ class LMTrainer():
                 to_ignore,
                 reduction="sum")
 
-            # TODO: fix selection of scores for cases
-            # depth > 1 and width > 2
-            # select from score_gold["head"]; but which?
+            # clean this up a bit
+
+            # in case of multiple heads of the same type
+            # scores get averaged
             middle = score_preds.shape[0]//2
             preds_head = score_preds[:middle].mean(0).detach().cpu().numpy()
             golds_head = score_gold[
@@ -827,6 +828,10 @@ class LMTrainer():
                 # print(p)
                 # print(g)
                 pred_headlist = mst(p)
+                # one could max for each row as head instead
+                # but this would not correspond to the max probability
+                # tree given the scores
+
                 gold_headlist = mask_to_headlist(g)
                 # print(pred_headlist, gold_headlist)
                 uas_s = uas_absolute(pred_headlist, gold_headlist) + 1

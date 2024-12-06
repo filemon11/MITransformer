@@ -393,7 +393,8 @@ def main_hyperopt(args: "HyperoptParserArgs",
     maximise = {"UAS"}
     direction = "maximize" if args.optimise in maximise else "minimize"
 
-    with new_pg(world_size, "gloo") as pg, metric_writer() as writer:
+    ld = os.path.join("./runs", f"{args.name}_hyperopt")
+    with new_pg(world_size, "gloo") as pg, metric_writer(log_dir=ld) as writer:
         objective: Objective = Objective(world_size, args, writer, pg)
         if args.rank == 0 or args.rank is None:
             study = optuna.create_study(
