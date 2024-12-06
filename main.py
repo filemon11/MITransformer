@@ -376,7 +376,7 @@ class Objective:
                 raise optuna.exceptions.TrialPruned()
 
         assert metrics is not None, (
-           "eval_interval is smaller than total number of steps")
+           "eval_interval is larger than total number of steps")
         if self.writer is not None:
             self.writer.add_params(
                 args.to_dict(),
