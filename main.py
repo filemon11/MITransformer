@@ -350,7 +350,7 @@ class Objective:
     def __call__(self, trial) -> float:
         if self.n_devices > 1:
             trial = optuna.integration.TorchDistributedTrial(
-                trial, self.pg)  # type: ignore
+                trial)  # type: ignore
 
         args = TrainParserArgs.from_kwargs(**{
             name: hyperopt_args_sampler(name, arg, trial) for
@@ -391,7 +391,7 @@ class Objective:
 
 def main_hyperopt(args: "HyperoptParserArgs",
                   world_size: int) -> None:
-    cpu_comm = torch.distributed.new_group(backend="gloo")
+    cpu_comm = 1 #torch.distributed.new_group(backend="gloo")
 
     maximise = {"UAS"}
     direction = "maximize" if args.optimise in maximise else "minimize"
@@ -489,7 +489,7 @@ def main(args: "ParserArgs") -> None:
             if mode == "train":
                 assert isinstance(args, TrainParserArgs)
                 info(args.rank, logger, "Launching model training.")
-                main_train_multiple(args, n_devices)
+                main_train_multiple(args, n_devices)<
             else:
                 assert isinstance(args, HyperoptParserArgs)
                 info(args.rank, logger, "Launching hyperparameter tuning.")
