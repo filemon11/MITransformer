@@ -98,6 +98,14 @@ class Metric(Params):
     # just for typing so that we can safely call metric.loss.backward()
     # without the type checker complaining
 
+    @property
+    def device(self) -> torch.device:
+        return self.loss.device
+
+    @property
+    def is_cuda(self) -> bool:
+        return self.loss.is_cuda
+
     def minval(self) -> float:
         return math.inf if self.minimise[self.main_metric] else -math.inf
 
@@ -171,11 +179,18 @@ class Metric(Params):
             if isinstance(value, torch.Tensor):
                 setattr(self, f.name, value.detach())
 
-    def to(self, device: str | torch.device) -> None:
+    def to_(self, device: str | torch.device) -> None:
+        """Inplace"""
         for f in fields(self):
             value = getattr(self, f.name)
             if isinstance(value, torch.Tensor):
                 setattr(self, f.name, value.to(device))
+
+    def to(self, device: str | torch.device) -> Self:
+        return self.__class__(
+            **{f.name: (getattr(self, f.name).to(device)
+                        if isinstance(getattr(self, f.name), torch.Tensor)
+                        else getattr(self, f.name)) for f in fields(self)})
 
     @property
     def main_value(self) -> torch.Tensor:
@@ -738,7 +753,7 @@ class LMTrainer():
         self.optimiser.zero_grad(set_to_none=True)
 
         metric.detach()
-        metric.to("cpu")
+        metric.to_("cpu")
         return metric
 
     def eval_step(self,
@@ -827,6 +842,7 @@ class LMTrainer():
             arc_loss=arc_loss,
             perplexity=surprisal_sum,
             uas=uas_abs)
+        metric.to_("cpu")
         metric.detach()
         return metric
 
@@ -1161,8 +1177,10 @@ class LMTrainer():
 
     def gather_ddp(self, data: N) -> list[N]:
         if self.use_ddp:
-            outputs = [data]*self.config.world_size
+            outputs: list[N] = [data]*self.config.world_size
             dist.all_gather_object(outputs, data)
+            if isinstance(data, (torch.Tensor, Metric)) and data.is_cuda:
+                outputs = [t.to(data.device) for t in outputs]  # type: ignore
             return outputs
         return [data]
 
