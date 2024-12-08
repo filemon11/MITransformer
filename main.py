@@ -290,6 +290,9 @@ def main_train_multiple(
     return means_and_stds  # type: ignore
 
 
+USE_LOG = {"learning_rate"}
+
+
 def hyperopt_args_sampler(
         name: str,
         arg: T | list[T] | tuple[T, T],
@@ -302,9 +305,11 @@ def hyperopt_args_sampler(
           and len(arg) == 2
           and isinstance(arg[0], (int, float))):
         if isinstance(arg[0], float) and isinstance(arg[1], float):
-            return trial.suggest_float(name, arg[0], arg[1])
+            return trial.suggest_float(name, arg[0], arg[1],
+                                       log=name in USE_LOG)
         elif isinstance(arg[0], int) and isinstance(arg[1], int):
-            return trial.suggest_int(name, arg[0], arg[1])
+            return trial.suggest_int(name, arg[0], arg[1],
+                                     log=name in USE_LOG)
         else:
             raise Exception(
                 f"Range {arg} for arg {name} inconsistently typed!")
@@ -359,7 +364,6 @@ class Objective:
             n_runs=1)
         args.seed = args.seed + trial.number
         args_logic(args)
-
         train_iterator = main_train(
             args, self.n_devices,
             iterate=True, datasets=self.datasets)
