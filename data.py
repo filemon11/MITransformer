@@ -1346,7 +1346,7 @@ def load_dataset(details: DatasetDetails,       # type: ignore
         sets = (train, eval)
         splits = ("train", "eval")
         if len(dirs) == 3:
-            test = load_dataset(dirs[0], False, max_len_eval_test)
+            test = load_dataset(dirs[2], False, max_len_eval_test)
             sets = (train, eval, test)
             splits = ("train", "eval", "test")
     else:
