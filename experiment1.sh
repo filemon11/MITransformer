@@ -47,4 +47,4 @@ torchrun ${prefix} \
 torchrun ${prefix} \
     --name exp1_dep-in \
     ${core} \
-    --dependency_mode input 
+    --dependency_mode 'input' 
