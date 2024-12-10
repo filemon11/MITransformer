@@ -571,7 +571,8 @@ class LMTrainer():
 
             # score_preds = score_preds[~to_ignore_mask]
 
-        # print(score_preds.detach().cpu().numpy().round(2), score_gold.to(score_preds.dtype).detach().cpu().numpy())
+        # print(score_preds.detach().cpu().numpy().round(2),
+        #       score_gold.to(score_preds.dtype).detach().cpu().numpy())
         loss = F.binary_cross_entropy(
             score_preds,
             score_gold.to(score_preds.dtype),
@@ -918,7 +919,7 @@ class LMTrainer():
                     info(self.config.rank,
                          logger,
                          (f"Step: {total_steps}/" +
-                          ('inf' if train_config.max_steps is None
+                          ('inf' if train_config.max_steps is # type: ignoreNone
                            else str(train_config.max_steps))))
                     self.log_metric(train_metric, total_steps, "train")
                     info(self.config.rank, logger,
@@ -983,29 +984,18 @@ class LMTrainer():
         # load best (saved) into transformerlm
         self.load_state()
 
-        final_train = self._eval(train)
-        final_eval = self._eval(eval)
-        # Do not log here to not overwrite metrics at this training step
-        # self.log_metric(final_train, current_step, "train")
-        # self.log_metric(final_eval, current_step, "eval")
         info(self.config.rank, logger,
              f"Ended training after {current[0]} epochs, {current[1]} steps.")
         info(self.config.rank, logger,
              f"Found best model after {best[0]} epochs, {best[1]} steps.")
-        info(self.config.rank, logger,
-             f"Final best model train metric:\n{final_train.info}")
-        info(self.config.rank, logger,
-             f"Final best model eval metric:\n{final_eval.info}")
 
         if test is not None:
-            final_test = self.test(test)
-            # self.log_metric(final_test, current_step, "test")
-            info(self.config.rank, logger,
-                 f"Final best model test metric:\n{final_test.info}")
-            return (final_train, final_eval, final_test)
-
+            return self.test(train=train,  # type: ignore
+                             eval=eval,
+                             test=test)
         else:
-            return (final_train, final_eval)
+            return self.test(train=train,  # type: ignore
+                             eval=eval)
         # if score_preds is not None and score_gold is not None:
         #    token_mapper: TokenMapper = TokenMapper.load("./tokmap.pickle")
         #    for i in range(10):
@@ -1081,10 +1071,13 @@ class LMTrainer():
                 for batch in loader]
         return self.gather_metrics(sum_metrics(metrics))
 
-    def test(self, dataset: DepDataset | DataLoader) -> Metric:
-        dataset = self.get_loader(dataset)
-        metric = self._eval(dataset)
-        return metric
+    def test(self, **datasets: DepDataset | DataLoader) -> tuple[Metric, ...]:
+        metrics = tuple([self._eval(self.get_loader(ds))
+                         for ds in datasets.values()])
+        for n, m in zip(datasets.keys(), metrics):
+            info(self.config.rank, logger,
+                 f"Test metric for {n} split:\n{m.info}")
+        return metrics
 
     def predict(
             self, dataset: DepDataset,

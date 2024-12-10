@@ -4,7 +4,8 @@ import torch.distributed as dist
 from data import (load_dataset, dataset_details_full, DatasetDictTrain,
                   dataset_details_full_memmaped, get_loader, Dataset)
 from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
-                     Metric, MetricWriter, metric_writer, sum_and_std_metrics)
+                     Metric, MetricWriter, metric_writer, sum_and_std_metrics,
+                     minimise)
 from model import TransformerDescription, description_builder
 from params import Params, dict_info
 
@@ -396,8 +397,7 @@ class Objective:
 
 def main_hyperopt(args: "HyperoptParserArgs",
                   world_size: int) -> None:
-    maximise = {"UAS"}
-    direction = "maximize" if args.optimise in maximise else "minimize"
+    direction = "minimize" if minimise[args.optimise.lower()] else "maximize"
 
     ld = os.path.join("./runs", f"{args.name}_hyperopt")
     with new_pg(world_size, "gloo") as pg, metric_writer(log_dir=ld) as writer:
