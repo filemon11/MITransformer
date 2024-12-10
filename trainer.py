@@ -5,12 +5,9 @@ from data import (DepDataset, DUMMY, ROOT, EOS,
                   CoNNLUTokenisedBatch, EssentialBatch, D)
 from tokeniser import TokenMapper
 from parse import parse_list_of_words_with_spacy
-from dependencies import (plot_tree, mst, merge_head_child_scores,
+from dependencies import (mst, merge_head_child_scores,
                           dummy_mask_removal, mask_to_headlist, uas_absolute)
 from params import Params
-
-import seaborn as sns   # type: ignore
-import matplotlib.pyplot as plt   # type: ignore
 
 import numpy as np
 import torch
@@ -35,7 +32,7 @@ from collections import defaultdict
 from typing import (Self, Literal, cast,
                     Container, Iterable, Mapping,
                     ClassVar, TypeVar, Callable,
-                    Any, Generator)
+                    Any, Generator, TypedDict, NotRequired)
 
 from logmaker import getLogger, info, warning, get_timestr
 
@@ -233,7 +230,8 @@ class Metric(Params):
             except ValueError:
                 return False
 
-    def to_dict(self, as_str: bool = False) -> dict[str, Any]:
+    def to_dict(self, as_str: bool = False,
+                omit_undefined: bool = False) -> dict[str, Any]:
         if as_str:
             return {attr: str(getattr(self, attr))
                     for attr in self._to_mean}
@@ -352,6 +350,15 @@ def metric_writer(*args, **kwds):
         writer.flush()
 
 
+class Result(TypedDict):
+    train: Metric
+    eval: Metric
+
+
+class TestResult(Result):
+    test: NotRequired[Metric]
+
+
 @dataclass
 class GeneralConfig(Params):
     batch_size: int = 16
@@ -439,19 +446,15 @@ class LMTrainer():
 
     @classmethod
     def load(cls, model_name: str,
-             optional_config: dict | GeneralConfig = dict()) -> Self:
+             **optional_config: Any) -> Self:
 
         model, transformer_config = cls.load_model(model_name)
 
         with open(os.path.join(
                     cls.model_dir, model_name, "config"), 'rb') as handle:
-            config = pickle.load(handle)
+            config: GeneralConfig = pickle.load(handle)
 
-        if isinstance(optional_config, GeneralConfig):
-            config = optional_config
-        else:
-            for key, value in optional_config.items():
-                setattr(config, key, value)
+        config.update_from_kwargs(**optional_config)
 
         cls.model_info(model, transformer_config, config)
 
@@ -786,6 +789,7 @@ class LMTrainer():
                 logits, labels,
                 ignore_index),
             labels, ignore_index).sum().detach().cpu().item()
+
         uas_abs = None
         arc_loss = None
         if (mode == "supervised"
@@ -825,24 +829,25 @@ class LMTrainer():
             # print(golds_arcs.astype(float))
             not_padding = (batch["label_ids"]
                            != ignore_index).cpu().numpy()[:, 1:]
-            uas_abs = 0
-            for p, g, n in zip(preds_arcs, golds_arcs, not_padding):
-                # print(n)
-                p = p[n][:, n]
-                g = g[n][:, n]
-                # print(p)
-                # print(g)
-                pred_headlist = mst(p)
-                # one could max for each row as head instead
-                # but this would not correspond to the max probability
-                # tree given the scores
 
-                gold_headlist = mask_to_headlist(g)
-                # print(pred_headlist, gold_headlist)
-                uas_s = uas_absolute(pred_headlist, gold_headlist) + 1
-                uas_abs += uas_s
-                # add 1 for dummy mask since metric divides through
-                # the number of all tokens
+            uas_abs = sum(map(get_uas_abs, zip(
+                preds_arcs, golds_arcs, not_padding)))
+
+            # # does not appear to be faster:
+            # uas_abs_l = [0]
+            # if self.config.rank == 0 or self.config.rank is None:
+            #     pool = mp.Pool(
+            #         processes=self.config.n_workers*self.config.world_size)
+            #     uas_abs_l = [sum(
+            #         pool.map(
+            #             get_uas_abs, zip(
+            #                 preds_arcs, golds_arcs, not_padding)))]
+            #     pool.close()
+            # 
+            # if self.use_ddp:
+            #     dist.barrier()
+            #     dist.broadcast_object_list(uas_abs, src=0)
+            #     # to tensor better with NCCL?
 
             arc_loss = arc_loss
 
@@ -876,7 +881,7 @@ class LMTrainer():
             self,
             train: DepDataset[IDSen] | DataLoader,
             eval: DepDataset[IDSen] | DataLoader,
-            **kwargs) -> Generator[tuple[Metric, Metric],
+            **kwargs) -> Generator[Result,
                                    None,
                                    tuple[tuple[int, int], tuple[int, int]]]:
         assert self.train_config is not None, "Config missing training params."
@@ -919,7 +924,8 @@ class LMTrainer():
                     info(self.config.rank,
                          logger,
                          (f"Step: {total_steps}/" +
-                          ('inf' if train_config.max_steps is # type: ignoreNone
+                          ('inf' if train_config.max_steps
+                           is None  # type: ignore
                            else str(train_config.max_steps))))
                     self.log_metric(train_metric, total_steps, "train")
                     info(self.config.rank, logger,
@@ -947,7 +953,8 @@ class LMTrainer():
                     else:
                         evals_without_improvement += 1
 
-                    yield train_metric, eval_metric
+                    yield {"train": train_metric,
+                           "eval": eval_metric}
 
                     if self.check_early_stop(evals_without_improvement):
                         break_training = True
@@ -964,8 +971,7 @@ class LMTrainer():
               train: DepDataset[IDSen] | DataLoader,
               eval: DepDataset[IDSen] | DataLoader,
               test: DepDataset[IDSen] | DataLoader | None = None,
-              **kwargs) -> tuple[Metric, Metric] | tuple[
-                  Metric, Metric, Metric]:
+              **kwargs) -> TestResult:
         assert self.train_config is not None, "Config missing training params."
 
         train = self.get_loader(train)
@@ -989,13 +995,9 @@ class LMTrainer():
         info(self.config.rank, logger,
              f"Found best model after {best[0]} epochs, {best[1]} steps.")
 
-        if test is not None:
-            return self.test(train=train,  # type: ignore
-                             eval=eval,
-                             test=test)
-        else:
-            return self.test(train=train,  # type: ignore
-                             eval=eval)
+        return self.test(train=train,  # type: ignore
+                         eval=eval,
+                         test=test)
         # if score_preds is not None and score_gold is not None:
         #    token_mapper: TokenMapper = TokenMapper.load("./tokmap.pickle")
         #    for i in range(10):
@@ -1014,7 +1016,8 @@ class LMTrainer():
         #            gold_child, ax=ax[1][1])
         #        fig.savefig(f"plot_{i}.png")
         #
-        #        not_padding = (batch["input_ids"][i] != token_mapper.pad_id).cpu().numpy()
+        #        not_padding = (batch["input_ids"][i]
+        #                       != token_mapper.pad_id).cpu().numpy()
         #
         #        # TODO: use heuristic of leaving out root node
         #        # and then calculating MST
@@ -1071,10 +1074,12 @@ class LMTrainer():
                 for batch in loader]
         return self.gather_metrics(sum_metrics(metrics))
 
-    def test(self, **datasets: DepDataset | DataLoader) -> tuple[Metric, ...]:
-        metrics = tuple([self._eval(self.get_loader(ds))
-                         for ds in datasets.values()])
-        for n, m in zip(datasets.keys(), metrics):
+    def test(self, **datasets: DepDataset | DataLoader | Any
+             ) -> dict[str, Metric]:
+        metrics = {n: self._eval(self.get_loader(ds))
+                   for n, ds in datasets.items()
+                   if isinstance(ds, (DataLoader, DepDataset))}
+        for n, m in metrics.items():
             info(self.config.rank, logger,
                  f"Test metric for {n} split:\n{m.info}")
         return metrics
@@ -1214,7 +1219,7 @@ class LMTrainer():
         return data
 
 
-#def logits_to_probs(logits: torch.Tensor,
+# def logits_to_probs(logits: torch.Tensor,
 #                    labels: torch.Tensor,
 #                    ignore_id: int) -> list[torch.Tensor]:
 #    probs = torch.softmax(logits, dim=-1)
@@ -1300,3 +1305,19 @@ def unpad_masks(masks: torch.Tensor, labels: torch.Tensor,
             sentence[:, sen_labels != ignore_index][
                 :, :, sen_labels != ignore_index])
     return unpadded_list
+
+
+def get_uas_abs(inp: tuple[np.ndarray, np.ndarray, int]) -> int:
+    pred_arcs, gold_arcs, upto_not_padding = inp
+    pred_arcs = pred_arcs[upto_not_padding][:, upto_not_padding]
+    gold_arcs = gold_arcs[upto_not_padding][:, upto_not_padding]
+    pred_headlist = mst(pred_arcs)
+    # one could max for each row as head instead
+    # but this would not correspond to the max probability
+    # tree given the scores
+    gold_headlist = mask_to_headlist(gold_arcs)
+    # print(pred_headlist, gold_headlist)
+    uas_s = uas_absolute(pred_headlist, gold_headlist) + 1
+    # add 1 for dummy mask since metric divides through
+    # the number of all tokens)
+    return uas_s

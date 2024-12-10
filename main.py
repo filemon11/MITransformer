@@ -5,9 +5,9 @@ from data import (load_dataset, dataset_details_full, DatasetDictTrain,
                   dataset_details_full_memmaped, get_loader, Dataset)
 from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
                      Metric, MetricWriter, metric_writer, sum_and_std_metrics,
-                     minimise)
+                     minimise, Result)
 from model import TransformerDescription, description_builder
-from params import Params, dict_info
+from params import Params, dict_info, Undefined
 
 import optuna
 import random
@@ -25,6 +25,8 @@ from logmaker import getLogger, info, logging_config, get_timestr
 from typing import (
     Literal, Any, Iterable, cast, Iterator, TypeVar, Generic,
     Sequence, Callable)
+
+import time
 
 logger = getLogger(__name__)
 optuna.logging.enable_propagation()  # Propagate logs to the root logger.
@@ -180,8 +182,8 @@ def main_train(
         world_size: int,
         iterate: bool = False,
         datasets: DatasetDictTrain | None = None
-        ) -> (Iterator[tuple[Metric, Metric]]
-              | Iterator[tuple[Metric, Metric, Metric]]):
+        ) -> Iterator[Result]:
+
     # device: where to execute computation
     if world_size > 1:
         assert args.rank is not None, "Rank cannot be None if word_size > 1."
@@ -250,13 +252,15 @@ def main_train_multiple(
         datasets: DatasetDictTrain | None = None
         ) -> (tuple[MeanStdDict, MeanStdDict]
               | tuple[MeanStdDict, MeanStdDict, MeanStdDict]):
+    start = time.time()
     """Calculates the mean and standard deviation of several
     runs."""
     # How to keep track of results? We are logging them
     # but shouldn't we also forward them to tensorboard?
     # but we only have the final results or should we compute
     # the mean over the models for each step?
-    datasets = _load_dataset(args, memmaped=True)
+    if datasets is None:
+        datasets = _load_dataset(args, memmaped=True)
 
     assert args.n_runs != 0, "--n_runs cannot be 0"
 
@@ -269,11 +273,11 @@ def main_train_multiple(
         args_logic(run_args)  # also sets seed
 
         metrics_list.append(
-            next(main_train(
+            tuple(next(main_train(
                 run_args,
                 world_size,
                 iterate=False,
-                datasets=datasets)))  # type: ignore
+                datasets=datasets)).values()))  # type: ignore
 
     means_and_stds = tuple(sum_and_std_metrics(seq)
                            for seq in zip(*metrics_list))
@@ -288,7 +292,51 @@ def main_train_multiple(
         info(args.rank, logger,
              f"Final mean and std test: {dict_info(means_and_stds[2])}")
 
+    end = time.time()
+    info(args.rank, logger, f"Took {end - start} seconds!")
     return means_and_stds  # type: ignore
+
+
+def main_test(
+        args: "TestParserArgs",
+        world_size: int,
+        datasets: DatasetDictTrain | None = None
+        ) -> tuple[Metric, Metric, Metric]:
+    """Calculates the mean and standard deviation of several
+    runs."""
+
+    # device: where to execute computation
+    if world_size > 1:
+        assert args.rank is not None, "Rank cannot be None if word_size > 1."
+
+    trainer = LMTrainer.load(
+        world_size=world_size,
+        use_input_mask=(args.dependency_mode == "input"),
+        **args.to_dict())
+
+    args.update_from_kwargs(**trainer.config.to_dict())
+
+    if datasets is None:
+        datasets = _load_dataset(
+            args,
+            memmaped=True)
+    assert isinstance(datasets, dict)
+
+    # Training setting
+    if "test" in datasets:
+        metrics = trainer.test(
+            train=datasets["train"],
+            eval=datasets["eval"],
+            test=datasets["test"])
+    else:
+        metrics = trainer.test(
+            train=datasets["train"],
+            eval=datasets["eval"])
+
+    del trainer
+    del datasets
+
+    return metrics  # type: ignore
 
 
 USE_LOG = {"learning_rate"}
@@ -374,7 +422,7 @@ class Objective:
         for step, metrics in enumerate(train_iterator, start=1):
             # Handle pruning based on the intermediate value.
             trial.report(
-                getattr(metrics[1], self.args.optimise),
+                getattr(metrics["eval"], self.args.optimise),
                 args.eval_interval*step)
 
             if trial.should_prune():
@@ -385,13 +433,13 @@ class Objective:
         if self.writer is not None:
             self.writer.add_params(
                 args.to_dict(),
-                metrics[1],
+                metrics["eval"],
                 run_name=str(trial.number),
                 global_step=args.eval_interval*step)
 
         # trial.set_user_attr("metric_dicts", metric_dicts)
 
-        loss: float = getattr(metrics[1], self.args.optimise)
+        loss: float = getattr(metrics["eval"], self.args.optimise)
         return loss
 
 
@@ -521,14 +569,19 @@ def main(args: "ParserArgs") -> None:
         with ddp(args.rank, n_devices) as ddp_status:
             info(args.rank, logger, f"Using DDP: {ddp_status}")
             mode = args.mode
-            if mode == "train":
-                assert isinstance(args, TrainParserArgs)
-                info(args.rank, logger, "Launching model training.")
-                main_train_multiple(args, n_devices)
-            else:
-                assert isinstance(args, HyperoptParserArgs)
-                info(args.rank, logger, "Launching hyperparameter tuning.")
-                main_hyperopt(args, n_devices)
+            match mode:
+                case "train":
+                    assert isinstance(args, TrainParserArgs)
+                    info(args.rank, logger, "Launching model training.")
+                    main_train_multiple(args, n_devices)
+                case "test":
+                    assert isinstance(args, TestParserArgs)
+                    info(args.rank, logger, "Launching model testing.")
+                    main_test(args, n_devices)
+                case _:
+                    assert isinstance(args, HyperoptParserArgs)
+                    info(args.rank, logger, "Launching hyperparameter tuning.")
+                    main_hyperopt(args, n_devices)
 
 
 @dataclass
@@ -633,13 +686,23 @@ class HyperoptParserArgs(ParserArgs):
 
 
 @dataclass
+class TestParserArgs(ParserArgs):
+    model_name: str
+    dependency_mode: str | Undefined
+    batch_size: int | Undefined
+    loss_alpha: float | None | Undefined
+    arc_loss_weighted: bool | Undefined
+
+
+@dataclass
 class DataprepParserArgs(ParserArgs):
     pass
 
 # TODO: make bool args optionally just acccept flag for True
 
 
-def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
+def parse_args() -> (TrainParserArgs | HyperoptParserArgs
+                     | DataprepParserArgs | TestParserArgs):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--rank', '--local-rank', type=OptNone(int), default=None,
@@ -1007,8 +1070,35 @@ def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
         help="Whether to use bias in all of the model weights")
 
     # # Dataprep Parser
-    dataprep = subparsers.add_parser(
+    subparsers.add_parser(
         "dataprep", help="dataprep mode")
+
+    # # Test Parser
+    test_parser = subparsers.add_parser(
+        "test", help="testing mode")
+
+    # # # Trainer parser group
+    trainer_group = test_parser.add_argument_group('trainer')
+    trainer_group.add_argument(
+        '--model_name', type=OptNone(str),
+        default=None,
+        help="model name. Set to experiment name if None")
+    trainer_group.add_argument(
+        '--dependency_mode', type=str,
+        choices=("supervised", "input", "standard"),
+        default=Undefined,
+        help="how to use dependency information")
+    trainer_group.add_argument(
+        '--batch_size', type=int, default=Undefined,
+        help=("batch size; in case of multiple GPUs it is "
+              "chunked across the devices"))
+    trainer_group.add_argument(
+        '--loss_alpha', type=OptNone(float), default=Undefined,
+        help=("loss weight for supervised learning; 1.0 is only "
+              "language model training while 0.0 is only arc training"))
+    trainer_group.add_argument(
+        '--arc_loss_weighted', type=str_to_bool, default=Undefined,
+        help="Overrepresent arcs against non-arcs in arc loss calculation")
 
     args = parser.parse_args()
     match args.mode:
@@ -1016,11 +1106,14 @@ def parse_args() -> TrainParserArgs | HyperoptParserArgs | DataprepParserArgs:
             return TrainParserArgs(**vars(args))
         case "hyperopt":
             return HyperoptParserArgs(**vars(args))
-        case _:
+        case "dataprep":
             return DataprepParserArgs(**vars(args))
+        case _:
+            return TestParserArgs(**vars(args))
 
 
-def args_logic(args: TrainParserArgs | HyperoptParserArgs | DataprepParserArgs
+def args_logic(args: (TrainParserArgs | HyperoptParserArgs
+                      | DataprepParserArgs | TestParserArgs)
                ) -> None:
     seed_everything(args.seed)
     args.device = make_device_str(args.device)
@@ -1034,6 +1127,7 @@ def args_logic(args: TrainParserArgs | HyperoptParserArgs | DataprepParserArgs
             if getattr(args, specific_dropout) == -1:
                 setattr(args, specific_dropout, args.dropout)
 
+    if isinstance(args, (TrainParserArgs, TestParserArgs)):
         if args.model_name is None:
             args.model_name = args.name
 
@@ -1045,7 +1139,8 @@ def args_logic(args: TrainParserArgs | HyperoptParserArgs | DataprepParserArgs
 
 
 if __name__ == "__main__":
-    args: TrainParserArgs | HyperoptParserArgs | DataprepParserArgs
+    args: (TrainParserArgs | HyperoptParserArgs
+           | DataprepParserArgs | TestParserArgs)
     args = parse_args()
     logging_config(logname=args.name)
     # logging_config(
