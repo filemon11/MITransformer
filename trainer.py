@@ -523,6 +523,7 @@ class LMTrainer():
              ignore_index: int = -100,
              reduction: Literal["sum", "mean"] = "mean"
              ) -> torch.Tensor:
+
         logits = torch.swapaxes(logits, 1, 2)
         loss = F.cross_entropy(
             logits, labels,
@@ -732,22 +733,21 @@ class LMTrainer():
             reduction="sum")
         arc_loss: torch.Tensor | None = None
 
-        score_preds, score_gold = self.prepare_scores(
-            arc_scores, batch["masks"])
-        if (self.train_config.dependency_mode == "supervised"
-                and score_preds is not None
-                and score_gold is not None):
+        if self.train_config.dependency_mode == "supervised":
+            score_preds, score_gold = self.prepare_scores(
+                arc_scores, batch["masks"])
+            if score_preds is not None and score_gold is not None:
 
-            to_ignore = self.get_ignore_mask(
-                score_preds,
-                batch["label_ids"],
-                ignore_index)
+                to_ignore = self.get_ignore_mask(
+                    score_preds,
+                    batch["label_ids"],
+                    ignore_index)
 
-            arc_loss = self.arc_loss(
-                score_preds,
-                score_gold,
-                to_ignore,
-                reduction="sum")
+                arc_loss = self.arc_loss(
+                    score_preds,
+                    score_gold,
+                    to_ignore,
+                    reduction="sum")
 
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
 
@@ -779,8 +779,6 @@ class LMTrainer():
             ignore_index=ignore_index, reduction="sum")
 
         # print(batch["masks"])
-        score_preds, score_gold = self.prepare_scores(
-            arc_scores, batch["masks"])
 
         num_instances = int((labels != ignore_index).sum().item())
 
@@ -792,64 +790,67 @@ class LMTrainer():
 
         uas_abs = None
         arc_loss = None
-        if (mode == "supervised"
-                and score_preds is not None
-                and score_gold is not None):
+        if mode == "supervised":
+            score_preds, score_gold = self.prepare_scores(
+                arc_scores, batch["masks"])
+            if score_preds is not None and score_gold is not None:
 
-            to_ignore = self.get_ignore_mask(
-                score_preds,
-                batch["label_ids"],
-                ignore_index)
+                to_ignore = self.get_ignore_mask(
+                    score_preds,
+                    batch["label_ids"],
+                    ignore_index)
 
-            arc_loss = self.arc_loss(
-                score_preds,
-                score_gold,
-                to_ignore,
-                reduction="sum")
+                arc_loss = self.arc_loss(
+                    score_preds,
+                    score_gold,
+                    to_ignore,
+                    reduction="sum")
 
-            # clean this up a bit
+                # clean this up a bit
 
-            # in case of multiple heads of the same type
-            # scores get averaged
-            middle = score_preds.shape[0]//2
-            preds_head = score_preds[:middle].mean(0).detach().cpu().numpy()
-            golds_head = score_gold[
-                :middle].float().mean(0).detach().cpu().numpy()
-            preds_child = score_preds[middle:].mean(0).detach().cpu().numpy()
-            golds_child = score_gold[
-                middle:].float().mean(0).detach().cpu().numpy()
-            # print("golds_head", golds_head.astype(float))
-            # print("golds_child", golds_child.astype(float))
-            preds_arcs = dummy_mask_removal(
-                merge_head_child_scores(preds_head, preds_child))
-            golds_arcs = dummy_mask_removal(
-                merge_head_child_scores(golds_head, golds_child))
+                # in case of multiple heads of the same type
+                # scores get averaged
+                middle = score_preds.shape[0]//2
+                preds_head = score_preds[
+                    :middle].mean(0).detach().cpu().numpy()
+                golds_head = score_gold[
+                    :middle].float().mean(0).detach().cpu().numpy()
+                preds_child = score_preds[
+                    middle:].mean(0).detach().cpu().numpy()
+                golds_child = score_gold[
+                    middle:].float().mean(0).detach().cpu().numpy()
+                # print("golds_head", golds_head.astype(float))
+                # print("golds_child", golds_child.astype(float))
+                preds_arcs = dummy_mask_removal(
+                    merge_head_child_scores(preds_head, preds_child))
+                golds_arcs = dummy_mask_removal(
+                    merge_head_child_scores(golds_head, golds_child))
 
-            # print(preds_arcs.round(2))
-            # print(golds_arcs.astype(float))
-            not_padding = (batch["label_ids"]
-                           != ignore_index).cpu().numpy()[:, 1:]
+                # print(preds_arcs.round(2))
+                # print(golds_arcs.astype(float))
+                not_padding = (batch["label_ids"]
+                               != ignore_index).cpu().numpy()[:, 1:]
 
-            uas_abs = sum(map(get_uas_abs, zip(
-                preds_arcs, golds_arcs, not_padding)))
+                uas_abs = sum(map(get_uas_abs, zip(
+                    preds_arcs, golds_arcs, not_padding)))
 
-            # # does not appear to be faster:
-            # uas_abs_l = [0]
-            # if self.config.rank == 0 or self.config.rank is None:
-            #     pool = mp.Pool(
-            #         processes=self.config.n_workers*self.config.world_size)
-            #     uas_abs_l = [sum(
-            #         pool.map(
-            #             get_uas_abs, zip(
-            #                 preds_arcs, golds_arcs, not_padding)))]
-            #     pool.close()
-            # 
-            # if self.use_ddp:
-            #     dist.barrier()
-            #     dist.broadcast_object_list(uas_abs, src=0)
-            #     # to tensor better with NCCL?
+                # # does not appear to be faster:
+                # uas_abs_l = [0]
+                # if self.config.rank == 0 or self.config.rank is None:
+                #     pool = mp.Pool(
+                #         processes=self.config.n_workers*self.config.world_size)
+                #     uas_abs_l = [sum(
+                #         pool.map(
+                #             get_uas_abs, zip(
+                #                 preds_arcs, golds_arcs, not_padding)))]
+                #     pool.close()
+                #
+                # if self.use_ddp:
+                #     dist.barrier()
+                #     dist.broadcast_object_list(uas_abs, src=0)
+                #     # to tensor better with NCCL?
 
-            arc_loss = arc_loss
+                arc_loss = arc_loss
 
         metric = self.get_metric(
             num_instances,
