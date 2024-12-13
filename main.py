@@ -596,7 +596,7 @@ class ParserArgs(Params):
     max_len_train: None | int
     max_len_eval_test: None | int
     vocab_size: int | None
-    triangulate: bool
+    triangulate: int
     first_k: int | None
     first_k_eval_test: int | None
     connect_with_dummy: bool
@@ -730,7 +730,7 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
     data_group = parser.add_argument_group('data')
     data_group.add_argument(
         '--dataset_name', type=str, help='name of the dataset to load',
-        default='Wikitext')
+        default='Wikitext_raw')
     data_group.add_argument(
         '--max_len_train', type=OptNone(int), default=40,
         help='maximum number of tokens in training set')
@@ -738,7 +738,7 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         '--max_len_eval_test', type=OptNone(int), default=None,
         help='maximum number of tokens in eval set')
     data_group.add_argument(
-        '--triangulate', type=str_to_bool, default=True,
+        '--triangulate', type=int, default=0,
         help='TODO')
     data_group.add_argument(
         '--vocab_size', type=OptNone(int), default=50_000,
@@ -868,7 +868,7 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
               "can be further specified by additional dropout params"))
     model_group.add_argument(
         '--dropout_attn', type=OptNone(float), default=-1,
-        help=("dropout for the attention module; "
+        help=("DEPREPCATED; dropout for the attention module; "
               "overridden by --dropout if set to -1"))
     model_group.add_argument(
         '--dropout_resid', type=OptNone(float), default=-1,
