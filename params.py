@@ -4,7 +4,6 @@ import inspect
 from typing import Any, Self
 
 
-
 class Undefined():
     pass
 

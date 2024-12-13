@@ -37,6 +37,10 @@ from typing import (Iterable, Iterator, Sequence, TypedDict,
                     Concatenate, NotRequired, Generic, Union, overload,
                     TypeVarTuple)
 
+from logmaker import getLogger, info
+
+logger = getLogger(__name__)
+
 ENCODING = "utf-8"
 
 
@@ -103,8 +107,7 @@ class TransformMaskHeadChild(MaskTransform):
         ATTENTION: modifies the matrix inplace."""
 
         head = mask
-        child = mask.T
-
+        child = mask.T.copy()
         # head[range(len(head)), range(len(head))] = True
         # child[range(len(child)), range(len(child))] = True
 
@@ -150,7 +153,6 @@ class TransformMaskHeadChild(MaskTransform):
 
         for key in self.keys_for_child:
             out_dict[key] = child
-        # print(head)
         # print(child)
 
         return out_dict
@@ -201,8 +203,8 @@ class MaskedSentence(TypedDict):
 
 
 class IDDict(TypedDict):
-    input_ids: npt.NDArray[np.uint16]
-    label_ids: npt.NDArray[np.uint16]
+    input_ids: npt.NDArray[np.uint32]
+    label_ids: npt.NDArray[np.uint32]
 
 
 class CoNNLUSentence(MaskedSentence):
@@ -257,6 +259,7 @@ class DepDataset(Dataset, ABC, Generic[Sen]):
     keys_for_tensors: set[str]
     keys_for_padding: dict[str, int]
     keys_for_mask_padding: dict[str, bool]
+    transform_mask: TransformFunc
 
     @classmethod
     @abstractmethod
@@ -306,7 +309,7 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
         self.masks_setting: Literal['complete', 'current', 'next']
         self.masks_setting = masks_setting
 
-        self.tokenised: list[npt.NDArray[np.uint16]] | None = None
+        self.tokenised: list[npt.NDArray[np.uint32]] | None = None
 
         self.token_mapper: TokenMapper | None
 
@@ -396,7 +399,7 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
                 label_ids=self.tokenised[idx][1:])
 
     def map_to_ids(self, token_mapper: TokenMapper) -> None:
-        self.tokenised = [np.array(sentence, dtype=np.uint16)
+        self.tokenised = [np.array(sentence, dtype=np.uint32)
                           for sentence in token_mapper(self.tokens)]
         self.token_mapper = token_mapper
 
@@ -547,7 +550,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
     def map_to_ids(self, token_mapper: TokenMapper, memdir: str) -> None:
         assert self.file is not None
         id_head_list_generator = (np.stack((
-            np.array(token_mapper([tokens])[0], dtype=np.uint16),
+            np.array(token_mapper([tokens])[0], dtype=np.uint32),
             headlist))
             for tokens, headlist in self.sentences)
 
@@ -654,7 +657,7 @@ class MemMapWindowDataset(MemMapDataset):
 
         i = self.max_len * idx
         data = np.memmap(self.memdir,
-                         dtype=np.uint16,
+                         dtype=np.uint32,
                          mode='r',
                          shape=(self.arr_len, 2))   # type: ignore
         ids = np.concat(
@@ -701,7 +704,7 @@ class MemMapWindowDataset(MemMapDataset):
             arr_len += len(tokens)
         self.arr_len = arr_len
 
-        arr = np.memmap(memdir, dtype=np.uint16, mode='w+', shape=(arr_len, 2))
+        arr = np.memmap(memdir, dtype=np.uint32, mode='w+', shape=(arr_len, 2))
 
         idx = 0
         for tokens, headlist in self.sentences:
@@ -709,7 +712,7 @@ class MemMapWindowDataset(MemMapDataset):
                 len(headlist))[headlist == 0] + 1
             headlist -= np.arange(headlist.shape[-1]) + 1
             arr[idx:idx+len(tokens), 0] = np.array(token_mapper([tokens])[0],
-                                                   dtype=np.uint16)
+                                                   dtype=np.uint32)
             arr[idx:idx+len(tokens), 1] = headlist
             idx += len(tokens)
         arr.flush()
@@ -910,11 +913,15 @@ class PaddingCollate(Collate):
             self,
             keys_to_torch: set[str] = set(),
             pad_with: dict[str, int] = dict(),
-            pad_mask_with: dict[str, bool] = dict()
+            pad_mask_with: dict[str, bool] = dict(),
+            connect_with_dummy: bool = True,
+            connect_with_self: bool = False
             ):
         super().__init__(keys_to_torch)
         self.pad_with = pad_with
         self.pad_mask_with = pad_mask_with
+        self.connect_with_dummy = connect_with_dummy
+        assert not connect_with_self, "not implemented"
 
     def __call__(
             self,
@@ -953,6 +960,8 @@ class PaddingCollate(Collate):
             for key, b in self.pad_mask_with.items():
                 for mask_k, mask in new_sentence[key].items():  # type: ignore
                     new_mask = np.full((max_lens[key], max_lens[key]), b)
+                    if self.connect_with_dummy:
+                        new_mask[:, 0] = not b
                     new_mask[:mask.shape[0], :mask.shape[1]] = mask
                     new_sentence[key][mask_k] = new_mask  # type: ignore
 
@@ -1040,6 +1049,11 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
                 dataset, num_replicas=world_size,
                 rank=rank, shuffle=shuffle, drop_last=False)
 
+        connect_with_dummy = False
+        connect_with_self = False
+        if isinstance(dataset.transform_mask, TransformMaskHeadChild):
+            connect_with_dummy = dataset.transform_mask.connect_with_dummy
+            connect_with_self = dataset.transform_mask.connect_with_self
         return DataLoader(
             dataset,
             shuffle=False if sampler is not None else shuffle,
@@ -1048,7 +1062,9 @@ def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
             collate_fn=PaddingCollate(
                 dataset.keys_for_tensors,
                 dataset.keys_for_padding,
-                dataset.keys_for_mask_padding),
+                dataset.keys_for_mask_padding,
+                connect_with_dummy=connect_with_dummy,
+                connect_with_self=connect_with_self),
             sampler=sampler,
             pin_memory=True,
             num_workers=n_workers,
@@ -1205,21 +1221,40 @@ EWT = DatasetDetailsFull(
     tokmap_dir="./processed/EWT/"
     )
 
-Wikitext = DatasetDetailsFull(
-    dirs=make_name("./Wikitext", "wikitext_spacy_{}.conllu",
+Wikitext_raw = DatasetDetailsFull(
+    dirs=make_name("./Wikitext_raw", "wikitext_spacy_{}.conllu",
                    ("train", "dev", "test")),
-    memmap_dir="./processed/Wikitext/memmap",
-    tokmap_dir="./processed/Wikitext/"
+    memmap_dir="./processed/Wikitext_raw/memmap",
+    tokmap_dir="./processed/Wikitext_raw/"
     )
 
-Wikitext_memmapped = DatasetDetailsFull(
+Wikitext_raw_memmapped = DatasetDetailsFull(
     memmaped=("train", "eval", "test"),
-    memmap_dir="./processed/Wikitext/memmap",
-    tokmap_dir="./processed/Wikitext/"
+    memmap_dir="./processed/Wikitext_raw/memmap",
+    tokmap_dir="./processed/Wikitext_raw/"
+    )
+
+Wikitext_processed = DatasetDetailsFull(
+    dirs=make_name("./Wikitext_processed", "wikitext_spacy_{}.conllu",
+                   ("train", "dev", "test")),
+    memmap_dir="./processed/Wikitext_processed/memmap",
+    tokmap_dir="./processed/Wikitext_processed/"
+    )
+
+Wikitext_processed_memmapped = DatasetDetailsFull(
+    memmaped=("train", "eval", "test"),
+    memmap_dir="./processed/Wikitext_processed/memmap",
+    tokmap_dir="./processed/Wikitext_processed/"
     )
 
 Sample = DatasetDetailsFull(
     dirs=tuple(3*["./sample.conllu"]),  # type: ignore
+    memmap_dir="./processed/Sample/memmap",
+    tokmap_dir="./processed/Sample/"
+    )
+
+Sample_memmapped = DatasetDetailsFull(
+    memmaped=("train", "eval"),
     memmap_dir="./processed/Sample/memmap",
     tokmap_dir="./processed/Sample/"
     )
@@ -1232,12 +1267,15 @@ NaturalStoriesOld = DatasetDetails(
 
 dataset_details_full = dict(
     EWT=EWT,
-    Wikitext=Wikitext,
+    Wikitext_raw=Wikitext_raw,
+    Wikitext_processed=Wikitext_processed,
     Sample=Sample
     )
 
 dataset_details_full_memmaped = dict(
-    Wikitext=Wikitext_memmapped
+    Wikitext_raw=Wikitext_raw_memmapped,
+    Wikitext_processed=Wikitext_processed_memmapped,
+    Sample=Sample_memmapped
     )
 
 dataset_details = (dataset_details_full
@@ -1366,6 +1404,9 @@ def load_dataset(details: DatasetDetails,       # type: ignore
 
         Path(tokmap_dir).mkdir(parents=True, exist_ok=True)
         token_mapper.save(os.path.join(tokmap_dir, "mapper"))
+
+        info(None, logger,
+             f"Trained tokenmapper with vocab size {token_mapper.vocab_size}.")
 
     else:
         token_mapper = TokenMapper.load(os.path.join(tokmap_dir, "mapper"))

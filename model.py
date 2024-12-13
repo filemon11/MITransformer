@@ -209,6 +209,7 @@ class MIAttention(nn.Module):
 
         # TODO: get an empty mask for all tags not occurring in the
         # mask argument; then stack all masks on dim 0 and fill masks
+
         if masks is not None:
             mask_list: list[torch.Tensor] = []
             for tag in self.tags:
@@ -228,7 +229,6 @@ class MIAttention(nn.Module):
         arc_scores = F.sigmoid(att)
 
         att = F.softmax(att, dim=-1)
-        att = self.attn_dropout(att)
         att = einops.rearrange(att, 'b m h s1 s2 -> b (m h) s1 s2')
 
         out = torch.matmul(att, v)
@@ -430,6 +430,7 @@ class MITransformerLM(nn.Module):
             to mask and False being the entries to mask.
 
             Output : Shape[B, S, E]"""
+
         x, scores = self.mi_transformer(input_ids, masks)
 
         x = self.ln(x)
