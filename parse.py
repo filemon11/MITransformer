@@ -141,6 +141,7 @@ def parse_list_of_words_with_spacy(
 # Note: Wikitext is slighty tokenised. For instance,
 # it includes whitespace before punctuation.
 def parse_wikitext_with_spacy(
+        raw: bool,
         output_dir: str = OUTPUT_DIR,
         output_file_name_train: str = "wikitext_spacy_train2.conllu",
         output_file_name_dev: str = "wikitext_spacy_dev.conllu",
@@ -150,14 +151,15 @@ def parse_wikitext_with_spacy(
     from datasets import (   # type: ignore # noqa: E402
         load_dataset, IterableDataset, IterableDatasetDict)
 
-    dataset = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1")
+    ds_name = "wikitext-103-raw-v1" if raw else "wikitext-103-v1"
+    dataset = load_dataset("Salesforce/wikitext", ds_name)
     assert (not isinstance(dataset, IterableDataset)
             and not isinstance(dataset, IterableDatasetDict))
     for filename, split in zip(
             (output_file_name_train,
              output_file_name_test,
              output_file_name_dev),
-            ("train", "test", "dev")):
+            ("train", "test", "validation")):
         batch_size = 50
         for idx in range(0, len(dataset[split]), batch_size):
             lines = remove_lines(
