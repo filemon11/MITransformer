@@ -107,7 +107,7 @@ class TransformMaskHeadChild(MaskTransform):
         ATTENTION: modifies the matrix inplace."""
 
         head = mask
-        child = mask.T.copy()
+        child = mask.T
         # head[range(len(head)), range(len(head))] = True
         # child[range(len(child)), range(len(child))] = True
 
@@ -121,6 +121,7 @@ class TransformMaskHeadChild(MaskTransform):
             child[:, 0] = np.logical_or(set_true, child[:, 0])
 
         if self.connect_with_self:
+            child = child.copy()
             tril_head = np.tril(head, -1)
             length = head.shape[0]
             set_true = ~tril_head.any(1)
