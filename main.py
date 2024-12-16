@@ -486,6 +486,7 @@ def main_hyperopt(args: "HyperoptParserArgs",
 
         info(args.rank, logger,
              f"Best trial: {study.best_trial.number}\n"
+             f"with results: {study.best_value}\n"
              f"with params: {study.best_params}")
 
     return None

@@ -26,8 +26,8 @@ fi
 prefix="--standalone --nnodes=1 --nproc-per-node=${N_GPUS} main.py"
 
 general_params="--n_workers ${THREADS_PER_GPU} --device ${DEVICE} --use_ddp ${USE_DDP} --first_k none --first_k_eval_test none"
-general_hyperopt_params='--batch_size 128 --epochs 100 --early_stop_after 3 --n_trials=50 --eval_interval 500 --n_warmup_steps 3 --n_startup_trials 3 --use_steps 1 --max_steps none'
-hyperopt_selection='--n_embd 200:1000 --dropout 0.0:0.6 --learning_rate 1e-6:1e-2'
+general_hyperopt_params='--batch_size 128 --epochs 100 --early_stop_after 3 --n_trials=50 --eval_interval 500 --n_warmup_steps 3 --n_startup_trials 3 --use_steps 1 --max_steps none --n_embd 812 --dropout 0.065 --learning_rate 1.1e-3'
+hyperopt_selection='--loss_alpha 0.0:1.0'
 
 core="${general_params} hyperopt ${hyperopt_selection} ${general_hyperopt_params}"
 
@@ -36,15 +36,4 @@ core="${general_params} hyperopt ${hyperopt_selection} ${general_hyperopt_params
 torchrun ${prefix} \
     --name exp1_dep-supervised \
     ${core} \
-    --dependency_mode 'supervised' \
-    --loss_alpha 0.0:1.0
-
-torchrun ${prefix} \
-    --name exp1_dep0 \
-    ${core} \
-    --dependency_mode 'standard'
-
-torchrun ${prefix} \
-    --name exp1_dep-in \
-    ${core} \
-    --dependency_mode 'input' 
+    --dependency_mode 'supervised_det'
