@@ -418,6 +418,7 @@ class Objective:
             iterate=True, datasets=self.datasets)
         assert train_iterator is not None
 
+        should_prune = False
         metrics = None
         for step, metrics in enumerate(train_iterator, start=1):
             # Handle pruning based on the intermediate value.
@@ -426,7 +427,8 @@ class Objective:
                 args.eval_interval*step)
 
             if trial.should_prune():
-                raise optuna.exceptions.TrialPruned()
+                should_prune = True
+                break
 
         assert metrics is not None, (
            "eval_interval is larger than total number of steps")
@@ -437,6 +439,8 @@ class Objective:
                 run_name=str(trial.number),
                 global_step=args.eval_interval*step)
 
+        if should_prune:
+            raise optuna.exceptions.TrialPruned()
         # trial.set_user_attr("metric_dicts", metric_dicts)
 
         loss: float = getattr(metrics["eval"], self.args.optimise)
@@ -708,7 +712,7 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         '--rank', '--local-rank', type=OptNone(int), default=None,
         help="which rank this process runs on; set by torchrun.")
     parser.add_argument(
-        '--n_workers', type=OptNone(int), default=None,
+        '--n_workers', type=int, default=0,
         help="number of workers for the dataloader")
     parser.add_argument(
         '--name', type=str,
