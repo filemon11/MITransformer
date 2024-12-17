@@ -158,10 +158,10 @@ def parse_wikitext_with_spacy(
     assert (not isinstance(dataset, IterableDataset)
             and not isinstance(dataset, IterableDatasetDict))
     for filename, split in zip(
-            (
+            (output_file_name_train,
              output_file_name_test,
              output_file_name_dev),
-            ("test", "validation")):
+            ("train", "test", "validation")):
         batch_size = 50
         for idx in range(0, len(dataset[split]), batch_size):
             lines = remove_lines(
