@@ -6,8 +6,8 @@ Linearity-of-surprisal-on-RT/blob/main/Preparing%20Corpora/get_frequency.py"""
 import pandas as pd
 import wordfreq     # type: ignore
 from tokeniser import TokenMapper
-from data import (CoNLLUDataset, DataLoader,
-                  get_transform_mask_head_child, get_loader)
+from data import (CoNLLUDataset,
+                  TransformMaskHeadChild, get_loader)
 from model import MITransformerLM, MITransformer
 from trainer import LMTrainer, OptionalConfig
 from parse import parse_list_of_words_with_spacy
@@ -158,10 +158,10 @@ def add_surprisal(input_file: str, output_file,
     words = df[token_col]
     conllu = parse_list_of_words_with_spacy(words, min_len=0)
 
-    transform = get_transform_mask_head_child(
+    # TODO: load these params from somewhere
+    transform = TransformMaskHeadChild(
         keys_for_head={"head"},
-        keys_for_child={"child"},
-        triangulate=True)
+        keys_for_child={"child"})
 
     dataset: CoNLLUDataset = CoNLLUDataset.from_str(
         conllu, transform, max_len=None)
@@ -170,8 +170,7 @@ def add_surprisal(input_file: str, output_file,
     dataset.map_to_ids(token_mapper)
 
     trainer = LMTrainer.load(model_dir,
-                             optional_config=OptionalConfig(
-                                 batch_size=batch_size))
+                             batch_size=batch_size)
     surprisal = generate_probs(
         trainer, dataset,
         untokenise=True, surprisal=True)
