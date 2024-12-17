@@ -4,10 +4,12 @@ Necessary: spacy_conll module
 from natural_stories import load_natural_stories
 
 import spacy  # type: ignore
+from spacy.symbols import ORTH
 nlp = spacy.load("en_core_web_trf")
 import en_core_web_trf  # type: ignore # noqa: E402
 nlp = en_core_web_trf.load()
 nlp.add_pipe("conll_formatter", last=True)
+nlp.tokenizer.add_special_case("<unk>", [{ORTH: "<unk>"}])  # type: ignore
 
 import conllu   # noqa: E402
 
@@ -143,7 +145,7 @@ def parse_list_of_words_with_spacy(
 def parse_wikitext_with_spacy(
         raw: bool,
         output_dir: str = OUTPUT_DIR,
-        output_file_name_train: str = "wikitext_spacy_train2.conllu",
+        output_file_name_train: str = "wikitext_spacy_train.conllu",
         output_file_name_dev: str = "wikitext_spacy_dev.conllu",
         output_file_name_test: str = "wikitext_spacy_test.conllu"):
     """Files should not exist or be empty"""
@@ -156,10 +158,10 @@ def parse_wikitext_with_spacy(
     assert (not isinstance(dataset, IterableDataset)
             and not isinstance(dataset, IterableDatasetDict))
     for filename, split in zip(
-            (output_file_name_train,
+            (
              output_file_name_test,
              output_file_name_dev),
-            ("train", "test", "validation")):
+            ("test", "validation")):
         batch_size = 50
         for idx in range(0, len(dataset[split]), batch_size):
             lines = remove_lines(

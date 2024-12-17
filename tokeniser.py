@@ -9,7 +9,7 @@ PAD = "<p>"
 EOS = "<e>"
 ROOT = "<r>"
 DUMMY = "<d>"
-UNK = "<u>"
+UNK = "<unk>"
 
 A = TypeVar("A", bound=Hashable)
 B = TypeVar("B")
