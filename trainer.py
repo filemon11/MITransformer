@@ -434,10 +434,11 @@ class LMTrainer():
             return None
 
     @classmethod
-    def load_model(cls, model_name: str
+    def load_model(cls, model_name: str, device: str = "cpu"
                    ) -> tuple[MITransformerLM, MITransformerConfig]:
         state_dict, transformer_config = torch.load(
-            os.path.join(cls.model_dir, model_name, "model")).values()
+            os.path.join(cls.model_dir, model_name, "model"),
+            map_location=device).values()
         transformer_config = cast(MITransformerConfig, transformer_config)
         model: MITransformerLM = MITransformerLM(
             MITransformer(transformer_config))
@@ -446,15 +447,17 @@ class LMTrainer():
 
     @classmethod
     def load(cls, model_name: str,
+             device: str = "cpu",
              **optional_config: Any) -> Self:
 
-        model, transformer_config = cls.load_model(model_name)
+        model, transformer_config = cls.load_model(model_name,
+                                                   device)
 
         with open(os.path.join(
                     cls.model_dir, model_name, "config"), 'rb') as handle:
             config: GeneralConfig = pickle.load(handle)
 
-        config.update_from_kwargs(**optional_config)
+        config.update_from_kwargs(device=device, **optional_config)
 
         cls.model_info(model, transformer_config, config)
 
