@@ -6,10 +6,8 @@ Linearity-of-surprisal-on-RT/blob/main/Preparing%20Corpora/get_frequency.py"""
 import pandas as pd
 import wordfreq     # type: ignore
 from tokeniser import TokenMapper
-from data import (CoNLLUDataset,
-                  TransformMaskHeadChild, get_loader)
-from model import MITransformerLM, MITransformer
-from trainer import LMTrainer, OptionalConfig
+from data import CoNLLUDataset, TransformMaskHeadChild
+from trainer import LMTrainer
 from parse import parse_list_of_words_with_spacy
 
 from natural_stories import load_natural_stories
@@ -21,6 +19,7 @@ from typing import Iterable
 
 import math
 
+import sys
 '''
 The input files are the meta data (text without RT) of the corpus
 that is already parsed and contains logp information. The output
@@ -37,7 +36,7 @@ TOKEN_COL = "WORD"
 LOGFREQ_COL = "logfreq"
 TEXT_ID_COL = "item"
 WNUM_COL = "zone"
-SURPRISAL_COL = "surprisal"
+SURPRISAL_COL = "logp"
 WLEN_COL = "WLEN"
 
 DEVICE = "cpu"
@@ -69,9 +68,11 @@ def add_word_length(input_file, output_file,
 def tsv_to_csv(input_file: str, output_file: str,
                token_col: str = TOKEN_COL,
                text_id_col: str = TEXT_ID_COL,
-               wnum_col: str = WNUM_COL
+               wnum_col: str = WNUM_COL,
+               token_mapper_dir: str | None = None
                ) -> None:
-    tokens, text_ids, wnums = load_natural_stories(input_file)
+    tokens, text_ids, wnums = load_natural_stories(
+        input_file, token_mapper_dir=token_mapper_dir)
     # making lowercase makes no difference
 
     df = pd.DataFrame({token_col: tokens,
@@ -147,13 +148,12 @@ def prob_to_surprisal(
         yield -math.log(prob)
 
 
-def add_surprisal(input_file: str, output_file,
+def add_surprisal(input_file: str, output_file: str,
                   model_dir: str, token_mapper_dir: str,
                   token_col: str = TOKEN_COL,
                   surprisal_col: str = SURPRISAL_COL,
                   device: str = DEVICE,
                   batch_size: int = BATCH_SIZE) -> None:
-
     df = pd.read_csv(input_file)
     words = df[token_col]
     conllu = parse_list_of_words_with_spacy(words, min_len=0)
@@ -170,7 +170,10 @@ def add_surprisal(input_file: str, output_file,
     dataset.map_to_ids(token_mapper)
 
     trainer = LMTrainer.load(model_dir,
-                             batch_size=batch_size)
+                             batch_size=batch_size,
+                             device=device,
+                             use_ddp=False,
+                             world_size=1)
     surprisal = generate_probs(
         trainer, dataset,
         untokenise=True, surprisal=True)
@@ -182,6 +185,7 @@ def add_surprisal(input_file: str, output_file,
 def process_tsv(
         input_file: str, output_file: str,
         model_dir: str, token_mapper_dir: str,
+        raw: bool = True,
         token_col: str = TOKEN_COL,
         text_id_col: str = TEXT_ID_COL,
         wnum_col: str = WNUM_COL,
@@ -194,7 +198,7 @@ def process_tsv(
         ) -> None:
     tsv_to_csv(input_file, output_file,
                token_col, text_id_col,
-               wnum_col)
+               wnum_col, None if raw else token_mapper_dir)
     add_frequency(output_file, output_file,
                   language, token_col, logfreq_col)
     add_word_length(output_file, output_file,
@@ -202,3 +206,14 @@ def process_tsv(
     add_surprisal(output_file, output_file, model_dir,
                   token_mapper_dir, token_col,
                   surprisal_col, device, batch_size)
+
+
+if __name__ == "__main__":
+    # Compute probabilities for natural stories corpus
+    # based on a model trianed on Wikitext_processed
+    model_name = sys.argv[1]
+    in_file = "naturalstories-master/words.tsv"
+    out_file = "naturalstories-master/words_processed.csv"
+    mapper = "processed/Wikitext_processed/mapper"
+    process_tsv(in_file, out_file, model_name, mapper,
+                raw=False)
