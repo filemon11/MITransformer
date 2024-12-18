@@ -312,6 +312,7 @@ def main_test(
     trainer = LMTrainer.load(
         world_size=world_size,
         use_input_mask=(args.dependency_mode == "input"),
+        device=args.device,
         **args.to_dict())
 
     args.update_from_kwargs(**trainer.config.to_dict())
