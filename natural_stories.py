@@ -31,7 +31,6 @@ def load_natural_stories(tsv_file: str,
                         to_string=True)[0]
 
                 words.append(token.replace(" ", ""))
-                print(token)
                 story_ids.append(int(story_id))
                 word_ids.append(int(word_id))
     return words, story_ids, word_ids

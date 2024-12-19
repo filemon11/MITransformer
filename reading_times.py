@@ -84,7 +84,7 @@ def tsv_to_csv(input_file: str, output_file: str,
 
 def generate_probs(
         trainer: LMTrainer,
-        dataset,
+        dataset: CoNLLUDataset,
         untokenise: bool = False,
         surprisal: bool = False) -> torch.Tensor:
     """WARNING: untested"""
@@ -97,7 +97,7 @@ def generate_probs(
     # Throw away probs of root and eos token
     probs = torch.cat([p[1:-1] for p in pred_probs])
 
-    space_after = np.concat(dataset.space_after)
+    space_after = np.concat(dataset.space_after)  # type: ignore
 
     if untokenise:
         probs = torch.tensor(
@@ -213,7 +213,7 @@ if __name__ == "__main__":
     # based on a model trianed on Wikitext_processed
     model_name = sys.argv[1]
     in_file = "naturalstories-master/words.tsv"
-    out_file = "naturalstories-master/words_processed.csv"
-    mapper = "processed/Wikitext_processed/mapper"
+    out_file = f"RT/data/words_processed_{model_name}.csv"
+    mapper = "processed/Wikitext_processed/mapper"  # TODO set to processed
     process_tsv(in_file, out_file, model_name, mapper,
-                raw=False)
+                raw=True)
