@@ -736,7 +736,7 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
     data_group = parser.add_argument_group('data')
     data_group.add_argument(
         '--dataset_name', type=str, help='name of the dataset to load',
-        default='Wikitext_raw')
+        default='Wikitext_processed')
     data_group.add_argument(
         '--max_len_train', type=OptNone(int), default=40,
         help='maximum number of tokens in training set')
