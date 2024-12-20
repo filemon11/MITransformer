@@ -51,6 +51,19 @@ def seed_everything(seed: int):
 T = TypeVar("T")
 
 
+class StrToLiteral(Generic[T]):
+    def __init__(self, *selection: T):
+        self.selection: tuple[T, ...] = selection
+
+    def __call__(self, string: str) -> T:
+        if string in self.selection:
+            return cast(T, string)
+        else:
+            raise Exception(
+                f"Argument value not allowed."
+                f"Given: {string}, allowed: {self.selection}")
+
+
 def str_to_bool(string: str) -> bool:
     try:
         if (string.lower() == "true"
@@ -646,6 +659,7 @@ class TrainParserArgs(ParserArgs):
     overlay_causal: bool
     use_dual_fixed: bool
     bias: bool
+    pos_enc: Literal["embedding", "sinusoidal"]
 
 
 @dataclass
@@ -689,6 +703,8 @@ class HyperoptParserArgs(ParserArgs):
     n_embd: int | tuple[int, int] | list[int]
     use_dual_fixed: bool | list[bool]
     bias: bool | list[bool]
+    pos_enc: (Literal["embedding", "sinusoidal"]
+              | list[Literal["embedding", "sinusoidal"]])
 
 
 @dataclass
@@ -910,6 +926,10 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
     model_group.add_argument(
         '--bias', type=str_to_bool, default=False,
         help="Whether to use bias in all of the model weights")
+    model_group.add_argument(
+        '--pos_enc', type=str, choices=("embedding", "sinusoidal"),
+        default="embedding",
+        help="What kind of positional encodings to use.")
 
     # # Hyperopt Parser
     hyperopt_parser = subparsers.add_parser(
@@ -1074,6 +1094,11 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
     hyperopt_flexbile_model_group.add_argument(
         '--bias', type=HyperoptSpace(str_to_bool), default=False,
         help="Whether to use bias in all of the model weights")
+    hyperopt_flexbile_model_group.add_argument(
+        '--pos_enc', type=HyperoptSpace(
+            StrToLiteral("embedding", "sinusoidal")),
+        default="embedding",
+        help="What kind of positional encodings to use.")
 
     # # Dataprep Parser
     subparsers.add_parser(

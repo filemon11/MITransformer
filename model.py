@@ -14,7 +14,7 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 
-from typing import (TypedDict, NotRequired, Sequence)
+from typing import (TypedDict, NotRequired, Sequence, Literal)
 
 
 def combine_scores(
@@ -66,30 +66,9 @@ class PositionalEncoding(nn.Module):
         Arguments:
             x: Tensor, shape ``[batch_size, seq_len, embedding_dim]``
         """
-        x = torch.cat((self.begin_emb, self.pe[:len-2]))
+        x = torch.cat((self.begin_emb, self.pe[:len-2])).requires_grad_(False)
         # do not positionally encode dummy and root
         return self.dropout(x).unsqueeze(0)
-
-
-class Encoder(nn.Module):
-    def __init__(self, ntoken, ninp, dropout=0.5):
-        super(Encoder, self).__init__()
-        self.pos_encoder = PositionalEncoding(ninp, dropout)
-        self.encoder = nn.Embedding(ntoken, ninp)
-        self.ninp = ninp
-        self.init_weights()
-
-    def init_weights(self):
-        initrange = 0.1
-        self.encoder.weight.data.uniform_(-initrange, initrange)
-
-    def forward(self, input_ids: torch.Tensor):
-        # Input: (B, S)
-        # Output: (B, S, E)
-
-        # Need (S, B) format for encoder.
-        src = self.encoder(input_ids) * math.sqrt(self.ninp)
-        return self.pos_encoder(src)
 
 
 class FeedForward(nn.Module):
@@ -305,6 +284,7 @@ class MITransformerConfig(Params):
     use_dual_fixed: bool = False
     bias: bool = False
     use_lstm: bool = True
+    pos_enc: Literal["embedding", "sinusoidal"] = "embedding"
 
 
 class MITransformer(nn.Module):
@@ -328,7 +308,12 @@ class MITransformer(nn.Module):
 
         self.wte = nn.Embedding(config.vocab_size, n_embd)
         # self.wpe = PositionalEncoding(n_embd, 0, self.block_size)
-        self.wpe = nn.Embedding(self.block_size, n_embd)
+        self.pos_enc_type = config.pos_enc
+        if config.pos_enc == "embedding":
+            self.wpe = nn.Embedding(self.block_size, n_embd)
+        else:
+            self.wpe = PositionalEncoding(config.n_embd, 0,
+                                          config.block_size)
 
         self.embd_dropout = nn.Dropout(config.dropout_embd)
 
@@ -377,7 +362,10 @@ class MITransformer(nn.Module):
         S = input_ids.shape[1]
 
         tok_emb = self.wte(input_ids.long())
-        pos_emb = self.wpe(torch.arange(0, S, device=tok_emb.device))
+        if self.pos_enc_type == "embedding":
+            pos_emb = self.wpe(torch.arange(0, S, device=tok_emb.device))
+        else:
+            pos_emb = self.wpe(S)
 
         x = self.embd_dropout(tok_emb + pos_emb)
 
