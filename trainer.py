@@ -372,6 +372,7 @@ class GeneralConfig(Params):
     model_name: str = field(default_factory=get_timestr)
     early_stop_metric: str = "loss"
     use_ddp: bool = False
+    discriminative: bool = False
 
 
 @dataclass
@@ -528,10 +529,17 @@ class LMTrainer():
              ) -> torch.Tensor:
 
         logits = torch.swapaxes(logits, 1, 2)
-        loss = F.cross_entropy(
-            logits, labels,
-            ignore_index=ignore_index,
-            reduction=reduction)
+        if self.config.discriminative:
+            probs = F.sigmoid(logits)
+            loss = F.binary_cross_entropy(
+                probs, F.one_hot(
+                    labels,
+                    logits.shape[-2]).swapaxes(-1, -2).float())
+        else:
+            loss = F.cross_entropy(
+                logits, labels,
+                ignore_index=ignore_index,
+                reduction=reduction)
         return loss
 
     def arc_loss(
