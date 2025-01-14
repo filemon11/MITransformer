@@ -40,7 +40,7 @@ torchrun ${prefix} \
     --loss_alpha 0.0:1.0
 
 torchrun ${prefix} \
-    --name exp1_dep0 \
+    --name exp1_dep-0 \
     ${core} \
     --dependency_mode 'standard'
 
