@@ -353,6 +353,84 @@ def main_test(
     return metrics  # type: ignore
 
 
+def main_compare(
+        args: "CompareParserArgs",
+        world_size: int,
+        datasets: DatasetDictTrain | None = None
+        ) -> None:
+    """Calculates the mean and standard deviation of several
+    runs."""
+    window = 5
+    highest_num = 100
+
+    # device: where to execute computation
+    if world_size > 1:
+        assert args.rank is not None, "Rank cannot be None if word_size > 1."
+
+    extra_args = args.to_dict()
+
+    # model1
+    trainer = LMTrainer.load(
+        model_name=args.model1_name,
+        world_size=world_size,
+        **extra_args)
+
+    args.update_from_kwargs(**trainer.config.to_dict())
+
+    if datasets is None:
+        datasets = _load_dataset(
+            args,
+            memmaped=True)
+    assert isinstance(datasets, dict)
+    dataset = datasets["eval"]
+    token_mapper = datasets["token_mapper"]
+
+    logprobs1, _ = trainer.predict(
+        dataset,
+        make_prob=True,
+        only_true=True)
+
+    # model2
+    del trainer
+    trainer = LMTrainer.load(
+        model_name=args.model2_name,
+        world_size=world_size,
+        **extra_args)
+
+    logprobs2, _ = trainer.predict(
+        dataset,
+        make_prob=True,
+        only_true=True)
+    del trainer
+
+    diffs: list[tuple[float, int, int]] = []  # diff, sen, pos
+    for sen_num, (probs1, probs2) in enumerate(zip(logprobs1, logprobs2)):
+        diff_tensor = (probs2 - probs1).tolist()
+        sen_nums = [sen_num] * probs1.shape[0]
+        positions = list(range(0, probs1.shape[0]))
+        diffs.extend(list(zip(diff_tensor, sen_nums, positions)))
+
+    highest = list(sorted(diffs,
+                          key=lambda x: abs(x[0]),
+                          reverse=True))[:highest_num]
+
+    assert dataset.id_hl is not None
+    tokens = set([token_mapper.id2word[
+        dataset.id_hl[x[1]][0][x[2]]] for x in highest])
+
+    info(args.rank, logger, f"Tokens with the highest difference: {tokens}")
+
+    info(args.rank, logger, "Tokens with window:")
+
+    for c_diff, c_sen_num, c_pos in highest:
+        tokens = token_mapper.decode([dataset.id_hl[c_sen_num][0]])[0]
+        left = max(0, c_pos-window)
+        right = min(len(tokens), c_pos+window)
+        info(args.rank, logger,
+             (f"diff={round(c_diff, 2)}: {' '.join(tokens[left:c_pos])}"
+              f"[ {tokens[c_pos]} ] {' '.join(tokens[c_pos+1:right])}"))
+
+
 USE_LOG = {"learning_rate"}
 
 
@@ -597,15 +675,20 @@ def main(args: "ParserArgs") -> None:
                     assert isinstance(args, TestParserArgs)
                     info(args.rank, logger, "Launching model testing.")
                     main_test(args, n_devices)
-                case _:
+                case "hyperopt":
                     assert isinstance(args, HyperoptParserArgs)
                     info(args.rank, logger, "Launching hyperparameter tuning.")
                     main_hyperopt(args, n_devices)
+                case _:
+                    assert isinstance(args, CompareParserArgs)
+                    info(args.rank, logger, "Launching model comparison.")
+                    main_compare(args, n_devices)
 
 
 @dataclass
 class ParserArgs(Params):
-    mode: Literal["train", "hyperopt"]
+    mode: Literal["train", "hyperopt", "dataprep", "test",
+                  "compare"]
     rank: int | None
     n_workers: int
     name: str
@@ -720,11 +803,19 @@ class TestParserArgs(ParserArgs):
 class DataprepParserArgs(ParserArgs):
     pass
 
+
+@dataclass
+class CompareParserArgs(ParserArgs):
+    model1_name: str
+    model2_name: str
+    batch_size: int
+
 # TODO: make bool args optionally just acccept flag for True
 
 
 def parse_args() -> (TrainParserArgs | HyperoptParserArgs
-                     | DataprepParserArgs | TestParserArgs):
+                     | DataprepParserArgs | TestParserArgs
+                     | CompareParserArgs):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--rank', '--local-rank', type=OptNone(int), default=None,
@@ -1131,6 +1222,20 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         '--arc_loss_weighted', type=str_to_bool, default=Undefined,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
 
+    # # Compare Parser
+    compare_parser = subparsers.add_parser(
+        "compare", help="comparison mode")
+    compare_parser.add_argument(
+        '--model1_name', type=str,
+        help="name of model 1")
+    compare_parser.add_argument(
+        '--model2_name', type=str,
+        help="name of model 2")
+    compare_parser.add_argument(
+        '--batch_size', type=int, default=32,
+        help=("batch size; in case of multiple GPUs it is "
+              "chunked across the devices"))
+
     args = parser.parse_args()
     match args.mode:
         case "train":
@@ -1139,12 +1244,15 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
             return HyperoptParserArgs(**vars(args))
         case "dataprep":
             return DataprepParserArgs(**vars(args))
-        case _:
+        case "test":
             return TestParserArgs(**vars(args))
+        case _:
+            return CompareParserArgs(**vars(args))
 
 
 def args_logic(args: (TrainParserArgs | HyperoptParserArgs
-                      | DataprepParserArgs | TestParserArgs)
+                      | DataprepParserArgs | TestParserArgs
+                      | CompareParserArgs)
                ) -> None:
     seed_everything(args.seed)
     args.device = make_device_str(args.device)
@@ -1171,7 +1279,8 @@ def args_logic(args: (TrainParserArgs | HyperoptParserArgs
 
 if __name__ == "__main__":
     args: (TrainParserArgs | HyperoptParserArgs
-           | DataprepParserArgs | TestParserArgs)
+           | DataprepParserArgs | TestParserArgs
+           | CompareParserArgs)
     args = parse_args()
     logging_config(logname=args.name)
     # logging_config(

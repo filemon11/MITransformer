@@ -1112,6 +1112,7 @@ class LMTrainer():
             logits: torch.Tensor
             arc_scores: dict[str, list[torch.Tensor]]
             for batch in loader:
+                self.batch_to(batch, device=self.config.device)  # type: ignore
                 logits, arc_scores = self.transformerlm(**batch)
                 labels = batch["label_ids"]
 
