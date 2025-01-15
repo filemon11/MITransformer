@@ -360,8 +360,8 @@ def main_compare(
         ) -> None:
     """Calculates the mean and standard deviation of several
     runs."""
-    window = 5
-    highest_num = 100
+    window = 20
+    highest_num = 500
 
     # device: where to execute computation
     if world_size > 1:
@@ -427,8 +427,8 @@ def main_compare(
         left = max(0, c_pos-window)
         right = min(len(tokens), c_pos+window)
         info(args.rank, logger,
-             (f"diff={round(c_diff, 2)}: {' '.join(tokens[left:c_pos])}"
-              f"[ {tokens[c_pos]} ] {' '.join(tokens[c_pos+1:right])}"))
+             (f"diff={round(c_diff, 2)}: {' '.join(tokens[left:c_pos])} "
+              f"[{tokens[c_pos]}] {' '.join(tokens[c_pos+1:right])}"))
 
 
 USE_LOG = {"learning_rate"}

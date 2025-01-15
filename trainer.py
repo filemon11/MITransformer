@@ -1094,6 +1094,8 @@ class LMTrainer():
             only_true: bool = False
             ) -> tuple[list[torch.Tensor], dict[str, list[torch.Tensor]]]:
         """Returns logits and arc scores"""
+        # TODO: Does this work with ddp? Batches are distributed but not
+        # joined back together.
         loader = get_loader(
             dataset, batch_size=self.config.batch_size,
             bucket=False,
