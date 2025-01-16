@@ -439,7 +439,7 @@ def main_compare(
         token_to_diffs[token].append(diff)
 
     info(args.rank, logger, "Concordances:")
-    for token in tokens_count.keys():
+    for token, _ in sorted(tokens_count.items(), key=lambda x: x[1]):
         info(args.rank, logger, f"\nToken: {token}\n")
         for c_diff, c_sen_num, c_pos in token_to_diffs[token]:
             tokens = token_mapper.decode([dataset.id_hl[c_sen_num][0]])[0]
