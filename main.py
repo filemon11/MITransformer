@@ -435,7 +435,7 @@ def main_compare(
 
     token_to_diffs: defaultdict[str, list[tuple[float, int, int]]]
     token_to_diffs = defaultdict(list)
-    for token, diff in zip(reversed(highest_tokens), reversed(highest)):
+    for token, diff in zip(highest_tokens, highest):
         token_to_diffs[token].append(diff)
 
     info(args.rank, logger, "Concordances:")
