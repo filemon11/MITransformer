@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import argparse
 from ast import literal_eval as make_tuple
 from copy import copy
+from collections import Counter, defaultdict
 
 from logmaker import getLogger, info, logging_config, get_timestr
 
@@ -361,7 +362,7 @@ def main_compare(
     """Calculates the mean and standard deviation of several
     runs."""
     window = 20
-    highest_num = 500
+    highest_num = 100
 
     # device: where to execute computation
     if world_size > 1:
@@ -415,10 +416,12 @@ def main_compare(
                           reverse=True))[:highest_num]
 
     assert dataset.id_hl is not None
-    tokens = set([token_mapper.id2word[
-        dataset.id_hl[x[1]][0][x[2]]] for x in highest])
+    highest_tokens = [token_mapper.id2word[
+        dataset.id_hl[x[1]][0][x[2]]] for x in highest]
+    tokens_count = Counter(highest_tokens)
 
-    info(args.rank, logger, f"Tokens with the highest difference: {tokens}")
+    info(args.rank, logger,
+         f"Tokens with the highest difference: {tokens_count}")
 
     info(args.rank, logger, "Tokens with window:")
 
@@ -429,6 +432,23 @@ def main_compare(
         info(args.rank, logger,
              (f"diff={round(c_diff, 2)}: {' '.join(tokens[left:c_pos])} "
               f"[{tokens[c_pos]}] {' '.join(tokens[c_pos+1:right])}"))
+
+    token_to_diffs: defaultdict[str, list[tuple[float, int, int]]]
+    token_to_diffs = defaultdict(list)
+    for token, diff in zip(reversed(highest_tokens), reversed(highest)):
+        token_to_diffs[token].append(diff)
+
+    info(args.rank, logger, "Concordances:")
+    for token in tokens_count.keys():
+        info(args.rank, logger, f"\nToken: {token}\n")
+        for c_diff, c_sen_num, c_pos in token_to_diffs[token]:
+            tokens = token_mapper.decode([dataset.id_hl[c_sen_num][0]])[0]
+            left = max(0, c_pos-window)
+            right = min(len(tokens), c_pos+window)
+            info(args.rank, logger,
+                 (f"diff={round(c_diff, 2)}: "
+                  f"{' '.join(tokens[left:c_pos])[-80:]:>80} "
+                  f"[{tokens[c_pos]}] {' '.join(tokens[c_pos+1:right])[:81]}"))
 
 
 USE_LOG = {"learning_rate"}
