@@ -531,10 +531,16 @@ class LMTrainer():
         logits = torch.swapaxes(logits, 1, 2)
         if self.config.discriminative:
             probs = F.sigmoid(logits)
+            mask = labels != ignore_index
+            labels_without_zero = labels
+            labels_without_zero[~mask] = 0  # dummy
+            one_hot = F.one_hot(
+                labels_without_zero,
+                logits.shape[-2]).swapaxes(-1, -2).float()
             loss = F.binary_cross_entropy(
-                probs, F.one_hot(
-                    labels,
-                    logits.shape[-2]).swapaxes(-1, -2).float())
+                probs, one_hot, reduction='none').swapaxes(-2, -1)
+            loss[~mask] = 0
+            loss = loss.sum() / (mask.sum() * logits.shape[-2])
         else:
             loss = F.cross_entropy(
                 logits, labels,
