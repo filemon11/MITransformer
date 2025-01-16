@@ -362,7 +362,7 @@ def main_compare(
     """Calculates the mean and standard deviation of several
     runs."""
     window = 20
-    highest_num = 100
+    highest_num = 1000
 
     # device: where to execute computation
     if world_size > 1:
@@ -439,7 +439,8 @@ def main_compare(
         token_to_diffs[token].append(diff)
 
     info(args.rank, logger, "Concordances:")
-    for token, _ in sorted(tokens_count.items(), key=lambda x: x[1]):
+    for token, _ in sorted(
+            tokens_count.items(), key=lambda x: x[1], reverse=True):
         info(args.rank, logger, f"\nToken: {token}\n")
         for c_diff, c_sen_num, c_pos in token_to_diffs[token]:
             tokens = token_mapper.decode([dataset.id_hl[c_sen_num][0]])[0]
