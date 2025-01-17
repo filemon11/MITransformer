@@ -480,11 +480,14 @@ def main_compare(
             reverse=False)))
 
     info(args.rank, logger,
-         "\nPerplexity diffs ordered by decrease contribution:\n"
+         "\nPerplexity diffs ordered by worsening contribution:\n"
          + "\n".join(f"'{tup[0]}': {tup[1]}" for tup in sorted(
             mean_perplexity.items(),
             key=lambda x: x[1]*total_tokens_count[x[0]],
             reverse=True)))
+
+    info(args.rank, logger,
+         f"Change of perplexity in total: {np.mean(perplexity_diffs)}")
 
 
 USE_LOG = {"learning_rate"}
