@@ -458,18 +458,32 @@ def main_compare(
         dataset.id_hl[x[1]][0][x[2]]] for x in diffs]
     total_tokens_count = Counter(total_tokens)
 
-    summed_diffs = defaultdict(float)
-    for token, (c_diff, _, _) in zip(total_tokens, diffs):
-        summed_diffs[token] += c_diff
+    perplexity_diffs: list[tuple[float, int, int]] = []  # diff, sen, pos
+    for sen_num, (probs1, probs2) in enumerate(zip(logprobs1, logprobs2)):
+        diff_tensor = (-torch.log(probs2) - -torch.log(probs1)).tolist()
+        sen_nums = [sen_num] * probs1.shape[0]
+        positions = list(range(0, probs1.shape[0]))
+        perplexity_diffs.extend(list(zip(diff_tensor, sen_nums, positions)))
 
-    mean_diffs = {token: diff_sum/total_tokens_count[token]
-                  for token, diff_sum in summed_diffs.items()}
+    summed_perplexity = defaultdict(float)
+    for token, (c_diff, _, _) in zip(total_tokens, perplexity_diffs):
+        summed_perplexity[token] += c_diff
+
+    mean_perplexity = {token: diff_sum/total_tokens_count[token]
+                       for token, diff_sum in summed_perplexity.items()}
 
     info(args.rank, logger,
-         "\nMean diffs ordered by importance (diff*count):\n"
+         "\nPerplexity diffs ordered by improvement contribution:\n"
          + "\n".join(f"'{tup[0]}': {tup[1]}" for tup in sorted(
-            mean_diffs.items(),
-            key=lambda x: abs(x[1])*total_tokens_count[x[0]],
+            mean_perplexity.items(),
+            key=lambda x: x[1]*total_tokens_count[x[0]],
+            reverse=False)))
+
+    info(args.rank, logger,
+         "\nPerplexity diffs ordered by decrease contribution:\n"
+         + "\n".join(f"'{tup[0]}': {tup[1]}" for tup in sorted(
+            mean_perplexity.items(),
+            key=lambda x: x[1]*total_tokens_count[x[0]],
             reverse=True)))
 
 
