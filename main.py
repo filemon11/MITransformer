@@ -487,7 +487,8 @@ def main_compare(
             reverse=True)))
 
     info(args.rank, logger,
-         f"Change of perplexity in total: {np.mean(perplexity_diffs)}")
+         f"Change of perplexity in total: {np.mean(
+             [x[0] for x in perplexity_diffs])}")
 
 
 USE_LOG = {"learning_rate"}
