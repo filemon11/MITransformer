@@ -466,9 +466,11 @@ def main_compare(
                   for token, diff_sum in summed_diffs.items()}
 
     info(args.rank, logger,
-         "\nMean diffs:\n"
+         "\nMean diffs ordered by importance (diff*count):\n"
          + "\n".join(f"'{tup[0]}': {tup[1]}" for tup in sorted(
-            mean_diffs.items(), key=lambda x: abs(x[1]), reverse=True)))
+            mean_diffs.items(),
+            key=lambda x: abs(x[1])*total_tokens_count[x[0]],
+            reverse=True)))
 
 
 USE_LOG = {"learning_rate"}
