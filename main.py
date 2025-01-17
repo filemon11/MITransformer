@@ -418,10 +418,11 @@ def main_compare(
     assert dataset.id_hl is not None
     highest_tokens = [token_mapper.id2word[
         dataset.id_hl[x[1]][0][x[2]]] for x in highest]
-    tokens_count = Counter(highest_tokens)
+    highest_tokens_count = Counter(highest_tokens)
 
     info(args.rank, logger,
-         f"Tokens with the highest difference: {tokens_count}")
+         f"{highest_num} tokens with the highest "
+         f"difference: {highest_tokens_count}")
 
     info(args.rank, logger, "Tokens with window:")
 
@@ -438,9 +439,10 @@ def main_compare(
     for token, diff in zip(highest_tokens, highest):
         token_to_diffs[token].append(diff)
 
+    # Concordances
     info(args.rank, logger, "Concordances:")
     for token, _ in sorted(
-            tokens_count.items(), key=lambda x: x[1], reverse=True):
+            highest_tokens_count.items(), key=lambda x: x[1], reverse=True):
         info(args.rank, logger, f"\nToken: {token}\n")
         for c_diff, c_sen_num, c_pos in token_to_diffs[token]:
             tokens = token_mapper.decode([dataset.id_hl[c_sen_num][0]])[0]
@@ -450,6 +452,23 @@ def main_compare(
                  (f"diff={round(c_diff, 2)}: "
                   f"{' '.join(tokens[left:c_pos])[-80:]:>80} "
                   f"[{tokens[c_pos]}] {' '.join(tokens[c_pos+1:right])[:81]}"))
+
+    # Mean differences
+    total_tokens = [token_mapper.id2word[
+        dataset.id_hl[x[1]][0][x[2]]] for x in diffs]
+    total_tokens_count = Counter(total_tokens)
+
+    summed_diffs = defaultdict(float)
+    for token, (c_diff, _, _) in zip(total_tokens, diffs):
+        summed_diffs[token] += c_diff
+
+    mean_diffs = {token: diff_sum/total_tokens_count[token]
+                  for token, diff_sum in summed_diffs.items()}
+
+    info(args.rank, logger,
+         "\nMean diffs:\n"
+         + "\n".join(f"'{tup[0]}': {tup[1]}" for tup in sorted(
+            mean_diffs.items(), key=lambda x: abs(x[1]), reverse=True)))
 
 
 USE_LOG = {"learning_rate"}
