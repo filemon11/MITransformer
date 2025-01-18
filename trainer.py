@@ -532,15 +532,18 @@ class LMTrainer():
         if self.config.discriminative:
             probs = F.sigmoid(logits)
             mask = labels != ignore_index
-            labels_without_zero = labels
-            labels_without_zero[~mask] = 0  # dummy
+            labels_without_negative = labels
+            labels_without_negative[~mask] = 0  # to ignore later
             one_hot = F.one_hot(
-                labels_without_zero,
-                logits.shape[-2]).swapaxes(-1, -2).float()
+                labels_without_negative,
+                logits.shape[-2]).float()
             loss = F.binary_cross_entropy(
-                probs, one_hot, reduction='none').swapaxes(-2, -1)
+                probs.swapaxes(-1, -2), one_hot, reduction='none')
+
+            # ignore padding tokens
             loss[~mask] = 0
             loss = loss.sum() / (mask.sum() * logits.shape[-2])
+
         else:
             loss = F.cross_entropy(
                 logits, labels,
