@@ -458,36 +458,46 @@ def main_compare(
     total_tokens_count = Counter(total_tokens)
 
     perplexity_diffs: list[tuple[float, int, int]] = []  # diff, sen, pos
+    ppl1: list[float] = []
+    ppl2: list[float] = []
     for sen_num, (probs1, probs2) in enumerate(zip(logprobs1, logprobs2)):
+        ppl1.extend((-torch.log(probs1)).tolist())
+        ppl2.extend((-torch.log(probs2)).tolist())
         diff_tensor = (-torch.log(probs2) - -torch.log(probs1)).tolist()
         sen_nums = [sen_num] * probs1.shape[0]
         positions = list(range(0, probs1.shape[0]))
         perplexity_diffs.extend(list(zip(diff_tensor, sen_nums, positions)))
 
-    summed_perplexity = defaultdict(float)
-    for token, (c_diff, _, _) in zip(total_tokens, perplexity_diffs):
-        summed_perplexity[token] += c_diff
+    summed_differences = defaultdict(float)
+    for token, (c_diff, _, _) in zip(total_tokens, diffs):
+        summed_differences[token] += c_diff
 
-    mean_perplexity = {token: diff_sum/total_tokens_count[token]
-                       for token, diff_sum in summed_perplexity.items()}
-
-    info(args.rank, logger,
-         "\nPerplexity diffs ordered by improvement contribution:\n"
-         + "\n".join(f"'{tup[0]}': {tup[1]}" for tup in sorted(
-            mean_perplexity.items(),
-            key=lambda x: x[1]*total_tokens_count[x[0]],
-            reverse=False)))
+    mean_differences = {token: diff_sum/total_tokens_count[token]
+                        for token, diff_sum in summed_differences.items()}
 
     info(args.rank, logger,
-         "\nPerplexity diffs ordered by worsening contribution:\n"
+         "\nProbability diffs ordered by improvement contribution:\n"
          + "\n".join(f"'{tup[0]}': {tup[1]}" for tup in sorted(
-            mean_perplexity.items(),
+            mean_differences.items(),
             key=lambda x: x[1]*total_tokens_count[x[0]],
             reverse=True)))
 
     info(args.rank, logger,
-         f"Change of perplexity in total: {np.mean(
-             [x[0] for x in perplexity_diffs])}")
+         "\nProbability diffs ordered by worsening contribution:\n"
+         + "\n".join(f"'{tup[0]}': {tup[1]}" for tup in sorted(
+            mean_differences.items(),
+            key=lambda x: x[1]*total_tokens_count[x[0]],
+            reverse=False)))
+
+    info(args.rank, logger,
+         f"Perplexity 1: {np.exp(np.mean(ppl1))}")
+
+    info(args.rank, logger,
+         f"Perplexity 2: {np.exp(np.mean(ppl2))}")
+
+    info(args.rank, logger,
+         "Change of perplexity in total: "
+         f"{np.exp(np.mean(ppl2)) - np.exp(np.mean(ppl1))}")
 
 
 USE_LOG = {"learning_rate"}
