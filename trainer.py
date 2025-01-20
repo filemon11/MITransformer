@@ -805,7 +805,8 @@ class LMTrainer():
         surprisal_sum = sum_depadded(
             logits_to_surprisal(
                 logits, labels,
-                ignore_index),
+                ignore_index,
+                softmax=not self.config.discriminative),
             labels, ignore_index).sum().detach().cpu().item()
 
         uas_abs = None
@@ -1133,7 +1134,9 @@ class LMTrainer():
                 labels = batch["label_ids"]
 
                 if make_prob:
-                    logits = logits_to_probs(logits)
+                    logits = logits_to_probs(
+                        logits,
+                        not self.config.discriminative)
 
                 if only_true:
                     logits = select_true(logits, labels, ignore_index)
@@ -1269,21 +1272,28 @@ def select_true(preds: torch.Tensor,
     return torch.gather(preds, -1, labels).squeeze(-1)
 
 
-def logits_to_probs(logits: torch.Tensor) -> torch.Tensor:
-    return torch.softmax(logits, dim=-1)
+def logits_to_probs(logits: torch.Tensor, softmax: bool = True
+                    ) -> torch.Tensor:
+    if softmax:
+        return torch.softmax(logits, dim=-1)
+    else:
+        return torch.sigmoid(logits)
 
 
 def logits_to_true_probs(logits: torch.Tensor,
                          labels: torch.Tensor,
-                         ignore_index: int | None = None) -> torch.Tensor:
-    probs = logits_to_probs(logits)
+                         ignore_index: int | None = None,
+                         softmax: bool = True) -> torch.Tensor:
+    probs = logits_to_probs(logits, softmax)
     return select_true(probs, labels, ignore_index)
 
 
 def logits_to_surprisal(logits: torch.Tensor,
                         labels: torch.Tensor,
-                        ignore_index: int | None = None) -> torch.Tensor:
-    return -torch.log(logits_to_true_probs(logits, labels, ignore_index))
+                        ignore_index: int | None = None,
+                        softmax: bool = True) -> torch.Tensor:
+    return -torch.log(logits_to_true_probs(
+        logits, labels, ignore_index, softmax))
 
 
 def sum_depadded(values: torch.Tensor,
@@ -1303,9 +1313,10 @@ def mean_depadded(values: torch.Tensor,
 
 def logits_to_perplexity(logits: torch.Tensor,
                          labels: torch.Tensor,
-                         ignore_index: int) -> torch.Tensor:
+                         ignore_index: int,
+                         softmax: bool = True) -> torch.Tensor:
     # Should we disregard first node (root from dummy?)
-    surprisal = logits_to_surprisal(logits, labels)
+    surprisal = logits_to_surprisal(logits, labels, softmax)
     means = mean_depadded(surprisal, labels, ignore_index)
     return torch.exp(means)
 
