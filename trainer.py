@@ -542,7 +542,7 @@ class LMTrainer():
 
             # ignore padding tokens
             loss[~mask] = 0
-            loss = loss.sum() / (mask.sum() * logits.shape[-2])
+            loss = loss.sum() / mask.sum()
 
         else:
             loss = F.cross_entropy(
