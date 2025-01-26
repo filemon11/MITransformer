@@ -791,6 +791,7 @@ class TrainParserArgs(ParserArgs):
     learning_rate: float
     loss_alpha: float | None
     arc_loss_weighted: bool
+    discriminative: bool
 
     transformer_description: TransformerDescription | None
     layer_design: tuple[str, ...]
@@ -833,6 +834,7 @@ class HyperoptParserArgs(ParserArgs):
     learning_rate: float | tuple[float, float] | list[float]
     loss_alpha: float | tuple[float, float] | list[float | None] | None
     arc_loss_weighted: bool | list[bool]
+    discriminative: bool | list[bool]
 
     block_size: int
     overlay_causal: bool
@@ -1000,6 +1002,9 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
     trainer_group.add_argument(
         '--arc_loss_weighted', type=str_to_bool, default=False,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
+    trainer_group.add_argument(
+        '--discriminative', type=str_to_bool, default=False,
+        help="Train the language model in a discriminative fashion")
 
     # # # Model parser group
     model_group = train_parser.add_argument_group('model')
@@ -1162,6 +1167,9 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
     hyperopt_flexible_trainer_group.add_argument(
         '--arc_loss_weighted', type=HyperoptSpace(str_to_bool), default=False,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
+    hyperopt_flexible_trainer_group.add_argument(
+        '--discriminative', type=HyperoptSpace(str_to_bool), default=False,
+        help="Train the language model in a discriminative fashion")
 
     # # # Hyperopt Fixed Model parser group
     hyperopt_fixed_model_group = hyperopt_parser.add_argument_group(
@@ -1175,9 +1183,9 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
               "masks as additional inputs"))
 
     # # # Hyperopt Flexible Model parser group
-    hyperopt_flexbile_model_group = hyperopt_parser.add_argument_group(
+    hyperopt_flexible_model_group = hyperopt_parser.add_argument_group(
         'model flexible')
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--transformer_description',
         type=HyperoptSpace(OptNone(make_tuple)),
         default=((('head', 'child'), 1),),
@@ -1185,76 +1193,76 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
               "where each layer is a tuple of a tuple of "
               "head types and a width."
               "The width is applied to every head type in the layer."))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--layer_design',
         type=HyperoptSpace(make_tuple), default=("head", "child"),
         help=("design of the core transformer layer; tuple of head types "
               "is overriden if --transformer_description is provided"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--use_standard',
         type=HyperoptSpace(str_to_bool), default=False,
         help=("whether to add an unrestricted head to the core layer(s)"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--width',
         type=HyperoptSpace(int), default=1,
         help=("width of the core transformer; "
               "is overriden if --transformer_description is provided"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--depth',
         type=HyperoptSpace(int), default=1,
         help=("depth of the core transformer; "
               "is overriden if --transformer_description is provided"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--unrestricted_before',
         type=HyperoptSpace(int), default=0,
         help=("number of unrestricted layers below the core transformer; "
               "is overriden if --transformer_description is provided"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--unrestricted_after',
         type=HyperoptSpace(int), default=0,
         help=("number of unrestricted layers above the core transformer; "
               "is overriden if --transformer_description is provided"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--d_ff_factor', type=HyperoptSpace(int), default=4,
         help="hidden dimensionality of the feed-forward layers (*n_embd)")
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--dropout', type=HyperoptSpace(OptNone(float)), default=0.3,
         help=("hidden dimensionality of the feed-forward layers; "
               "if provided, fixes the search for all specific dropouts;"
               "if provided, specific dropouts establish individual "
               " search spaces"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--dropout_attn', type=HyperoptSpace(OptNone(float)), default=-1,
         help=("dropout for the attention module; "
               "overriden by --dropout if specified"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--dropout_resid', type=HyperoptSpace(OptNone(float)), default=-1,
         help=("dropout for the residual connections; "
               "overriden by --dropout if specified"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--dropout_ff', type=HyperoptSpace(OptNone(float)), default=-1,
         help=("dropout for the feed-forward layers; "
               "overriden by --dropout if specified"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--dropout_embd', type=HyperoptSpace(OptNone(float)), default=-1,
         help=("dropout for the embedding layer; "
               "overriden by --dropout if specified"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--dropout_lstm', type=HyperoptSpace(OptNone(float)), default=-1,
         help=("dropout for the LSTM (if existant); "
               "overriden by --dropout if specified"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--n_embd', type=HyperoptSpace(int), default=500,
         help="model embedding size")
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--use_dual_fixed', type=HyperoptSpace(str_to_bool), default=False,
         help=("whether to cross-fix key and query weights of "
               "the head and child attention heads. Only allowed "
               "if both are present in the description with width 1"))
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--bias', type=HyperoptSpace(str_to_bool), default=False,
         help="Whether to use bias in all of the model weights")
-    hyperopt_flexbile_model_group.add_argument(
+    hyperopt_flexible_model_group.add_argument(
         '--pos_enc', type=HyperoptSpace(
             StrToLiteral("embedding", "sinusoidal")),
         default="embedding",
