@@ -439,7 +439,8 @@ class LMTrainer():
                    ) -> tuple[MITransformerLM, MITransformerConfig]:
         state_dict, transformer_config = torch.load(
             os.path.join(cls.model_dir, model_name, "model"),
-            map_location=device).values()
+            map_location=device,
+            weights_only=False).values()
         transformer_config = cast(MITransformerConfig, transformer_config)
         model: MITransformerLM = MITransformerLM(
             MITransformer(transformer_config))
@@ -516,7 +517,8 @@ class LMTrainer():
         if model_name is None:
             model_name = self.config.model_name
         state_dict, _ = torch.load(
-            os.path.join(self.model_dir, model_name, "model")).values()
+            os.path.join(self.model_dir, model_name, "model"),
+            weights_only=False).values()
         if self.use_ddp:
             self.transformerlm.module.load_state_dict(state_dict)
         else:
