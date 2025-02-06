@@ -1,4 +1,4 @@
-for i in exp1_dep-in_pr_35 exp1_dep0_pr_35 exp1_dep-supervised_pr_7
+for i in 0.1 # 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
 do 
-     sh correlate_RT.sh $i
+     sh correlate_RT.sh exp1_dep-alphaselect_${i} exp1_dep-alphaselect_1.0 3
 done

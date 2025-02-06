@@ -43,6 +43,10 @@ logger = getLogger(__name__)
 
 ENCODING = "utf-8"
 
+DUMMY_DEPREL = "dummy"
+ROOT_DEPREL = "!root"
+EOS_DEPREL = "eos"
+
 
 TransformFunc = Callable[[npt.NDArray[np.bool_]],
                          Mapping[str, npt.NDArray[np.bool_]]]
@@ -197,6 +201,7 @@ class CoNNLUDict(TypedDict):
     tokens: list[list[str]]
     heads: list[npt.NDArray[np.uint8]]  # max 127 sequence length
     space_after: NotRequired[list[npt.NDArray[np.bool_]]]
+    deprels: list[list[str]]
 
 
 class MaskedSentence(TypedDict):
@@ -293,6 +298,7 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
         self.mapped: bool = False
 
         self.tokens: list[list[str]] = data["tokens"]
+        self.deprels: list[list[str]] = data["deprels"]
         self.heads: list[npt.NDArray[np.uint8]] = data["heads"]
         self.space_after: list[npt.NDArray[np.bool_]] | None
         self.space_after = data.get("space_after", None)
@@ -320,12 +326,13 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
 
     @staticmethod
     def make_connludict(tokenlists: Iterable[conllu.TokenList]) -> CoNNLUDict:
-        d = filldict(("tokens", "heads", "space_after"),
-                     (get_tokens, get_head_list, get_space_after),
+        d = filldict(("tokens", "heads", "space_after", "deprels"),
+                     (get_tokens, get_head_list, get_space_after, get_deprels),
                      tokenlists)
         return CoNNLUDict(tokens=d["tokens"],   # type: ignore
                           heads=d["heads"],     # type: ignore
-                          space_after=d["space_after"])     # type: ignore
+                          space_after=d["space_after"],  # type: ignore
+                          deprels=d["deprels"])     # type: ignore
 
     @classmethod
     def from_file(
@@ -1115,6 +1122,14 @@ def get_head_list(tokenlist: conllu.TokenList,
     # 0 is already root; therefore add 1 because of dummy # +1
     heads.append(0+(1 if add_dummy_and_root else 0))  # (1)   # EOS token
     return np.asarray(heads, dtype=np.uint8)
+
+
+def get_deprels(tokenlist: conllu.TokenList,
+                add_dummy_and_root: bool = True) -> list[str]:
+    tokens = [DUMMY_DEPREL, ROOT_DEPREL] if add_dummy_and_root else []
+    tokens.extend(token["deprel"] for token in tokenlist)
+    tokens.append(EOS_DEPREL)
+    return tokens
 
 
 def get_space_after(tokenlist: conllu.TokenList) -> npt.NDArray[np.bool_]:
