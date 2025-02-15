@@ -39,6 +39,9 @@ def logging_config(logname: str | None = None,
     else:
         logname = os.path.join(logpath, logname + ".log")
 
+    if os.path.isfile(logname):
+        logname = f"{logname[:-4]}_{get_timestr()}.log"
+
     Path(logpath).mkdir(parents=True, exist_ok=True)
     basicConfig(
         format='%(asctime)s %(levelname)-8s %(message)s',
