@@ -8,6 +8,7 @@ from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
                      minimise, Result)
 from model import TransformerDescription, description_builder
 from params import Params, dict_info, Undefined
+from hooks import TreePlotHook, AttentionPlotHook
 
 import optuna
 import random
@@ -336,16 +337,24 @@ def main_test(
             memmaped=True)
     assert isinstance(datasets, dict)
 
+    # TODO: Hooks do not save dataset name or number.
+    # Idea: add counter to trainer that counts number of received
+    # datasets and give this number to hook
+
+    model_dir = os.path.join(trainer.model_dir, args.model_name)
+
+    if args.att_plot:
+        trainer.add_hook(AttentionPlotHook(
+            os.path.join(model_dir, "hooks", "att_plots")
+        ))
+
+    if args.tree_plot:
+        trainer.add_hook(TreePlotHook(
+            os.path.join(model_dir, "hooks", "tree_plots")
+        ))
+
     # Training setting
-    if "test" in datasets:
-        metrics = trainer.test(
-            train=datasets["train"],
-            eval=datasets["eval"],
-            test=datasets["test"])
-    else:
-        metrics = trainer.test(
-            train=datasets["train"],
-            eval=datasets["eval"])
+    metrics = trainer.test(**datasets)
 
     del trainer
     del datasets
@@ -468,7 +477,7 @@ def main_compare(
         positions = list(range(0, probs1.shape[0]))
         perplexity_diffs.extend(list(zip(diff_tensor, sen_nums, positions)))
 
-    summed_differences = defaultdict(float)
+    summed_differences: defaultdict[str, float] = defaultdict(float)
     for token, (c_diff, _, _) in zip(total_tokens, diffs):
         summed_differences[token] += c_diff
 
@@ -868,6 +877,9 @@ class TestParserArgs(ParserArgs):
     batch_size: int | Undefined
     loss_alpha: float | None | Undefined
     arc_loss_weighted: bool | Undefined
+
+    att_plot: bool
+    tree_plot: bool
 
 
 @dataclass
@@ -1298,6 +1310,17 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
     trainer_group.add_argument(
         '--arc_loss_weighted', type=str_to_bool, default=Undefined,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
+
+    # # # Plot parser group
+    plot_group = test_parser.add_argument_group('plot')
+    plot_group.add_argument(
+        '--att_plot', type=str_to_bool,
+        default=False,
+        help="plot attention matrices")
+    plot_group.add_argument(
+        '--tree_plot', type=str_to_bool,
+        default=False,
+        help="plot dependency trees")
 
     # # Compare Parser
     compare_parser = subparsers.add_parser(

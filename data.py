@@ -204,6 +204,10 @@ class CoNNLUDict(TypedDict):
     deprels: list[list[str]]
 
 
+class IdxSentence(TypedDict):
+    idx: npt.NDArray[np.int_]
+
+
 class MaskedSentence(TypedDict):
     masks: dict[str, npt.NDArray[np.bool_] | None]
 
@@ -219,12 +223,16 @@ class CoNNLUSentence(MaskedSentence):
     space_after: NotRequired[list[npt.NDArray[np.bool_]]]
 
 
-class CoNNLUTokenisedSentence(CoNNLUSentence, IDDict):
+class CoNNLUTokenisedSentence(IdxSentence, CoNNLUSentence, IDDict):
     pass
 
 
-class EssentialSentence(MaskedSentence, IDDict):
+class EssentialSentence(IdxSentence, MaskedSentence, IDDict):
     pass
+
+
+class BaseBatch(TypedDict):
+    idx: torch.Tensor
 
 
 class MaskedBatch(TypedDict):
@@ -242,11 +250,11 @@ class CoNNLUBatch(MaskedBatch):
     space_after: NotRequired[list[npt.NDArray[np.bool_]]]
 
 
-class CoNNLUTokenisedBatch(CoNNLUBatch, IDDictBatch):
+class CoNNLUTokenisedBatch(BaseBatch, CoNNLUBatch, IDDictBatch):
     pass
 
 
-class EssentialBatch(MaskedBatch, IDDictBatch):
+class EssentialBatch(BaseBatch, MaskedBatch, IDDictBatch):
     pass
 
 
@@ -391,6 +399,7 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
                 masks = {key: None if masks is None else masks[1:, :-1]
                          for key, masks in masks.items()}
         keys = dict(
+            idx=np.array(idx),
             tokens=sentence,
             labels=label,
             masks=masks)
@@ -551,6 +560,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
         # print(masks)
 
         return EssentialSentence(
+            idx=np.array(idx),
             masks=masks,
             input_ids=ids[:-1],
             label_ids=ids[1:])
@@ -700,6 +710,7 @@ class MemMapWindowDataset(MemMapDataset):
                          for key, masks in masks.items()}
 
         return EssentialSentence(
+            idx=np.array(idx),
             masks=masks,
             input_ids=ids[:-1],
             label_ids=ids[1:])

@@ -7,8 +7,10 @@ from tokeniser import TokenMapper
 from parse import parse_list_of_words_with_spacy
 from dependencies import (mst, merge_head_child_scores,
                           dummy_mask_removal, mask_to_headlist, uas_absolute)
+from hooks import Hook
 from params import Params
 
+import pandas as pd
 import numpy as np
 import torch
 from torch.optim.adam import Adam
@@ -32,7 +34,8 @@ from collections import defaultdict
 from typing import (Self, Literal, cast,
                     Container, Iterable, Mapping,
                     ClassVar, TypeVar, Callable,
-                    Any, Generator, TypedDict, NotRequired)
+                    Any, Generator, TypedDict, NotRequired,
+                    Sequence)
 
 from logmaker import getLogger, info, warning, get_timestr
 
@@ -128,6 +131,16 @@ class Metric(Params):
         val2 = getattr(m2, name)
         if name == "main_metric":
             assert val1 == val2, "Main metrics do not correspond!"
+            # TODO: does this make sense? Should the values correspond?
+            # I think we should assert
+            # getattr(m1, "main_metric") == getattr(m2, "main_metric")
+            # in __add__
+            return val1
+        elif val1 is None:
+            assert m1.num == 0
+            return val2
+        elif val2 is None:
+            assert m2.num == 0
             return val1
         else:
             return val1 + val2
@@ -301,9 +314,10 @@ class EvalMetric(Metric):
 @dataclass
 class SupervisedEvalMetric(SupervisedMetric, EvalMetric):
     _uas: float = 0
+    _att_entropy: pd.DataFrame | None = None
     _to_mean: ClassVar[set[str]] = (SupervisedMetric._to_mean
                                     | EvalMetric._to_mean
-                                    | {"uas"})
+                                    | {"uas", "att_entropy"})
 
 
 class MetricWriter(SummaryWriter):
@@ -413,6 +427,8 @@ class LMTrainer():
                 output_device=device,
                 find_unused_parameters=False)
 
+        self.hooks: list[Hook] = []
+
     @property
     def config(self) -> GeneralConfig:
         return self.__config
@@ -451,12 +467,13 @@ class LMTrainer():
     def load(cls, model_name: str,
              device: str = "cpu",
              **optional_config: Any) -> Self:
+        optional_config["model_name"] = model_name
 
         model, transformer_config = cls.load_model(model_name,
                                                    device)
 
         with open(os.path.join(
-                    cls.model_dir, model_name, "config"), 'rb') as handle:
+                  cls.model_dir, model_name, "config"), 'rb') as handle:
             config: GeneralConfig = pickle.load(handle)
 
         config.update_from_kwargs(device=device, **optional_config)
@@ -524,6 +541,27 @@ class LMTrainer():
         else:
             self.transformerlm.load_state_dict(state_dict)
         self.transformerlm.to(self.config.device)
+
+    def add_hook(self,
+                 hook: Hook
+                 ) -> None:
+        self.hooks.append(hook)
+
+    def run_hooks(self, input: CoNNLUTokenisedBatch | EssentialBatch,
+                  output: tuple[torch.Tensor, dict[str, list[torch.Tensor]]]
+                  ) -> None:
+        for hook in self.hooks:
+            hook(input, output)
+
+    def init_hooks(self, dataloader: DataLoader, dataset_name: str,
+                   epoch: int | None = None,
+                   token_mapper: TokenMapper | None = None) -> None:
+        for hook in self.hooks:
+            if epoch is None:
+                hook.init(dataloader, token_mapper, dataset_name)
+            else:
+                hook.init(dataloader, token_mapper,
+                          "_".join((dataset_name, f"ep:{epoch}")))
 
     def loss(self, logits: torch.Tensor, labels: torch.Tensor,
              ignore_index: int = -100,
@@ -712,7 +750,8 @@ class LMTrainer():
                    lm_loss: torch.Tensor,
                    arc_loss: torch.Tensor | None = None,
                    perplexity: float | None = None,
-                   uas: float | None = None) -> Metric:
+                   uas: float | None = None,
+                   att_entropy: pd.DataFrame | None = None) -> Metric:
         if perplexity is not None:
             if arc_loss is not None:
                 assert uas is not None
@@ -723,6 +762,7 @@ class LMTrainer():
                     _arc_loss=arc_loss,
                     alpha=self.config.loss_alpha,
                     _uas=uas,
+                    _att_entropy=att_entropy,
                     main_metric=self.config.early_stop_metric
                     )
             else:
@@ -748,6 +788,7 @@ class LMTrainer():
         assert self.optimiser is not None
         self.batch_to(batch, device=self.config.device)  # type: ignore
         logits, arc_scores = self.transformerlm(**batch)
+        self.run_hooks(batch, (logits, arc_scores))
         # remove from arc_scores those that should not be used...
         lm_loss = self.loss(
             logits, batch["label_ids"],
@@ -793,6 +834,7 @@ class LMTrainer():
         self.batch_to(batch, device=self.config.device)  # type: ignore
 
         logits, arc_scores = self.transformerlm(**batch)
+        self.run_hooks(batch, (logits, arc_scores))
         # remove from arc_scores those that should not be used...
 
         labels = batch["label_ids"]
@@ -813,6 +855,7 @@ class LMTrainer():
 
         uas_abs = None
         arc_loss = None
+        att_entropy = None
         if mode == "supervised":
             score_preds, score_gold = self.prepare_scores(
                 arc_scores, batch["masks"])
@@ -833,6 +876,7 @@ class LMTrainer():
 
                 # in case of multiple heads of the same type
                 # scores get averaged
+                # TODO: save these in dictionary
                 middle = score_preds.shape[0]//2
                 preds_head = score_preds[
                     :middle].mean(0).detach().cpu().numpy()
@@ -857,30 +901,23 @@ class LMTrainer():
                 uas_abs = sum(map(get_uas_abs, zip(
                     preds_arcs, golds_arcs, not_padding)))
 
-                # # does not appear to be faster:
-                # uas_abs_l = [0]
-                # if self.config.rank == 0 or self.config.rank is None:
-                #     pool = mp.Pool(
-                #         processes=self.config.n_workers*self.config.world_size)
-                #     uas_abs_l = [sum(
-                #         pool.map(
-                #             get_uas_abs, zip(
-                #                 preds_arcs, golds_arcs, not_padding)))]
-                #     pool.close()
-                #
-                # if self.use_ddp:
-                #     dist.barrier()
-                #     dist.broadcast_object_list(uas_abs, src=0)
-                #     # to tensor better with NCCL?
+                # TODO: make the model output logits and apply sigmoid later
+                head_entropy = get_attention_entropy(
+                    inverse_sigmoid(score_preds[:middle])).detach().cpu()
+                child_entropy = get_attention_entropy(
+                    inverse_sigmoid(score_preds[middle:])).detach().cpu()
 
-                arc_loss = arc_loss
+                att_entropy = pd.DataFrame({"head": head_entropy.tolist(),
+                                            "child": child_entropy.tolist()})
+                # can make separate list of heads
 
         metric = self.get_metric(
             num_instances,
             lm_loss=lm_loss,
             arc_loss=arc_loss,
             perplexity=surprisal_sum,
-            uas=uas_abs)
+            uas=uas_abs,
+            att_entropy=att_entropy)
         metric.to_("cpu")
         metric.detach()
         return metric
@@ -905,6 +942,7 @@ class LMTrainer():
             self,
             train: DepDataset[IDSen] | DataLoader,
             eval: DepDataset[IDSen] | DataLoader,
+            token_mapper: TokenMapper | None = None,
             **kwargs) -> Generator[Result,
                                    None,
                                    tuple[tuple[int, int], tuple[int, int]]]:
@@ -932,6 +970,7 @@ class LMTrainer():
         best_epoch: int = 0
         best_step: int = 0
         for epoch in range(1, max_epochs+1):
+            self.init_hooks(train, "train", epoch, token_mapper)
             if break_training:
                 epoch -= 1
                 break
@@ -955,8 +994,12 @@ class LMTrainer():
                     info(self.config.rank, logger,
                          f"train metric:\n{train_metric.info}")
 
+                    self.init_hooks(eval, "eval", epoch, token_mapper)
                     eval_metric = self._eval(eval)
+
+                    self.init_hooks(train, "train", epoch, token_mapper)
                     self.transformerlm.train()
+
                     self.log_metric(eval_metric, total_steps, "eval")
                     info(self.config.rank, logger,
                          f"eval metric:\n{eval_metric.info}")
@@ -1098,20 +1141,25 @@ class LMTrainer():
                 for batch in loader]
         return self.gather_metrics(sum_metrics(metrics))
 
-    def test(self, **datasets: DepDataset | DataLoader | Any
+    def test(self, token_mapper: TokenMapper | None = None,
+             **datasets: DepDataset | DataLoader | Any
              ) -> dict[str, Metric]:
-        metrics = {n: self._eval(self.get_loader(ds))
-                   for n, ds in datasets.items()
-                   if isinstance(ds, (DataLoader, DepDataset))}
-        for n, m in metrics.items():
-            info(self.config.rank, logger,
-                 f"Test metric for {n} split:\n{m.info}")
+        metrics: dict[str, Metric] = {}
+        for n, ds in datasets.items():
+            if isinstance(ds, (DataLoader, DepDataset)):
+                ds = self.get_loader(ds)
+                self.init_hooks(ds, n, token_mapper=token_mapper)
+                metrics[n] = self._eval(self.get_loader(ds))
+                info(self.config.rank, logger,
+                     f"Test metric for {n} split:\n{metrics[n].info}")
         return metrics
 
     def predict(
             self, dataset: DepDataset,
             make_prob: bool = False,
-            only_true: bool = False
+            only_true: bool = False,
+            dataset_name: str | None = None,
+            token_mapper: TokenMapper | None = None
             ) -> tuple[list[torch.Tensor], dict[str, list[torch.Tensor]]]:
         """Returns logits and arc scores"""
         # TODO: Does this work with ddp? Batches are distributed but not
@@ -1121,6 +1169,9 @@ class LMTrainer():
             bucket=False,
             shuffle=False, droplast=False,
             n_workers=self.config.n_workers)
+        self.init_hooks(
+            loader, (dataset_name if dataset_name is not None else "ds"),
+            token_mapper=token_mapper)
 
         ignore_index = dataset.keys_for_padding["label_ids"]
 
@@ -1136,6 +1187,7 @@ class LMTrainer():
             for batch in loader:
                 self.batch_to(batch, device=self.config.device)  # type: ignore
                 logits, arc_scores = self.transformerlm(**batch)
+                self.run_hooks(batch, (logits, arc_scores))
                 labels = batch["label_ids"]
 
                 if make_prob:
@@ -1358,3 +1410,18 @@ def get_uas_abs(inp: tuple[np.ndarray, np.ndarray, int]) -> int:
     # add 1 for dummy mask since metric divides through
     # the number of all tokens)
     return uas_s
+
+
+def get_attention_entropy(logits: torch.Tensor) -> torch.Tensor:
+    """input shape [H, B, S, S]
+    with H: heads, B: batch size, S: sequence length.
+    output shape: [H]"""
+    probs = F.softmax(logits, dim=-1)
+    entropy = -(probs*torch.log(probs))
+    entropy[entropy.isnan()] = 0
+    entropy = entropy.flatten(1).sum(-1)
+    return entropy
+
+
+def inverse_sigmoid(x: torch.Tensor) -> torch.Tensor:
+    return -torch.log((1-x)/x)
