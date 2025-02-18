@@ -518,6 +518,7 @@ class LMTrainer():
         if not self.use_ddp or self.config.rank == 0:
             model = self.transformerlm
             if self.use_ddp:
+                assert isinstance(self.transformerlm.module, DDP)
                 model = self.transformerlm.module
             dir = os.path.join(self.model_dir, self.train_config.model_name)
             Path(dir).mkdir(parents=True, exist_ok=True)
@@ -579,12 +580,25 @@ class LMTrainer():
             labels_without_negative[~mask] = 0  # to ignore later
             one_hot = F.one_hot(
                 labels_without_negative,
-                logits.shape[-2]).float()
+                logits.shape[-2])
             loss = F.binary_cross_entropy(
-                probs.swapaxes(-1, -2), one_hot, reduction='none')
+                probs.swapaxes(-1, -2), one_hot.float(), reduction='none')
+
+            # # mask randomly
+            # mask_rate = 0.5
+            # rand_mask = torch.rand(loss.shape, device=mask.device) < mask_rate
+            # rand_mask[one_hot] = 0  # unmask gold items
+            # loss[rand_mask] = 0
+
+            # false continuation factor
+            factor = 0.5
+            tensor_factor = torch.full(loss.shape, factor, device=mask.device)
+            tensor_factor[one_hot] = 1  # multiply gold items by 1
+            loss *= tensor_factor
 
             # ignore padding tokens
             loss[~mask] = 0
+
             loss = loss.sum() / mask.sum()
 
         else:
