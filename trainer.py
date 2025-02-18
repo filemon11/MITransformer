@@ -10,6 +10,7 @@ from dependencies import (mst, merge_head_child_scores,
 from hooks import Hook
 from params import Params
 
+from tqdm import tqdm
 import pandas as pd
 import numpy as np
 import torch
@@ -497,7 +498,8 @@ class LMTrainer():
                    transformer_config: MITransformerConfig,
                    config: GeneralConfig) -> None:
         info(config.rank, logger,
-             "Initialised model with params:\n" +
+             "Initialised model with params:\n")
+        info(config.rank, logger,
              transformer_config.info)
 
         model_parameters = filter(
@@ -506,7 +508,8 @@ class LMTrainer():
         info(config.rank, logger, f"Number of parameters: {params}")
 
         info(config.rank, logger,
-             "Initialised trainer with params:\n" + config.info)
+             "Initialised trainer with params:\n")
+        info(config.rank, logger, config.info)
 
     def save(self) -> None:
         assert self.train_config is not None
@@ -969,7 +972,12 @@ class LMTrainer():
         # max_steps
         best_epoch: int = 0
         best_step: int = 0
-        for epoch in range(1, max_epochs+1):
+        if self.train_config.max_steps is not None:
+            pbar_steps = tqdm(total=self.train_config.max_steps, desc="Steps")
+        else:
+            pbar_steps = None
+
+        for epoch in tqdm(range(1, max_epochs+1), desc="Epochs"):
             self.init_hooks(train, "train", epoch, token_mapper)
             if break_training:
                 epoch -= 1
@@ -982,6 +990,8 @@ class LMTrainer():
             # Steps
             for train_metric in self._train(train):
                 total_steps += 1  # equal epochs in case of not use_steps
+                if pbar_steps is not None:
+                    pbar_steps.update(1)
 
                 if total_steps % eval_interval == 0:
                     info(self.config.rank,
@@ -1032,6 +1042,8 @@ class LMTrainer():
                         break_training = True
                         break
 
+        if pbar_steps is not None:
+            pbar_steps.close()
         return (epoch, total_steps), (best_epoch, best_step)
 
     def train(self,
@@ -1115,7 +1127,7 @@ class LMTrainer():
 
         metrics: list[Metric]
         if self.train_config.use_steps:
-            for batch in loader:
+            for batch in tqdm(loader, desc="Batches"):
                 metric = self.train_step(
                     batch,
                     loader.dataset.keys_for_padding["label_ids"])
@@ -1125,7 +1137,7 @@ class LMTrainer():
                 self.train_step(
                     batch,
                     loader.dataset.keys_for_padding["label_ids"])
-                for batch in loader]
+                for batch in tqdm(loader, desc="Batches")]
             yield self.gather_metrics(sum_metrics(metrics))
 
     def _eval(self, loader: DataLoader[IDBatch, D]) -> Metric:
@@ -1138,7 +1150,7 @@ class LMTrainer():
                     batch,
                     self.config.dependency_mode,
                     loader.dataset.keys_for_padding["label_ids"])
-                for batch in loader]
+                for batch in tqdm(loader, desc="Batches")]
         return self.gather_metrics(sum_metrics(metrics))
 
     def test(self, token_mapper: TokenMapper | None = None,
