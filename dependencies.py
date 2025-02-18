@@ -9,7 +9,8 @@ def mst(score_matrix: np.ndarray) -> np.ndarray:
     """Expects probabilities."""
     # Convert to logspace (addition corresponds to
     # multiplication of probabilities)
-    score_matrix = np.log(score_matrix)
+    with np.errstate(divide='ignore'):
+        score_matrix = np.log(score_matrix)
     heads, _ = chu_liu_edmonds(score_matrix.astype(np.double))
     return np.array(heads)
 
