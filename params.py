@@ -20,12 +20,15 @@ class Params():
                 omit_undefined: bool = True) -> dict[str, Any]:
         _dict = {key: value for key, value    # type: ignore
                  in self.__dict__.copy().items()
-                 if (not isinstance(value, Undefined)  # type: ignore
+                 if not omit_undefined or
+                    (not isinstance(value, Undefined)  # type: ignore
                      and not value == Undefined)}  # type: ignore
         if as_str:
             _dict = {key: str(value)
                      for key, value in _dict.items()
-                     if not omit_undefined}
+                     if not omit_undefined or
+                        (not isinstance(value, Undefined)  # type: ignore
+                        and not value == Undefined)}
         return _dict
 
     @property
