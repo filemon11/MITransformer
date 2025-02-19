@@ -10,6 +10,7 @@ from model import TransformerDescription, description_builder
 from params import Params, dict_info, Undefined
 from hooks import TreePlotHook, AttentionPlotHook
 
+from tqdm import tqdm
 import optuna
 import random
 import os
@@ -281,7 +282,7 @@ def main_train_multiple(
 
     metrics_list: (list[tuple[Metric, Metric]]
                    | list[tuple[Metric, Metric, Metric]]) = []
-    for n_run in range(args.n_runs):
+    for n_run in tqdm(range(args.n_runs), desc="Runs"):
         run_args = copy(args)
         run_args.model_name = f"{args.name}_{n_run}"
         run_args.seed = args.seed + n_run  # offset seed

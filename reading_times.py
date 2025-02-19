@@ -49,8 +49,8 @@ POS_TAG_COL = "POS"
 DEPREL_COL = "deprel"
 WLEN_COL = "WLEN"
 
-DEVICE = "cpu"
-BATCH_SIZE = 64
+DEVICE = "cuda"
+BATCH_SIZE = 8
 
 TAGSET = None  # "universal"  # None
 

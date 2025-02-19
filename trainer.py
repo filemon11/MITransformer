@@ -1210,7 +1210,7 @@ class LMTrainer():
             # all intermediatte variable
             logits: torch.Tensor
             arc_scores: dict[str, list[torch.Tensor]]
-            for batch in loader:
+            for batch in tqdm(loader, desc="Batches"):
                 self.batch_to(batch, device=self.config.device)  # type: ignore
                 logits, arc_scores = self.transformerlm(**batch)
                 self.run_hooks(batch, (logits, arc_scores))
