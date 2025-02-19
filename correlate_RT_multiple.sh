@@ -1,4 +1,21 @@
-for i in 0.1 # 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
-do 
-     sh correlate_RT.sh exp1_dep-alphaselect_${i} exp1_dep-alphaselect_1.0 3
+model_count=$1
+
+for i in $(seq 0 $((model_count -1)))
+do
+    python reading_times.py exp1_dep-alphaselect_1.0_${i}
+    cd RT
+    Rscript --vanilla preproc.R data/words_processed_exp1_dep-alphaselect_1.0_${i}.csv data/preprocessed_exp1_dep-alphaselect_1.0_${i}.csv
+    cd ..
+done
+
+for i in $(LC_ALL=C seq 0.1 .1 1.0);
+do
+     echo "Correlating reading times for alpha=${i} ..."
+     sh correlate_RT.sh exp1_dep-alphaselect_${i} exp1_dep-alphaselect_1.0 ${model_count} 0
+done
+
+for i in $(LC_ALL=C seq 0.105 .005 0.195);
+do
+     echo "Correlating reading times for alpha=${i} ..."
+     sh correlate_RT.sh exp1_dep-alphaselect_${i} exp1_dep-alphaselect_1.0 ${model_count} 0
 done
