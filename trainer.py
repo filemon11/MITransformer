@@ -593,7 +593,7 @@ class LMTrainer():
             # false continuation factor
             factor = 0.5
             tensor_factor = torch.full(loss.shape, factor, device=mask.device)
-            tensor_factor[one_hot] = 1  # multiply gold items by 1
+            tensor_factor[one_hot.bool()] = 1  # multiply gold items by 1
             loss *= tensor_factor
 
             # ignore padding tokens
@@ -1028,6 +1028,8 @@ class LMTrainer():
                     info(self.config.rank, logger,
                          f"eval metric:\n{eval_metric.info}")
 
+                    # TODO make it possible to save without checking if
+                    # there was an improvement
                     if best is None:
                         best = eval_metric.minval()
                     if eval_metric > best:       # greater means better

@@ -817,6 +817,7 @@ class TrainParserArgs(ParserArgs):
     dropout_ff: float | None
     dropout_embd: float | None
     dropout_lstm: float | None
+    use_lstm: bool
     block_size: int
     n_embd: int
     overlay_causal: bool
@@ -864,6 +865,7 @@ class HyperoptParserArgs(ParserArgs):
     dropout_ff: float | tuple[int, int] | list[int | None] | None
     dropout_embd: float | tuple[int, int] | list[int | None] | None
     dropout_lstm: float | tuple[int, int] | list[int | None] | None
+    use_lstm: bool | list[bool]
     n_embd: int | tuple[int, int] | list[int]
     use_dual_fixed: bool | list[bool]
     bias: bool | list[bool]
@@ -1087,6 +1089,9 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help=("dropout for the LSTM (if existant); "
               "overridden by --dropout if set to -1"))
     model_group.add_argument(
+        '--use_lstm', type=str_to_bool, default=True,
+        help=("use LSTM layer"))
+    model_group.add_argument(
         '--block_size', type=int, default=500,
         help="maximum sequence length of the model")
     model_group.add_argument(
@@ -1264,6 +1269,9 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         '--dropout_lstm', type=HyperoptSpace(OptNone(float)), default=-1,
         help=("dropout for the LSTM (if existant); "
               "overriden by --dropout if specified"))
+    hyperopt_flexible_model_group.add_argument(
+        '--use_lstm', type=HyperoptSpace(str_to_bool), default=True,
+        help=("use LSTM layer"))
     hyperopt_flexible_model_group.add_argument(
         '--n_embd', type=HyperoptSpace(int), default=500,
         help="model embedding size")
