@@ -518,7 +518,7 @@ class LMTrainer():
         if not self.use_ddp or self.config.rank == 0:
             model = self.transformerlm
             if self.use_ddp:
-                assert isinstance(self.transformerlm.module, DDP)
+                assert isinstance(self.transformerlm.module, MITransformerLM)
                 model = self.transformerlm.module
             dir = os.path.join(self.model_dir, self.train_config.model_name)
             Path(dir).mkdir(parents=True, exist_ok=True)
