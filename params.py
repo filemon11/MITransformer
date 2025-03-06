@@ -8,27 +8,30 @@ class Undefined():
     pass
 
 
+def is_undef(obj) -> bool:
+    return isinstance(obj, Undefined) or obj == Undefined
+
+
 def dict_info(d: dict[str, Any]) -> str:
     return "\n".join(
-        ["{}={}".format(*item) for item
-         in d.items()])
+        [
+            "{}={}".format(*item) for item
+            in d.items()])
 
 
 @dataclass
 class Params():
     def to_dict(self, as_str: bool = False,
                 omit_undefined: bool = True) -> dict[str, Any]:
-        _dict = {key: value for key, value    # type: ignore
-                 in self.__dict__.copy().items()
-                 if not omit_undefined or
-                    (not isinstance(value, Undefined)  # type: ignore
-                     and not value == Undefined)}  # type: ignore
+        _dict = {
+            key: value for key, value    # type: ignore
+            in self.__dict__.copy().items()
+            if not omit_undefined or not is_undef(value)}
         if as_str:
-            _dict = {key: str(value)
-                     for key, value in _dict.items()
-                     if not omit_undefined or
-                        (not isinstance(value, Undefined)  # type: ignore
-                        and not value == Undefined)}
+            _dict = {
+                key: str(value)
+                for key, value in _dict.items()
+                if not omit_undefined or not is_undef(value)}
         return _dict
 
     @property
