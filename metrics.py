@@ -511,19 +511,39 @@ class Metric(Params):
                 return False
 
     def __eq__(self, other: object) -> bool:
-        factor = -1 if self.minimise[self.main_metric] else 1
+        '''This function compares the main values of two objects based
+        on a specified metric and returns
+        True if they are equal.
 
-        self_attr = (self.main_value.item()
-                     if isinstance(self.main_value, torch.Tensor)
-                     else self.main_value)
+        Parameters
+        ----------
+        other : object
+            The `other` parameter in the `__eq__` method represents the
+            object that the current object is
+            being compared to for equality.
+
+        Returns
+        -------
+        bool
+            The `__eq__` method is returning a boolean value based
+            on the comparison of the main values of
+            two objects. If the other object is an instance of the
+            Metric class, it compares the main values
+            of both objects after applying a factor based on whether the main
+            metric is set to minimize or
+            not. If the other object is not an instance of the Metric class,
+            it attempts to convert the
+            other
+        '''
+        self_attr = (
+            self.main_value.item()
+            if isinstance(self.main_value, torch.Tensor)
+            else self.main_value)
         if isinstance(other, Metric):
-            other_attr = (other.main_value.item()
-                          if isinstance(other.main_value, torch.Tensor)
-                          else other.main_value)
-            return factor*self_attr == factor*other_attr
+            return other == self_attr
         else:
             try:
-                return factor*self_attr == factor*float(other)  # type: ignore
+                return self_attr == float(other)  # type: ignore
             except ValueError:
                 return False
 
@@ -545,12 +565,41 @@ class Metric(Params):
 
 @dataclass
 class SupervisedMetric(Metric):
+    '''This Python class extends the Metric class
+    by adding arc loss for the supervised setting
+    and a weight (alpha) for balancing language modelling
+    loss and dependency loss.
+
+    Attributes
+    ----------
+    alpha : float
+        Weight for balancing language modelling and dependency
+        loss. `loss = lm_loss*alpha + arc_loss*(1-alpha)` if
+        alpha is not None.
+    _arc_loss : torch.Tensor
+        Dependency parsing loss.
+    '''
+
     _arc_loss: torch.Tensor = torch.tensor(0)
     alpha: float | None = None
     _to_mean: ClassVar[set[str]] = Metric._to_mean | {"arc_loss"}
 
     @property
     def _loss(self) -> torch.Tensor:
+        '''This function calculates a loss value based on
+        two sub-losses, with the weighting between them
+        determined by the alpha parameter.
+
+        Returns
+        -------
+        torch.Tensor
+            The method `_loss` returns a torch.Tensor that is
+            calculated based on the value of the `alpha`
+            attribute. If `alpha` is None, it returns the sum
+            of `_lm_loss` and `_arc_loss`. If `alpha` is
+            not None, it returns a weighted sum of `_lm_loss`
+            and `_arc_loss` based on the value of `alpha`.
+        '''
         if self.alpha is None:
 
             warning(None, logger, "SupervisedMetric.alpha is None!")
@@ -564,6 +613,30 @@ class SupervisedMetric(Metric):
                     name: str,
                     m1: "Metric",
                     m2: "Metric") -> float | torch.Tensor:
+        '''The function `_add_fields` takes in
+        two Metric objects and a field name. If the field to sum
+        is "alpha", then it checks whether alpha is the same for both
+        objects or whether one of the objects has None as alpha
+        and returns alpha if true, else it raises
+        an assertion error if they are different. For all other names,
+        it calls `super()._add_fields`.
+
+        Parameters
+        ----------
+        name : str
+            The `name` parameter in the `_add_fields` method
+            is a string that specifies the field name for
+            which the operation is being performed.
+        m1 : "Metric"
+            Metric m1 is an instance of the class "Metric".
+        m2 : "Metric"
+            m2 is an instance of the class "Metric".
+
+        Returns
+        -------
+        float | torch.Tensor
+            Combined field value.
+        '''
         if name == "alpha":
             val1 = getattr(m1, name)
             val2 = getattr(m2, name)
@@ -575,27 +648,18 @@ class SupervisedMetric(Metric):
 
         return super()._add_fields(name, m1, m2)
 
-    def __add__(self, other: Metric) -> Metric:
-        # other must be a lower type or Self
-
-        higher = None
-        if (isinstance(self, other.__class__)
-                and not isinstance(other, self.__class__)):
-            return other.__add__(self)
-        elif isinstance(other, self.__class__):
-            higher = self
-        assert higher is not None, (f"Cannot add metrics "
-                                    f"of types {self.__class__} "
-                                    f"and {other.__class__}")
-        other = cast(Self, other)
-
-        return higher.__class__(
-            **{f.name: self._add_fields(f.name, self, other)  # type: ignore
-               for f in fields(higher)})
-
 
 @dataclass
 class EvalMetric(Metric):
+    '''This Python class extends the Metric class
+    by adding additional metric fields that should be computed for
+    model evaluation.
+
+    Attributes
+    ----------
+    _perplexity : float
+        Perplexity.
+    '''
     _perplexity: float = 0
     _to_mean: ClassVar[set[str]] = Metric._to_mean | {"perplexity"}
     _convert = Metric._convert | {"perplexity": math.exp}    # type: ignore
@@ -603,6 +667,17 @@ class EvalMetric(Metric):
 
 @dataclass
 class SupervisedEvalMetric(SupervisedMetric, EvalMetric):
+    '''This Python class extends the SupervisedMetric class
+    and EvalMetric classes by adding additional metric fields
+    that should be computed for model evaluation.
+
+    Attributes
+    ----------
+    _uas : float
+        Unlabelled attachment score.
+    _att_entropy: pd.DataFrame
+        Attention entropy of the model heads.
+    '''
     _uas: float = 0
     _att_entropy: pd.DataFrame | None = None
     _to_mean: ClassVar[set[str]] = (SupervisedMetric._to_mean
@@ -611,12 +686,33 @@ class SupervisedEvalMetric(SupervisedMetric, EvalMetric):
 
 
 class MetricWriter(SummaryWriter):
+    '''Class to manage metric and hyperparameter tracking
+    with TensorBoard.
+    '''
     def add_metric(
             self,
             metric: Metric,
             epoch: int,
             split: Literal["train", "eval", "test"]
             ) -> None:
+        '''The `add_metric` function adds metrics to TensorBoard.
+
+        Parameters
+        ----------
+        metric : Metric
+            The `metric` parameter refers to an object of the `Metric` class.
+            It is used to store and represent metrics such as
+            accuracy, loss, etc., during the training or
+            evaluation of a model.
+        epoch : int
+            The `epoch` parameter in the `add_metric` method represents
+            the current epoch number during
+            training or evaluation of a model.
+        split : Literal["train", "eval", "test"]
+            The `split` parameter is used to specify the dataset split
+            for which the metric is being added
+            (training set, evaluation set, or test set
+        '''
         for key, value in metric.to_dict().items():
             if isinstance(value, pd.DataFrame):
                 flattened = flatten(value.to_dict())
@@ -632,6 +728,31 @@ class MetricWriter(SummaryWriter):
             run_name: str | None = None,
             global_step: int | None = None,
             ) -> None:
+        '''The `add_params` function takes in parameters,
+        a metric, and optional run information to add
+        hyperparameters and metrics to a logging system.
+
+        Parameters
+        ----------
+        params : Mapping[str, Any]
+            The `params` parameter is a mapping (dictionary-like object)
+            that contains key-value pairs
+            where the keys are strings and the values can be of any type.
+            Only the key-value pairs where the values are of type float, int,
+            torch.Tensor, bool or str are recorded.
+        metric : Metric
+            The `metric` object to record.
+        run_name : str | None
+            The `run_name` parameter in the `add_params` method
+            is a string that represents the name of the
+            run or experiment.
+        global_step : int | None
+            The `global_step` parameter in the `add_params` method
+            is an optional integer value that
+            represents the global step or iteration number at which the
+            parameters and metrics are being added. It is used to track
+            the progress of the training process.
+        '''
         def check_type(value: Any) -> bool:
             if (isinstance(value, float)
                     or isinstance(value, int)
@@ -642,16 +763,27 @@ class MetricWriter(SummaryWriter):
             return False
         self.add_hparams(
             {key: value for key, value
-             in params.items() if check_type(value)},
+                in params.items() if check_type(value)},
             {f"_{key}": value for key, value in metric.to_dict().items()},
             run_name=run_name,
             global_step=global_step)
 
 
 @contextmanager
-def metric_writer(*args, **kwds):
+def metric_writer(*args, **kwargs):
+    '''Context manager for `MetricWriter`.
+    Closes the writer automatically when leaving
+    its scope.
+    
+    Parameters
+    ----------
+    args
+        Arguments to initialise `MetricWriter` with.
+    kwargs
+        Keyword arguments to initialise `MetricWriter` with.
+    '''
     # Code to acquire resource, e.g.:
-    writer = MetricWriter(*args, **kwds)
+    writer = MetricWriter(*args, **kwargs)
     try:
         yield writer
     finally:
