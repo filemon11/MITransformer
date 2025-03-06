@@ -4,10 +4,10 @@ import torch.distributed as dist
 from data import (load_dataset, dataset_details_full, DatasetDictTrain,
                   dataset_details_full_memmaped, get_loader, Dataset)
 from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
-                     Metric, MetricWriter, metric_writer, sum_and_std_metrics,
-                     minimise, Result)
+                     Metric, Result)
+from metrics import MetricWriter, metric_writer, sum_and_std_metrics, minimise
 from model import TransformerDescription, description_builder
-from params import Params, dict_info, Undefined
+from params import Params, dict_info, Undefined, is_undef
 from hooks import TreePlotHook, AttentionPlotHook
 
 from tqdm import tqdm
@@ -150,7 +150,7 @@ def make_device_str(string: str) -> str:
 
 
 """
-TOOD:
+TODO:
 - establish dataset naming and loading by name
 - save loading config with dataset
 - if no name: save as Wikitext_1, _2 etc.
@@ -324,11 +324,16 @@ def main_test(
     # device: where to execute computation
     if world_size > 1:
         assert args.rank is not None, "Rank cannot be None if word_size > 1."
-
-    trainer = LMTrainer.load(
-        world_size=world_size,
-        use_input_mask=(args.dependency_mode == "input"),
-        **args.to_dict())
+    print(args.dependency_mode)
+    if is_undef(args.dependency_mode):
+        trainer = LMTrainer.load(
+            world_size=world_size,
+            **args.to_dict())
+    else:
+        trainer = LMTrainer.load(
+            world_size=world_size,
+            use_input_mask=args.dependency_mode == "input",
+            **args.to_dict())
 
     args.update_from_kwargs(**trainer.config.to_dict())
 
