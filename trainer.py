@@ -3,6 +3,10 @@ from data import (DepDataset, DUMMY, ROOT, EOS,
                   TransformMaskHeadChild, CoNLLUDataset,
                   DataLoader, get_loader, IDSen, IDBatch,
                   CoNNLUTokenisedBatch, EssentialBatch, D)
+from metrics import (sum_metrics, SupervisedEvalMetric,
+                     SupervisedMetric, Metric, EvalMetric,
+                     MetricWriter, M, N)
+
 from tokeniser import TokenMapper
 from parse import parse_list_of_words_with_spacy
 from dependencies import (mst, merge_head_child_scores,
@@ -20,349 +24,20 @@ import torch.nn.functional as F
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from torch.utils.tensorboard.writer import SummaryWriter
-
-import math
 from pathlib import Path
 import os
 import pickle
 
-from dataclasses import dataclass, fields, field
-from functools import total_ordering
-from contextlib import contextmanager
+from dataclasses import dataclass, field
 from collections import defaultdict
 
 from typing import (Self, Literal, cast,
                     Container, Iterable, Mapping,
-                    ClassVar, TypeVar, Callable,
-                    Any, Generator, TypedDict, NotRequired,
-                    Sequence)
+                    Any, Generator, TypedDict, NotRequired)
 
-from logmaker import getLogger, info, warning, get_timestr
+from logmaker import getLogger, info, get_timestr
 
 logger = getLogger(__name__)
-
-Mode = Literal["standard", "input", "supervised"]
-M = TypeVar("M", bound="Metric")
-N = TypeVar("N")
-
-
-def sum_metrics(metrics: Iterable[M]) -> M:
-    """Computes mean wrt. elements."""
-    s: None | M = None
-    for m in metrics:
-        if s is None:
-            s = m
-        else:
-            s = cast(M, m + s)
-    assert s is not None, "Iterable of metrics cannot be empty."
-    return s
-
-
-def sum_and_std_metrics(
-        metrics: "Iterable[Metric]"
-        ) -> dict[str, tuple[float, float]]:
-    ms = list(metrics)
-    n = len(ms)
-    out_dict: dict[str, tuple[float, float]] = dict()
-    means: dict[str, float] = sum_metrics(ms).to_dict()
-    for key, mean_value in means.items():
-        xs = [getattr(m, key) for m in ms]
-        out_dict[key] = (mean_value,
-                         math.sqrt(sum([(x-mean_value)**2 for x in xs]) / n))
-    return out_dict
-
-
-minimise = {"lm_loss": True,
-            "loss": True,
-            "arc_loss": True,
-            "perplexity": True,
-            "uas": False,
-            }
-
-
-@total_ordering
-@dataclass
-class Metric(Params):
-    num: float = 0
-    _lm_loss: torch.Tensor = torch.tensor(0)
-
-    _to_mean: ClassVar[set[str]] = {"lm_loss", "loss"}
-
-    _convert: ClassVar[dict[str, Callable[[N], N]]] = {}    # type: ignore
-
-    main_metric: str = "loss"
-
-    # Whether optimisation means minimising (if False: maximising)
-    minimise: ClassVar[dict[str, bool]] = minimise
-    loss: ClassVar[torch.Tensor]
-    # just for typing so that we can safely call metric.loss.backward()
-    # without the type checker complaining
-
-    @property
-    def device(self) -> torch.device:
-        return self.loss.device
-
-    @property
-    def is_cuda(self) -> bool:
-        return self.loss.is_cuda
-
-    def minval(self) -> float:
-        return math.inf if self.minimise[self.main_metric] else -math.inf
-
-    def maxval(self) -> float:
-        return -self.minval()
-
-    def __getattr__(self, prop: str):
-        """Calculate mean for metrics"""
-        if prop in self._to_mean:
-            val = self.__getattribute__(f"_{prop}") / self.num
-            if prop in self._convert:
-                val = self._convert[prop](val)
-            return val
-        else:
-            raise AttributeError(
-                f"'{self.__class__}' has no attribute '{prop}' or '_{prop}'.")
-
-    def _add_fields(self,
-                    name: str,
-                    m1: "Metric",
-                    m2: "Metric") -> float | torch.Tensor:
-        val1 = getattr(m1, name)
-        val2 = getattr(m2, name)
-        if name == "main_metric":
-            assert val1 == val2, "Main metrics do not correspond!"
-            # TODO: does this make sense? Should the values correspond?
-            # I think we should assert
-            # getattr(m1, "main_metric") == getattr(m2, "main_metric")
-            # in __add__
-            return val1
-        elif val1 is None:
-            assert m1.num == 0
-            return val2
-        elif val2 is None:
-            assert m2.num == 0
-            return val1
-        else:
-            return val1 + val2
-
-    def __add__(self, other: "Metric") -> "Metric":
-        # other must be a lower type or Self
-
-        higher = None
-        if (isinstance(self, other.__class__)
-                and not isinstance(other, self.__class__)):
-            return other.__add__(self)
-        elif isinstance(other, self.__class__):
-            higher = self
-        assert higher is not None, (f"Cannot add metrics "
-                                    f"of types {self.__class__} "
-                                    f"and {other.__class__}")
-
-        return higher.__class__(
-            **{f.name: self._add_fields(f.name, self, other)  # type: ignore
-               for f in fields(higher)})
-
-    def __radd__(self, other: "Metric") -> "Metric":
-        return self + other
-
-    def __truediv__(self, other: float) -> "Metric":
-        new = self.__class__(main_metric=self.main_metric) + self
-        new.num *= other
-        return new
-
-    def print(self, epoch: int,
-              total_epochs: int, kind: str) -> None:
-        strs = [f"{name}: {getattr(self, name):.2f}" for name in self._to_mean]
-        print(f"[{epoch}/{total_epochs}] {kind}:: " + ", ".join(strs))
-
-    def print_test(self) -> None:
-        strs = [f"{name}: {getattr(self, name):.2f}" for name in self._to_mean]
-        print("Test results: " + ", ".join(strs))
-
-    @property
-    def _loss(self) -> torch.Tensor:
-        return self._lm_loss
-
-    def detach(self) -> None:
-        for f in fields(self):
-            value = getattr(self, f.name)
-            if isinstance(value, torch.Tensor):
-                setattr(self, f.name, value.detach())
-
-    def to_(self, device: str | torch.device) -> None:
-        """Inplace"""
-        for f in fields(self):
-            value = getattr(self, f.name)
-            if isinstance(value, torch.Tensor):
-                setattr(self, f.name, value.to(device))
-
-    def to(self, device: str | torch.device) -> Self:
-        return self.__class__(
-            **{f.name: (getattr(self, f.name).to(device)
-                        if isinstance(getattr(self, f.name), torch.Tensor)
-                        else getattr(self, f.name)) for f in fields(self)})
-
-    @property
-    def main_value(self) -> torch.Tensor:
-        return getattr(self, self.main_metric)
-
-    def __gt__(self, other: object) -> bool:
-        factor = -1 if self.minimise[self.main_metric] else 1
-
-        self_attr = (self.main_value.item()
-                     if isinstance(self.main_value, torch.Tensor)
-                     else self.main_value)
-
-        if isinstance(other, Metric):
-            other_attr = (other.main_value.item()
-                          if isinstance(other.main_value, torch.Tensor)
-                          else other.main_value)
-
-            return factor*self_attr > factor*other_attr
-        else:
-            try:
-                return (factor*self_attr
-                        > factor*float(other))  # type: ignore
-            except ValueError:
-                return False
-
-    def __eq__(self, other: object) -> bool:
-        factor = -1 if self.minimise[self.main_metric] else 1
-
-        self_attr = (self.main_value.item()
-                     if isinstance(self.main_value, torch.Tensor)
-                     else self.main_value)
-        if isinstance(other, Metric):
-            other_attr = (other.main_value.item()
-                          if isinstance(other.main_value, torch.Tensor)
-                          else other.main_value)
-            return factor*self_attr == factor*other_attr
-        else:
-            try:
-                return factor*self_attr == factor*float(other)  # type: ignore
-            except ValueError:
-                return False
-
-    def to_dict(self, as_str: bool = False,
-                omit_undefined: bool = False) -> dict[str, Any]:
-        if as_str:
-            return {attr: str(getattr(self, attr))
-                    for attr in self._to_mean}
-        else:
-            return {attr: float(getattr(self, attr))
-                    for attr in self._to_mean}
-
-
-@dataclass
-class SupervisedMetric(Metric):
-    _arc_loss: torch.Tensor = torch.tensor(0)
-    alpha: float | None = None
-    _to_mean: ClassVar[set[str]] = Metric._to_mean | {"arc_loss"}
-
-    @property
-    def _loss(self) -> torch.Tensor:
-        if self.alpha is None:
-
-            warning(None, logger, "SupervisedMetric.alpha is None!")
-            return (self._lm_loss
-                    + self._arc_loss)
-        else:
-            return (self.alpha*self._lm_loss
-                    + (1-self.alpha)*self._arc_loss)
-
-    def _add_fields(self,
-                    name: str,
-                    m1: "Metric",
-                    m2: "Metric") -> float | torch.Tensor:
-        if name == "alpha":
-            val1 = getattr(m1, name)
-            val2 = getattr(m2, name)
-            assert (val1 == val2 or val2 is None
-                    or val1 is None), (
-                        "Cannot combine metrics with different alpha."
-                    )
-            return val2 if val2 is not None else val1
-
-        return super()._add_fields(name, m1, m2)
-
-    def __add__(self, other: Metric) -> Metric:
-        # other must be a lower type or Self
-
-        higher = None
-        if (isinstance(self, other.__class__)
-                and not isinstance(other, self.__class__)):
-            return other.__add__(self)
-        elif isinstance(other, self.__class__):
-            higher = self
-        assert higher is not None, (f"Cannot add metrics "
-                                    f"of types {self.__class__} "
-                                    f"and {other.__class__}")
-        other = cast(Self, other)
-
-        return higher.__class__(
-            **{f.name: self._add_fields(f.name, self, other)  # type: ignore
-               for f in fields(higher)})
-
-
-@dataclass
-class EvalMetric(Metric):
-    _perplexity: float = 0
-    _to_mean: ClassVar[set[str]] = Metric._to_mean | {"perplexity"}
-    _convert = Metric._convert | {"perplexity": math.exp}    # type: ignore
-
-
-@dataclass
-class SupervisedEvalMetric(SupervisedMetric, EvalMetric):
-    _uas: float = 0
-    _att_entropy: pd.DataFrame | None = None
-    _to_mean: ClassVar[set[str]] = (SupervisedMetric._to_mean
-                                    | EvalMetric._to_mean
-                                    | {"uas", "att_entropy"})
-
-
-class MetricWriter(SummaryWriter):
-    def add_metric(
-            self,
-            metric: Metric,
-            epoch: int,
-            split: Literal["train", "eval", "test"]
-            ) -> None:
-        for key, value in metric.to_dict().items():
-            self.add_scalar(f"{key}/{split}", value, epoch)
-
-    def add_params(
-            self,
-            params: Mapping[str, Any],
-            metric: Metric,
-            run_name: str | None = None,
-            global_step: int | None = None,
-            ) -> None:
-        def check_type(value: Any) -> bool:
-            if (isinstance(value, float)
-                    or isinstance(value, int)
-                    or isinstance(value, torch.Tensor)
-                    or isinstance(value, bool)
-                    or isinstance(value, str)):
-                return True
-            return False
-        self.add_hparams(
-            {key: value for key, value
-             in params.items() if check_type(value)},
-            {f"_{key}": value for key, value in metric.to_dict().items()},
-            run_name=run_name,
-            global_step=global_step)
-
-
-@contextmanager
-def metric_writer(*args, **kwds):
-    # Code to acquire resource, e.g.:
-    writer = MetricWriter(*args, **kwds)
-    try:
-        yield writer
-    finally:
-        # Code to release resource, e.g.:
-        writer.flush()
 
 
 class Result(TypedDict):
@@ -372,6 +47,9 @@ class Result(TypedDict):
 
 class TestResult(Result):
     test: NotRequired[Metric]
+
+
+Mode = Literal["standard", "input", "supervised"]
 
 
 @dataclass
@@ -470,13 +148,14 @@ class LMTrainer():
              **optional_config: Any) -> Self:
         optional_config["model_name"] = model_name
 
-        model, transformer_config = cls.load_model(model_name,
-                                                   device)
+        model, transformer_config = cls.load_model(
+            model_name,
+            device)
 
-        with open(os.path.join(
-                  cls.model_dir, model_name, "config"), 'rb') as handle:
-            config: GeneralConfig = pickle.load(handle)
-
+        with open(
+            os.path.join(
+            cls.model_dir, model_name, "config"), 'rb') as handle:
+                config: GeneralConfig = pickle.load(handle)
         config.update_from_kwargs(device=device, **optional_config)
 
         cls.model_info(model, transformer_config, config)
