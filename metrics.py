@@ -258,11 +258,8 @@ class Metric(Params):
         val1 = getattr(m1, name)
         val2 = getattr(m2, name)
         if name == "main_metric":
+            # val1 and val2 are the names of the main metric
             assert val1 == val2, "Main metrics do not correspond!"
-            # TODO: does this make sense? Should the values correspond?
-            # I think we should assert
-            # getattr(m1, "main_metric") == getattr(m2, "main_metric")
-            # in __add__
             return val1
         elif val1 is None:
             assert m1.num == 0
