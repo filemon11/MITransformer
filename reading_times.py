@@ -380,17 +380,28 @@ def generate_fddc(
         mask_gov = attention_matrices["head"][i][0].clone()
         mask_dep = attention_matrices["child"][i][0].clone()
 
-        mask_gov[:, 1] = 0
-        mask_gov[:, 0] = 0
-        mask_dep[:, 1] = 0
-        mask_dep[:, 0] = 0
+        # mask_gov_ = np.tril(mask_gov) >= 0.5
+        # mask_dep_ = np.tril(mask_dep) >= 0.5
+        # mask = np.tril(np.logical_or(mask_gov_, mask_dep_))
 
-        mask_gov_ = np.tril(mask_gov) >= 0.5
-        mask_dep_ = np.tril(mask_dep) >= 0.5
-        mask = np.tril(np.logical_or(mask_gov_, mask_dep_))
+        # first_connection: npt.NDArray[np.int_] = np.argmax(
+        #    mask, axis=1)
+        mask_gov_ = np.tril(mask_gov)
+        mask_dep_ = np.tril(mask_dep)
+        first_connection_gov: npt.NDArray[np.int_] = np.argmax(
+            mask_gov_, axis=1)
+        first_connection_dep: npt.NDArray[np.int_] = np.argmax(
+            mask_dep_, axis=1)
+        first_connection = np.minimum(
+            first_connection_gov, first_connection_dep)
+        no_left_head = first_connection_gov < 2
+        no_left_child = first_connection_dep < 2
 
-        first_connection: npt.NDArray[np.int_] = np.argmax(
-            mask, axis=1)
+        cond = np.logical_and(no_left_head, np.logical_not(no_left_child))
+        first_connection[cond] = first_connection_dep[cond]
+
+        cond = np.logical_and(no_left_child, np.logical_not(no_left_head))
+        first_connection[cond] = first_connection_gov[cond]
 
         length = mask_gov.shape[0]
         indices: npt.NDArray[np.int_] = np.tile(
@@ -398,9 +409,10 @@ def generate_fddc(
         indices = indices - np.flip(
             np.arange(1, length+1))[..., np.newaxis]
 
-        distances = -indices[np.arange(0, first_connection.shape[0]),
-                             first_connection]
-        distances[mask.sum(1) == 0] = 0
+        distances = -indices[
+            np.arange(0, first_connection.shape[0]),
+            first_connection]
+        distances[np.logical_and(no_left_head, no_left_child)] = 0
         # distance where there is no left element is set to 0
 
         distances = distances[2:]
