@@ -59,7 +59,7 @@ TAGSET = None  # "universal"  # None
 if TAGSET is None:
     CONTENT_POS = {"FW", "MD", "NN", "NNS", "NNP",
                    "NNPS", "VB", "VBD", "VBG", "VBN",
-                   "VBP", "VBZ"}  # , "JJ", "JJR", "JJS"}
+                   "VBP", "VBZ", "JJ", "JJR", "JJS"}
     PUNCTUATION = {"''", "(", "SYM", "POS"}
     MERGE_MAPPING = {"JJS": "JJ", "JJR": "JJ",
                      "PRP$": "PRP",
@@ -206,10 +206,22 @@ def generate_POS_tags(
 
 def get_content_word_mask(
         sentence: list[str],
-        not_to_mask: set[str] = CONTENT_POS) -> npt.NDArray[np.bool]:
+        not_to_mask: set[str] = CONTENT_POS,
+        dummies_present: bool = True) -> npt.NDArray[np.bool]:
     pos_tags = get_POS_tags(sentence)
     mask = np.array([tag in not_to_mask for tag in pos_tags], dtype=bool)
-    mask[0:2] = False
+    if dummies_present:
+        mask[0:2] = False
+    return mask
+
+
+def get_content_word_mask_by_POS_tags(
+        pos_tags: list[str],
+        not_to_mask: set[str] = CONTENT_POS,
+        dummies_present: bool = True) -> npt.NDArray[np.bool]:
+    mask = np.array([tag in not_to_mask for tag in pos_tags], dtype=bool)
+    if dummies_present:
+        mask[0:2] = False
     return mask
 
 
@@ -289,18 +301,30 @@ def generate_integration_Gibson(
 def generate_first_dep_distance(
         dataset: CoNLLUDataset,
         pos_tags: list[str],
-        untokenise: bool = False) -> npt.NDArray[np.int_]:
+        untokenise: bool = False,
+        only_content_words: bool = False) -> npt.NDArray[np.int_]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
 
     costs_list: list[npt.NDArray[np.int_]] = []
+    elements_in: int = 0
     for i in range(len(dataset)):
         sentence = dataset[i]
         # assumes that governor and child mask are called head and child
         # these are already triangulated
         mask_gov = sentence["masks"]["head"].copy()
         mask_dep = sentence["masks"]["child"].copy()
+
+        if only_content_words:
+            content_word_mask = get_content_word_mask_by_POS_tags(
+                pos_tags[
+                    elements_in:elements_in+mask_gov.shape[0]-2],
+                CONTENT_POS,
+                dummies_present=False)
+
+            mask_gov[:, 2:][:, ~content_word_mask] = False
+            mask_dep[:, 2:][:, ~content_word_mask] = False
 
         assert mask_gov is not None and mask_dep is not None
 
@@ -322,11 +346,14 @@ def generate_first_dep_distance(
         indices = indices - np.flip(
             np.arange(1, length+1))[..., np.newaxis]
 
-        distances = -indices[np.arange(0, first_connection.shape[0]),
-                             first_connection]
+        distances = -indices[
+            np.arange(0, first_connection.shape[0]),
+            first_connection]
 
         distances[first_connection == 0] = 0    # if root, then distance 0
         costs_list.append(distances[2:])
+
+        elements_in += distances.shape[0]-2
 
     cost_array = np.concat(costs_list)
 
@@ -364,12 +391,16 @@ def generate_fddc(
         dataset: CoNLLUDataset,
         attention_matrices: dict[str, list[torch.Tensor]],
         pos_tags: list[str],
-        untokenise: bool = False) -> npt.NDArray[np.bool]:
+        untokenise: bool = False,
+        only_content_words: bool = True) -> npt.NDArray[np.bool]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
+    # TODO: Discard punctuation
     """WARNING: untested"""
 
-    fdd = generate_first_dep_distance(dataset, pos_tags, untokenise=False)
+    fdd = generate_first_dep_distance(
+        dataset, pos_tags, untokenise=False,
+        only_content_words=only_content_words)
 
     costs_list: list[npt.NDArray[np.bool]] = []
     elements_in: int = 0
@@ -379,6 +410,15 @@ def generate_fddc(
         # these are already triangulated
         mask_gov = attention_matrices["head"][i][0].clone()
         mask_dep = attention_matrices["child"][i][0].clone()
+
+        if only_content_words:
+            # disregard connections to non-content words
+            content_word_mask = get_content_word_mask_by_POS_tags(
+                pos_tags[elements_in:elements_in+mask_gov.shape[0]-2],
+                CONTENT_POS,
+                dummies_present=False)
+            mask_gov[:, 2:][:, ~content_word_mask] = 0
+            mask_dep[:, 2:][:, ~content_word_mask] = 0
 
         # mask_gov_ = np.tril(mask_gov) >= 0.5
         # mask_dep_ = np.tril(mask_dep) >= 0.5
@@ -927,7 +967,8 @@ def add_surprisal(input_file: str, output_file: str,
     integration_costs = generate_head_distance(
         dataset, pos_tag_list, untokenise=True)
 
-    fdd = generate_first_dep_distance(dataset, pos_tag_list, untokenise=True)
+    fdd = generate_first_dep_distance(dataset, pos_tag_list, untokenise=True,
+                                      only_content_words=True)
     fddc = generate_fddc(
         dataset, attention, pos_tag_list, untokenise=True).astype(int)
     fddw = generate_fddw(
