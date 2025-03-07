@@ -1,9 +1,9 @@
 """
-    The code defines classes and functions for handling and computing metrics
-    in a machine
-    learning context, including methods for calculating and aggregating
-    metrics, as well as writing
-    metrics to a TensorBoard SummaryWriter.
+The code defines classes and functions for handling and computing metrics
+in a machine
+learning context, including methods for calculating and aggregating
+metrics, as well as writing
+metrics to a TensorBoard SummaryWriter.
 """
 
 from params import Params
