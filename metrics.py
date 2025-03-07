@@ -114,6 +114,17 @@ class Metric(Params):
     and methods for calculating
     and manipulating metrics in a machine learning context.
 
+    Attributes
+    ----------
+    num : int
+        The number of tokens for which the metrics were
+        accumulated.
+    _lm_loss : torch.Tensor
+        Language modelling loss.
+    main_metric : str
+        Main metric. Useful to directly perform backpropagation
+        on.
+
     Returns
     -------
     The code provided defines a class `Metric` with various
