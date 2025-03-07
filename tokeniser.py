@@ -1,3 +1,8 @@
+"""
+This module provides a `TokenMapper` class that can be used to map
+tokens to IDs, training a mapping based on a corpus and decode
+IDs back to tokens.
+"""
 import math
 import pickle
 from collections import defaultdict
