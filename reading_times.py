@@ -45,6 +45,7 @@ INTEGRATION_COST_COL = "incost"
 FDD_COL = "fdd"  # first dependency distance
 FDDC_COL = "fddc"  # first dependency distance correct?
 FDDW_COL = "fddw"  # first dependency distance weight
+FDD_DEPRELS_COL = "fdddeprels"  # first dependency distance weight
 LDDS_COL = "ldds"  # left dependency distance sum
 LDC_COL = "ldc"  # left dependency count
 POS_TAG_COL = "POS"
@@ -80,11 +81,48 @@ else:
     MERGE_MAPPING = {}
 
 
+DEPREL_MERGE_MAPPING = {
+    "nsubj": "cpreddep", "nsubjpass": "cpreddep", "dobj": "cpreddep",
+    "iobj": "cpreddep",
+    "csubj": "cpreddep", "csubjpass": "cpreddep", "ccomp": "cpreddep",
+    "xcomp": "cpreddep",
+    "dative": "cpreddep", "attr": "cpreddep", "acomp": "cpreddep",
+    "nummod": "noundep", "appos": "noundep", "nmod": "noundep",
+    "oprd": "noundep",
+    "acl": "noundep",
+    "amod": "noundep", "det": "noundep", "predet": "noundep",
+    "advcl": "npreddep",
+    "advmod": "npreddep", "npadvmod": "npreddep",
+    "agent": "npreddep", "relcl": "npreddep", "neg": "npreddep",
+    "vocative": "spcldep", "discourse": "spcldep", "expl": "spcldep",
+    "aux": "spcldep", "auxpass": "spcldep", "cop": "spcldep", "punct": "spcldep",
+    "mark": "spcldep",
+    "prt": "spcldep",
+    "compound": "comp", "name": "comp",
+    "mwe": "comp", "foreign": "comp",
+    "goeswith": "comp",
+    "conj": "coord", "cc": "coord", "preconj": "coord",
+    "case": "case", "pcomp": "case", "pobj": "cpreddep", "poss": "npreddep",
+    "prep": "case",
+    "list": "loose", "dislocated": "loose", "parataxis": "loose",
+    "remnant": "loose", "reparandum": "loose",
+    "root": "other", "dep": "other", "intj": "other", "quantmod": "other"
+    
+}
+
+
 def pos_merge(tag: str) -> str:
     if tag not in MERGE_MAPPING.keys():
         return tag
     else:
         return MERGE_MAPPING[tag]
+
+
+def deprel_merge(tag: str) -> str:
+    if tag not in DEPREL_MERGE_MAPPING.keys():
+        return tag
+    else:
+        return DEPREL_MERGE_MAPPING[tag]
 
 
 def get_frequency(token, language: str = LANG):
@@ -316,22 +354,21 @@ def generate_first_dep_distance(
         mask_gov = sentence["masks"]["head"].copy()
         mask_dep = sentence["masks"]["child"].copy()
 
-        if only_content_words:
-            content_word_mask = get_content_word_mask_by_POS_tags(
-                pos_tags[
-                    elements_in:elements_in+mask_gov.shape[0]-2],
-                CONTENT_POS,
-                dummies_present=False)
+        # if only_content_words:
+        #     content_word_mask = get_content_word_mask_by_POS_tags(
+        #         pos_tags[
+        #             elements_in:elements_in+mask_gov.shape[0]-2],
+        #         CONTENT_POS,
+        #         dummies_present=False)
+        # 
+        #     mask_gov[:, 2:][:, ~content_word_mask] = False
+        #     mask_dep[:, 2:][:, ~content_word_mask] = False
+        # 
+        # assert mask_gov is not None and mask_dep is not None
 
-            mask_gov[:, 2:][:, ~content_word_mask] = False
-            mask_dep[:, 2:][:, ~content_word_mask] = False
-
-        assert mask_gov is not None and mask_dep is not None
-
-        root_idx = 1
-        mask_dep[:, root_idx] = 0
+        mask_dep[:, 1] = 0
         mask_dep[:, 0] = 0      # no cost if no children
-        mask_gov[:, root_idx] = 0
+        mask_gov[:, 1] = 0
         mask_gov[:, 0] = 0
 
         mask = np.tril(np.logical_or(mask_gov, mask_dep))
@@ -383,6 +420,103 @@ def generate_first_dep_distance(
             new_cost_list.append(current_cost)
 
         cost_array = np.array(new_cost_list)
+
+    return cost_array
+
+
+def generate_fdd_deprel(
+        dataset: CoNLLUDataset,
+        pos_tags: list[str],
+        deprels: list[str],
+        untokenise: bool = False,
+        only_content_words: bool = False) -> list[str]:
+    # TODO: all left ones distance sum
+    # TODO: all left ones number
+    """WARNING: untested"""
+
+    costs_list: list[list[str]] = []
+    elements_in: int = 0
+    for i in range(len(dataset)):
+        sentence = dataset[i]
+        # assumes that governor and child mask are called head and child
+        # these are already triangulated
+        mask_gov = sentence["masks"]["head"].copy()
+        mask_dep = sentence["masks"]["child"].copy()
+
+        #if only_content_words:
+        #    content_word_mask = get_content_word_mask_by_POS_tags(
+        #        pos_tags[
+        #            elements_in:elements_in+mask_gov.shape[0]-2],
+        #        CONTENT_POS,
+        #        dummies_present=False)
+        #
+        #    mask_gov[:, 2:][:, ~content_word_mask] = False
+        #    mask_dep[:, 2:][:, ~content_word_mask] = False
+
+        assert mask_gov is not None and mask_dep is not None
+
+        root_idx = 1
+        mask_dep[:, root_idx] = 0
+        mask_dep[:, 0] = 0      # no cost if no children
+        mask_gov[:, root_idx] = 0
+        mask_gov[:, 0] = 0
+
+        # mask = np.tril(np.logical_or(mask_gov, mask_dep))
+        mask_gov = np.logical_or(mask_gov, mask_dep.T)
+        mask_dep = np.logical_or(mask_dep, mask_gov.T)
+
+        first_connection_gov: npt.NDArray[np.int_] = np.argmax(
+            mask_gov, axis=1)
+        first_connection_dep: npt.NDArray[np.int_] = np.argmax(
+            mask_dep, axis=1)
+
+        deprels_sen = ["dummy", "main_root"] + deprels[
+            elements_in:elements_in+first_connection_gov.shape[0]-2]
+        fdd_deprels: list[str] = []
+        for i, (fc_g, fc_d) in enumerate(
+                zip(first_connection_gov, first_connection_dep)):
+            if fc_g == 0:
+                fdd_deprels.append(deprels_sen[fc_d])
+            elif fc_d == 0:
+                fdd_deprels.append(deprels_sen[i])
+            else:
+                if fc_d < fc_g:
+                    fdd_deprels.append(deprels_sen[fc_d])
+                else:
+                    fdd_deprels.append(deprels_sen[i])
+
+        costs_list.append(fdd_deprels[2:])
+
+        elements_in += len(fdd_deprels)-2
+
+    cost_array = [deprel for sentence in costs_list for deprel in sentence]
+
+    if untokenise:
+        assert dataset.space_after is not None
+        space_after = np.concat(dataset.space_after)
+
+        # take the first distance to disregard punctuation
+        # which may connect over long distances
+        cost_list: list[str] = cost_array
+        new_cost_list: list[str] = []
+        current_cost: str | None = None
+        found_non_punct: bool = False
+        for space_after_tok, pos, new_cost in zip(
+                space_after, pos_tags, cost_list):
+            if current_cost is None:
+                current_cost = new_cost
+            if not found_non_punct and pos not in PUNCTUATION:
+                current_cost = new_cost
+                found_non_punct = True
+            if space_after_tok:
+                new_cost_list.append(current_cost)
+                found_non_punct = False
+                current_cost = None
+
+        if current_cost is not None:
+            new_cost_list.append(current_cost)
+
+        cost_array = new_cost_list
 
     return cost_array
 
@@ -831,6 +965,7 @@ def generate_deprels(
 
     deprels: list[str] = []
     for deprels_sen in dataset.deprels:
+        deprels_sen = [deprel_merge(deprel) for deprel in deprels_sen]
         deprels.extend(deprels_sen[2:-1])
 
     if untokenise:
@@ -932,6 +1067,7 @@ def add_surprisal(input_file: str, output_file: str,
                   fdd_col: str = FDD_COL,
                   fddc_col: str = FDDC_COL,
                   fddw_col: str = FDDW_COL,
+                  fdd_deprels_col: str = FDD_DEPRELS_COL,
                   ldds_col: str = LDDS_COL,
                   ldc_col: str = LDC_COL,
                   device: str = DEVICE,
@@ -974,6 +1110,11 @@ def add_surprisal(input_file: str, output_file: str,
     fddw = generate_fddw(
         dataset, attention, pos_tag_list, untokenise=True)
     deprels = generate_deprels(dataset, pos_tag_list, untokenise=True)
+    
+    deprels_raw = generate_deprels(dataset, pos_tag_list, untokenise=False)
+    fdd_deprels = generate_fdd_deprel(
+        dataset, pos_tag_list, deprels_raw,
+        untokenise=True, only_content_words=True)
     ldds = generate_ldds(dataset, pos_tag_list, untokenise=True)
     ldc = generate_ldc(dataset, pos_tag_list, untokenise=True)
 
@@ -987,6 +1128,7 @@ def add_surprisal(input_file: str, output_file: str,
     df[fdd_col] = fdd
     df[fddc_col] = fddc
     df[fddw_col] = fddw
+    df[fdd_deprels_col] = fdd_deprels
     df[ldds_col] = ldds
     df[ldc_col] = ldc
     df[pos_tag_col] = pos_tag_list
@@ -1012,6 +1154,7 @@ def process_tsv(
         ldc_col: str = LDC_COL,
         pos_tag_col: str = POS_TAG_COL,
         deprel_col: str = DEPREL_COL,
+        fdd_deprels_col: str = FDD_DEPRELS_COL,
         wlen_col: str = WLEN_COL,
         language: str = LANG,
         device: str = DEVICE,
@@ -1029,6 +1172,7 @@ def process_tsv(
                   surprisal_col, word_position_col,
                   integration_cost_col, pos_tag_col,
                   deprel_col, fdd_col, fddc_col, fddw_col,
+                  fdd_deprels_col,
                   ldds_col, ldc_col,
                   device, batch_size)
 
