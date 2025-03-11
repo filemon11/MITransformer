@@ -4,7 +4,7 @@ tokens to IDs, training a mapping based on a corpus and decode
 IDs back to tokens.
 """
 import math
-import pickle
+from ..utils import pickle
 from collections import defaultdict
 
 from typing import (Iterable, Self, Hashable, TypeVar,

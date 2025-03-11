@@ -28,7 +28,7 @@ from collections import defaultdict
 import os
 from pathlib import Path
 
-from tokeniser import TokenMapper, EOS, ROOT, DUMMY
+from . import tokeniser
 
 from abc import ABC, abstractmethod
 
@@ -37,7 +37,7 @@ from typing import (Iterable, Iterator, Sequence, TypedDict,
                     Concatenate, NotRequired, Generic, Union, overload,
                     TypeVarTuple)
 
-from logmaker import getLogger, info
+from mitransformer.utils.logmaker import getLogger, info
 
 logger = getLogger(__name__)
 
@@ -48,8 +48,9 @@ ROOT_DEPREL = "!root"
 EOS_DEPREL = "eos"
 
 
-TransformFunc = Callable[[npt.NDArray[np.bool_]],
-                         Mapping[str, npt.NDArray[np.bool_]]]
+TransformFunc = Callable[
+    [npt.NDArray[np.bool_]],
+    Mapping[str, npt.NDArray[np.bool_]]]
 
 X = TypeVar("X")
 Y = TypeVar("Y")
@@ -60,9 +61,10 @@ def listmap(func: Callable[[X], Y], seq: Iterable[X]) -> list[Y]:
     return list(map(func, seq))
 
 
-def filldict(keys: Sequence[Z],
-             funcs: Sequence[Callable[[X], Y]],
-             seq: Iterable[X]) -> dict[Z, list[Y]]:
+def filldict(
+        keys: Sequence[Z],
+        funcs: Sequence[Callable[[X], Y]],
+        seq: Iterable[X]) -> dict[Z, list[Y]]:
 
     out_dict: dict[Z, list[Y]] = defaultdict(list)
 
@@ -326,7 +328,7 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
 
         self.tokenised: list[npt.NDArray[np.uint32]] | None = None
 
-        self.token_mapper: TokenMapper | None
+        self.token_mapper: tokeniser.TokenMapper | None
 
         self.keys_for_tensors: set[str] = set()
         self.keys_for_padding: dict[str, int] = {}
@@ -334,13 +336,15 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
 
     @staticmethod
     def make_connludict(tokenlists: Iterable[conllu.TokenList]) -> CoNNLUDict:
-        d = filldict(("tokens", "heads", "space_after", "deprels"),
-                     (get_tokens, get_head_list, get_space_after, get_deprels),
-                     tokenlists)
-        return CoNNLUDict(tokens=d["tokens"],   # type: ignore
-                          heads=d["heads"],     # type: ignore
-                          space_after=d["space_after"],  # type: ignore
-                          deprels=d["deprels"])     # type: ignore
+        d = filldict(
+            ("tokens", "heads", "space_after", "deprels"),
+            (get_tokens, get_head_list, get_space_after, get_deprels),
+            tokenlists)
+        return CoNNLUDict(
+            tokens=d["tokens"],   # type: ignore
+            heads=d["heads"],     # type: ignore
+            space_after=d["space_after"],  # type: ignore
+            deprels=d["deprels"])     # type: ignore
 
     @classmethod
     def from_file(
@@ -392,12 +396,14 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
 
         match self.masks_setting:
             case "current":
-                masks = {key: None if masks is None else masks[:-1, :-1]
-                         for key, masks in masks.items()}
+                masks = {
+                    key: None if masks is None else masks[:-1, :-1]
+                    for key, masks in masks.items()}
 
             case "next":
-                masks = {key: None if masks is None else masks[1:, :-1]
-                         for key, masks in masks.items()}
+                masks = {
+                    key: None if masks is None else masks[1:, :-1]
+                    for key, masks in masks.items()}
         keys = dict(
             idx=np.array(idx),
             tokens=sentence,
@@ -415,14 +421,16 @@ class CoNLLUDataset(DepDataset[CoNNLUSentence | CoNNLUTokenisedSentence]):
                 input_ids=self.tokenised[idx][:-1],
                 label_ids=self.tokenised[idx][1:])
 
-    def map_to_ids(self, token_mapper: TokenMapper) -> None:
-        self.tokenised = [np.array(sentence, dtype=np.uint32)
-                          for sentence in token_mapper(self.tokens)]
+    def map_to_ids(self, token_mapper: tokeniser.TokenMapper) -> None:
+        self.tokenised = [
+            np.array(sentence, dtype=np.uint32)
+            for sentence in token_mapper(self.tokens)]
         self.token_mapper = token_mapper
 
         self.keys_for_tensors = {"input_ids", "masks", "label_ids"}
-        self.keys_for_padding = {"input_ids": token_mapper.pad_id,
-                                 "label_ids": -100}
+        self.keys_for_padding = {
+            "input_ids": token_mapper.pad_id,
+            "label_ids": -100}
         self.keys_for_mask_padding = {"masks": False}
 
         self.mapped = True
@@ -454,7 +462,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
         if id_hl is not None:
             self.mapped = True
 
-        self.token_mapper: TokenMapper | None
+        self.token_mapper: tokeniser.TokenMapper | None
 
         self.keys_for_tensors: set[str] = set()
         self.keys_for_padding: dict[str, int] = {}
@@ -503,8 +511,9 @@ class MemMapDataset(DepDataset[EssentialSentence]):
             max_len: int | None = 40,
             first_k: int | None = None):
 
-        return cls(transform_masks, file, masks_setting,
-                   max_len=max_len, first_k=first_k)
+        return cls(
+            transform_masks, file, masks_setting,
+            max_len=max_len, first_k=first_k)
 
     @classmethod
     def from_memmap(
@@ -521,11 +530,12 @@ class MemMapDataset(DepDataset[EssentialSentence]):
 
         id_hl = RaggedMmap(path)
 
-        dataset = cls(transform_masks,
-                      masks_setting=masks_setting,
-                      id_hl=id_hl,
-                      max_len=max_len,
-                      first_k=first_k)
+        dataset = cls(
+            transform_masks,
+            masks_setting=masks_setting,
+            id_hl=id_hl,
+            max_len=max_len,
+            first_k=first_k)
         dataset.keys_for_tensors = {"input_ids", "masks", "label_ids"}
         dataset.keys_for_padding = {"input_ids": pad_id,
                                     "label_ids": -100}
@@ -551,12 +561,14 @@ class MemMapDataset(DepDataset[EssentialSentence]):
 
         match self.masks_setting:
             case "current":
-                masks = {key: None if masks is None else masks[:-1, :-1]
-                         for key, masks in masks.items()}
+                masks = {
+                    key: None if masks is None else masks[:-1, :-1]
+                    for key, masks in masks.items()}
 
             case "next":
-                masks = {key: None if masks is None else masks[1:, :-1]
-                         for key, masks in masks.items()}
+                masks = {
+                    key: None if masks is None else masks[1:, :-1]
+                    for key, masks in masks.items()}
         # print(masks)
 
         return EssentialSentence(
@@ -565,7 +577,8 @@ class MemMapDataset(DepDataset[EssentialSentence]):
             input_ids=ids[:-1],
             label_ids=ids[1:])
 
-    def map_to_ids(self, token_mapper: TokenMapper, memdir: str) -> None:
+    def map_to_ids(
+            self, token_mapper: tokeniser.TokenMapper, memdir: str) -> None:
         assert self.file is not None
         id_head_list_generator = (np.stack((
             np.array(token_mapper([tokens])[0], dtype=np.uint32),
@@ -582,8 +595,9 @@ class MemMapDataset(DepDataset[EssentialSentence]):
         self.token_mapper = token_mapper
 
         self.keys_for_tensors = {"input_ids", "masks", "label_ids"}
-        self.keys_for_padding = {"input_ids": token_mapper.pad_id,
-                                 "label_ids": -100}
+        self.keys_for_padding = {
+            "input_ids": token_mapper.pad_id,
+            "label_ids": -100}
         self.keys_for_mask_padding = {"masks": False}
 
         self.mapped = True
@@ -615,7 +629,7 @@ class MemMapWindowDataset(MemMapDataset):
         if memdir is not None:
             self.mapped = True
 
-        self.token_mapper: TokenMapper | None
+        self.token_mapper: tokeniser.TokenMapper | None
 
         self.keys_for_tensors: set[str] = set()
         self.keys_for_padding: dict[str, int] = {}
@@ -635,8 +649,9 @@ class MemMapWindowDataset(MemMapDataset):
             max_len: int | None = 40,
             first_k: int | None = None):
         assert max_len is not None
-        return cls(transform_masks, file, masks_setting,
-                   max_len=max_len, first_k=first_k)
+        return cls(
+            transform_masks, file, masks_setting,
+            max_len=max_len, first_k=first_k)
 
     @classmethod
     def from_memmap(
@@ -652,10 +667,11 @@ class MemMapWindowDataset(MemMapDataset):
             first_k: int | None = None):
         assert first_k is None, "first_k not implemented for MMWD."
         assert max_len is not None
-        dataset = cls(transform_masks,
-                      masks_setting=masks_setting,
-                      memdir=path,
-                      max_len=max_len)
+        dataset = cls(
+            transform_masks,
+            masks_setting=masks_setting,
+            memdir=path,
+            max_len=max_len)
         dataset.keys_for_tensors = {"input_ids", "masks", "label_ids"}
         dataset.keys_for_padding = {"input_ids": pad_id,
                                     "label_ids": -100}
@@ -674,13 +690,16 @@ class MemMapWindowDataset(MemMapDataset):
         assert self.token_mapper is not None
 
         i = self.max_len * idx
-        data = np.memmap(self.memdir,
-                         dtype=np.uint32,
-                         mode='r',
-                         shape=(self.arr_len, 2))   # type: ignore
+        data = np.memmap(
+            self.memdir,
+            dtype=np.uint32,
+            mode='r',
+            shape=(self.arr_len, 2))   # type: ignore
         ids = np.concat(
-            (np.array([self.token_mapper.dummy_id, self.token_mapper.root_id]),
-             data[i:i+self.max_len, 0]))
+            (
+                np.array([
+                    self.token_mapper.dummy_id, self.token_mapper.root_id]),
+                data[i:i+self.max_len, 0]))
         heads = data[i:i+self.max_len, 1]
         # print(heads)
         heads = heads + np.arange(heads.shape[-1])+1
@@ -702,12 +721,14 @@ class MemMapWindowDataset(MemMapDataset):
 
         match self.masks_setting:
             case "current":
-                masks = {key: None if masks is None else masks[:-1, :-1]
-                         for key, masks in masks.items()}
+                masks = {
+                    key: None if masks is None else masks[:-1, :-1]
+                    for key, masks in masks.items()}
 
             case "next":
-                masks = {key: None if masks is None else masks[1:, :-1]
-                         for key, masks in masks.items()}
+                masks = {
+                    key: None if masks is None else masks[1:, :-1]
+                    for key, masks in masks.items()}
 
         return EssentialSentence(
             idx=np.array(idx),
@@ -715,7 +736,8 @@ class MemMapWindowDataset(MemMapDataset):
             input_ids=ids[:-1],
             label_ids=ids[1:])
 
-    def map_to_ids(self, token_mapper: TokenMapper, memdir: str) -> None:
+    def map_to_ids(
+            self, token_mapper: tokeniser.TokenMapper, memdir: str) -> None:
         assert self.file is not None
         # iterates twice through sentences; TODO: improve
         arr_len = 0
@@ -730,8 +752,9 @@ class MemMapWindowDataset(MemMapDataset):
             headlist[headlist == 0] = np.arange(
                 len(headlist))[headlist == 0] + 1
             headlist -= np.arange(headlist.shape[-1]) + 1
-            arr[idx:idx+len(tokens), 0] = np.array(token_mapper([tokens])[0],
-                                                   dtype=np.uint32)
+            arr[idx:idx+len(tokens), 0] = np.array(
+                token_mapper([tokens])[0],
+                dtype=np.uint32)
             arr[idx:idx+len(tokens), 1] = headlist
             idx += len(tokens)
         arr.flush()
@@ -741,8 +764,9 @@ class MemMapWindowDataset(MemMapDataset):
         self.token_mapper = token_mapper
 
         self.keys_for_tensors = {"input_ids", "masks", "label_ids"}
-        self.keys_for_padding = {"input_ids": token_mapper.pad_id,
-                                 "label_ids": -100}
+        self.keys_for_padding = {
+            "input_ids": token_mapper.pad_id,
+            "label_ids": -100}
         self.keys_for_mask_padding = {"masks": False}
 
         self.mapped = True
@@ -757,29 +781,33 @@ class MemMapWindowDataset(MemMapDataset):
     def sentences(self) -> Iterator[tuple[list[str],
                                     npt.NDArray[np.uint8]]]:
         assert self.file is not None
-        return (self.get_sentence(tl) for tl in load_conllu(self.file,
-                                                            self.max_len//10,
-                                                            self.first_k))
+        return (self.get_sentence(tl) for tl in load_conllu(
+            self.file,
+            self.max_len//10,
+            self.first_k))
 
     @property
     def tokens(self) -> Iterator[list[str]]:
         assert self.file is not None
-        return (get_tokens(tl, False) for tl in load_conllu(self.file,
-                                                            self.max_len,
-                                                            self.first_k))
+        return (get_tokens(tl, False) for tl in load_conllu(
+            self.file,
+            self.max_len,
+            self.first_k))
 
     @property
     def heads(self) -> Iterator[npt.NDArray[np.uint8]]:
         assert self.file is not None
-        return (get_head_list(tl, False) for tl in load_conllu(self.file,
-                                                               self.max_len,
-                                                               self.first_k))
+        return (get_head_list(tl, False) for tl in load_conllu(
+            self.file,
+            self.max_len,
+            self.first_k))
 
 
 class BySequenceLengthSampler(Sampler):
-    def __init__(self, data_source: DepDataset,
-                 bucket_boundaries, batch_size=64,
-                 drop_last=True, include_smaller=False, include_larger=False):
+    def __init__(
+            self, data_source: DepDataset,
+            bucket_boundaries, batch_size=64,
+            drop_last=True, include_smaller=False, include_larger=False):
         self.data_source = data_source
         ind_n_len = []
         for i, s in enumerate(data_source):     # type: ignore
@@ -791,8 +819,9 @@ class BySequenceLengthSampler(Sampler):
         self.drop_last = drop_last
 
         if self.drop_last:
-            print("WARNING: drop_last=True, dropping last non batch-size"
-                  "batch in every bucket ... ")
+            print(
+                "WARNING: drop_last=True, dropping last non batch-size"
+                "batch in every bucket ... ")
 
         boundaries = list(self.bucket_boundaries)
         if include_smaller:
@@ -896,8 +925,9 @@ class Collate(CollateBase):
                 else:
                     output[key].append(content)     # type: ignore
 
-        def dict_to_torch(dictionary: dict[str, Any],
-                          keys_to_torch: set[str]) -> None:
+        def dict_to_torch(
+                dictionary: dict[str, Any],
+                keys_to_torch: set[str]) -> None:
             for key in keys_to_torch:
                 if isinstance(dictionary[key], np.ndarray):
                     dictionary[key] = torch.from_numpy(
@@ -1001,51 +1031,57 @@ class DataLoader(torchDataLoader[Batch], Generic[Batch, D]):
 
 
 @overload
-def get_loader(dataset: DepDataset[CoNNLUTokenisedSentence], batch_size: int,
-               bucket: bool = True, min_size: int = 5,
-               max_size: int = 50,
-               shuffle: bool = True,
-               droplast: bool = True,
-               rank: int | None = 0,
-               world_size: int = 1,
-               n_workers: int = 0,
-               ) -> DataLoader[CoNNLUTokenisedBatch, DepDataset]:
+def get_loader(
+        dataset: DepDataset[CoNNLUTokenisedSentence], batch_size: int,
+        bucket: bool = True, min_size: int = 5,
+        max_size: int = 50,
+        shuffle: bool = True,
+        droplast: bool = True,
+        rank: int | None = 0,
+        world_size: int = 1,
+        n_workers: int = 0,
+        ) -> DataLoader[CoNNLUTokenisedBatch, DepDataset]:
     ...
 
 
 @overload
-def get_loader(dataset: DepDataset[EssentialSentence], batch_size: int,
-               bucket: bool = True, min_size: int = 5,
-               max_size: int = 50,
-               shuffle: bool = True,
-               droplast: bool = True,
-               rank: int | None = 0,
-               world_size: int = 1,
-               n_workers: int = 0,
-               ) -> DataLoader[EssentialBatch, DepDataset]:
+def get_loader(
+        dataset: DepDataset[EssentialSentence], batch_size: int,
+        bucket: bool = True, min_size: int = 5,
+        max_size: int = 50,
+        shuffle: bool = True,
+        droplast: bool = True,
+        rank: int | None = 0,
+        world_size: int = 1,
+        n_workers: int = 0,
+        ) -> DataLoader[EssentialBatch, DepDataset]:
     ...
 
 
-def get_loader(dataset: (DepDataset[CoNNLUTokenisedSentence]
-                         | DepDataset[EssentialSentence]),
-               batch_size: int,
-               bucket: bool = True, min_size: int = 5,
-               max_size: int = 50,
-               shuffle: bool = True,
-               droplast: bool = True,
-               rank: int | None = 0,
-               world_size: int = 1,
-               n_workers: int = 0,
-               ) -> (DataLoader[CoNNLUTokenisedBatch, DepDataset]
-                     | DataLoader[EssentialBatch, DepDataset]):
+def get_loader(
+        dataset: (
+            DepDataset[CoNNLUTokenisedSentence]
+            | DepDataset[EssentialSentence]),
+        batch_size: int,
+        bucket: bool = True, min_size: int = 5,
+        max_size: int = 50,
+        shuffle: bool = True,
+        droplast: bool = True,
+        rank: int | None = 0,
+        world_size: int = 1,
+        n_workers: int = 0,
+        ) -> (
+            DataLoader[CoNNLUTokenisedBatch, DepDataset]
+            | DataLoader[EssentialBatch, DepDataset]):
 
     # TODO: include attention mask to disregard masked tokens
     # in loss calculation
     assert dataset.mapped is True
 
     if bucket:
-        assert world_size == 1, ("Distributed sampling not implemented"
-                                 "for bucketed sampling.")
+        assert world_size == 1, (
+            "Distributed sampling not implemented"
+            "for bucketed sampling.")
         return DataLoader(
             dataset,
             batch_sampler=BySequenceLengthSampler(
@@ -1099,10 +1135,11 @@ def load_conllu(
     for tokenlist in conllu.parse_incr(data_file):
         if max_len is None or len(tokenlist) <= max_len:
             # Disregard contracted tokens
-            yield conllu.TokenList([token for token in tokenlist
-                                    if isinstance(token["id"], int)],
-                                   metadata=tokenlist.metadata,
-                                   default_fields=tokenlist.default_fields)
+            yield conllu.TokenList(
+                [token for token in tokenlist
+                    if isinstance(token["id"], int)],
+                metadata=tokenlist.metadata,
+                default_fields=tokenlist.default_fields)
             loaded_num += 1
         if first_k is not None and loaded_num >= first_k:
             break
@@ -1115,16 +1152,18 @@ def load_conllu_from_str(
             if max_len is None or len(tokenlist) <= max_len]
 
 
-def get_tokens(tokenlist: conllu.TokenList,
-               add_dummy_and_root: bool = True) -> list[str]:
-    tokens = [DUMMY, ROOT] if add_dummy_and_root else []
+def get_tokens(
+        tokenlist: conllu.TokenList,
+        add_dummy_and_root: bool = True) -> list[str]:
+    tokens = [tokeniser.DUMMY, tokeniser.ROOT] if add_dummy_and_root else []
     tokens.extend(token["form"] for token in tokenlist)
-    tokens.append(EOS)
+    tokens.append(tokeniser.EOS)
     return tokens
 
 
-def get_head_list(tokenlist: conllu.TokenList,
-                  add_dummy_and_root: bool = True) -> npt.NDArray[np.uint8]:
+def get_head_list(
+        tokenlist: conllu.TokenList,
+        add_dummy_and_root: bool = True) -> npt.NDArray[np.uint8]:
     heads = [0, 0] if add_dummy_and_root else []
     heads.extend(
         token["head"]+(1 if add_dummy_and_root else 0) if token["head"]
@@ -1152,8 +1191,9 @@ def get_space_after(tokenlist: conllu.TokenList) -> npt.NDArray[np.bool_]:
             return False
         return True
 
-    spaces.extend(token_space_after(token)
-                  for token in tokenlist)
+    spaces.extend(
+        token_space_after(token)
+        for token in tokenlist)
     return np.array(spaces, dtype=np.bool_)
 
 
@@ -1186,11 +1226,13 @@ def apply_to_tokenlist(
     return tuple(fn(tokenlist) for fn in funcs)
 
 
-SplitSelection = (tuple[Literal["train"],
-                        Literal["eval"],
-                        Literal["test"]]
-                  | tuple[Literal["train"], Literal["eval"]]
-                  | tuple[Literal["test"]])
+SplitSelection = (
+    tuple[
+        Literal["train"],
+        Literal["eval"],
+        Literal["test"]]
+    | tuple[Literal["train"], Literal["eval"]]
+    | tuple[Literal["test"]])
 
 TupleSelection = tuple[str, str, str] | tuple[str, str] | tuple[str]
 
@@ -1212,7 +1254,7 @@ class DatasetDetailsFull(DatasetDetails):
 
 
 class DatasetDictBase(TypedDict):
-    token_mapper: TokenMapper
+    token_mapper: tokeniser.TokenMapper
 
 
 class DatasetDictTrain(DatasetDictBase):
@@ -1228,8 +1270,9 @@ class DatasetDictTest(DatasetDictBase):
 T = TypeVarTuple("T")
 
 
-def make_name(dir: str, naming_pattern: str,
-              splits: tuple[*T]) -> tuple[*T]:
+def make_name(
+        dir: str, naming_pattern: str,
+        splits: tuple[*T]) -> tuple[*T]:
     return tuple(
         os.path.join(
             dir, naming_pattern.format(split))
@@ -1323,7 +1366,9 @@ def load_dataset(details: DatasetDetailsFull,
                  first_k_eval_test: int | None = None,
                  triangulate: int | None = 0,
                  connect_with_dummy: bool = True,
-                 connect_with_self: bool = False
+                 connect_with_self: bool = False,
+                 masks_setting: Literal[
+                     "complete", "current", "next"] = "current"
                  ) -> DatasetDictTrain:
     ...
 
@@ -1337,7 +1382,9 @@ def load_dataset(details: DatasetDetails,
                  first_k_eval_test: int | None = None,
                  triangulate: int | None = 0,
                  connect_with_dummy: bool = True,
-                 connect_with_self: bool = False
+                 connect_with_self: bool = False,
+                 masks_setting: Literal[
+                     "complete", "current", "next"] = "current"
                  ) -> DatasetDictTrain | DatasetDictTest:
     ...
 
@@ -1350,7 +1397,9 @@ def load_dataset(details: DatasetDetails,       # type: ignore
                  first_k_eval_test: int | None = None,
                  triangulate: int | None = 0,
                  connect_with_dummy: bool = True,
-                 connect_with_self: bool = False
+                 connect_with_self: bool = False,
+                 masks_setting: Literal[
+                     "complete", "current", "next"] = "current"
                  ) -> DatasetDictTrain | DatasetDictTest:
     # TODO: implement option to read raw string data and parse,
     # to accept raw string as input and to save parsed data
@@ -1388,11 +1437,13 @@ def load_dataset(details: DatasetDetails,       # type: ignore
         if load_memmap:
             return MemMapDataset.from_memmap(dir, transform,
                                              max_len=max_len,
-                                             first_k=first_k_param)
+                                             first_k=first_k_param,
+                                             masks_setting=masks_setting)
         else:
             return MemMapDataset.from_file(dir, transform,
                                            max_len=max_len,
-                                           first_k=first_k_param)
+                                           first_k=first_k_param,
+                                           masks_setting=masks_setting)
 
     train: None | MemMapDataset = None
     eval: None | MemMapDataset = None
@@ -1425,7 +1476,7 @@ def load_dataset(details: DatasetDetails,       # type: ignore
         assert vocab_size is not None, (
             "Vocabulary size must be specified. Given: None.")
 
-        token_mapper = TokenMapper.train(
+        token_mapper = tokeniser.TokenMapper.train(
             train.tokens,
             keep_top_k=vocab_size)
 
@@ -1436,7 +1487,7 @@ def load_dataset(details: DatasetDetails,       # type: ignore
              f"Trained tokenmapper with vocab size {token_mapper.vocab_size}.")
 
     else:
-        token_mapper = TokenMapper.load(os.path.join(tokmap_dir, "mapper"))
+        token_mapper = tokeniser.TokenMapper.load(os.path.join(tokmap_dir, "mapper"))
 
     for split, split_name in zip(sets, splits):
         if split is not None and not split.mapped:

@@ -1,4 +1,4 @@
-from data import TokenMapper
+from .tokeniser import TokenMapper
 
 
 def load_natural_stories(tsv_file: str,

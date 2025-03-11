@@ -6,12 +6,11 @@ Linearity-of-surprisal-on-RT/blob/main/Preparing%20Corpora/get_frequency.py"""
 import pandas as pd
 import wordfreq     # type: ignore
 import nltk  # type: ignore
-from tokeniser import TokenMapper
-from data import CoNLLUDataset, TransformMaskHeadChild
-from trainer import LMTrainer, inverse_sigmoid
-from parse import parse_list_of_words_with_spacy
-
-from natural_stories import load_natural_stories
+from mitransformer.data.tokeniser import TokenMapper
+from mitransformer.data.data import CoNLLUDataset, TransformMaskHeadChild
+from mitransformer.train.trainer import LMTrainer, inverse_sigmoid
+from mitransformer.data.parse import parse_list_of_words_with_spacy
+from mitransformer.data.natural_stories import load_natural_stories
 
 import torch
 import numpy as np
@@ -1071,7 +1070,9 @@ def add_surprisal(input_file: str, output_file: str,
                   ldds_col: str = LDDS_COL,
                   ldc_col: str = LDC_COL,
                   device: str = DEVICE,
-                  batch_size: int = BATCH_SIZE) -> None:
+                  batch_size: int = BATCH_SIZE,
+                  masks_setting: Literal[
+                      "complete", "current", "next"] = "current") -> None:
     df = pd.read_csv(input_file)
     words = df[token_col]
     conllu = parse_list_of_words_with_spacy(words, min_len=0)
@@ -1082,7 +1083,7 @@ def add_surprisal(input_file: str, output_file: str,
         keys_for_child={"child"})
 
     dataset: CoNLLUDataset = CoNLLUDataset.from_str(
-        conllu, transform, max_len=None)
+        conllu, transform, max_len=None, masks_setting=masks_setting)
 
     token_mapper: TokenMapper = TokenMapper.load(token_mapper_dir)
     dataset.map_to_ids(token_mapper)
@@ -1158,7 +1159,9 @@ def process_tsv(
         wlen_col: str = WLEN_COL,
         language: str = LANG,
         device: str = DEVICE,
-        batch_size: int = BATCH_SIZE
+        batch_size: int = BATCH_SIZE,
+        masks_setting: Literal[
+            "current", "next", "complete"] = "current"
         ) -> None:
     tsv_to_csv(input_file, output_file,
                token_col, text_id_col,
@@ -1174,7 +1177,7 @@ def process_tsv(
                   deprel_col, fdd_col, fddc_col, fddw_col,
                   fdd_deprels_col,
                   ldds_col, ldc_col,
-                  device, batch_size)
+                  device, batch_size, masks_setting=masks_setting)
 
 
 if __name__ == "__main__":

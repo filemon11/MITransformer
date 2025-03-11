@@ -6,8 +6,6 @@ metrics, as well as writing
 metrics to a TensorBoard SummaryWriter.
 """
 
-from params import Params
-
 import pandas as pd
 import torch
 
@@ -25,7 +23,8 @@ from typing import (Self, Literal, cast,
                     ClassVar, TypeVar, Callable,
                     Any)
 
-from logmaker import getLogger, warning
+from ..utils.params import Params
+from ..utils.logmaker import getLogger, warning
 
 
 logger = getLogger(__name__)

@@ -1,7 +1,7 @@
 """
 Necessary: spacy_conll module
 """
-from natural_stories import load_natural_stories
+from .natural_stories import load_natural_stories
 
 import spacy  # type: ignore
 from spacy.symbols import ORTH

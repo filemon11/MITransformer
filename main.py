@@ -1,14 +1,17 @@
 import torch
 import torch.distributed as dist
 
-from data import (load_dataset, dataset_details_full, DatasetDictTrain,
-                  dataset_details_full_memmaped, get_loader, Dataset)
-from trainer import (LMTrainer, TrainConfig, MITransformerConfig,
-                     Metric, Result)
-from metrics import MetricWriter, metric_writer, sum_and_std_metrics, minimise
-from model import TransformerDescription, description_builder
-from params import Params, dict_info, Undefined, is_undef
-from hooks import TreePlotHook, AttentionPlotHook
+from mitransformer.data.data import (
+    load_dataset, dataset_details_full,
+    DatasetDictTrain,
+    dataset_details_full_memmaped, get_loader, Dataset)
+from mitransformer.train.trainer import (
+    LMTrainer, TrainConfig, MITransformerConfig,
+    Result)
+from mitransformer.train.metrics import Metric, MetricWriter, metric_writer, sum_and_std_metrics, minimise
+from mitransformer.models.model import TransformerDescription, description_builder
+from mitransformer.utils.params import Params, dict_info, Undefined, is_undef
+from mitransformer.train.hooks import TreePlotHook, AttentionPlotHook
 
 from tqdm import tqdm
 import optuna
@@ -23,7 +26,7 @@ from ast import literal_eval as make_tuple
 from copy import copy
 from collections import Counter, defaultdict
 
-from logmaker import getLogger, info, logging_config, get_timestr
+from mitransformer.utils.logmaker import getLogger, info, logging_config, get_timestr
 
 from typing import (
     Literal, Any, Iterable, cast, Iterator, TypeVar, Generic,
@@ -180,7 +183,8 @@ def _load_dataset(args: "ParserArgs", memmaped: bool = False
         args.first_k_eval_test,
         args.triangulate,
         args.connect_with_dummy,
-        args.connect_with_self)
+        args.connect_with_self,
+        args.masks_setting)
     info(args.rank, logger, (
         "Loaded datasets with "
         + ', '.join([str(len(ds)) for ds  # type: ignore
@@ -787,6 +791,7 @@ class ParserArgs(Params):
     first_k_eval_test: int | None
     connect_with_dummy: bool
     connect_with_self: bool
+    masks_setting: Literal["complete", "current", "next"]
     seed: int
 
 
@@ -963,6 +968,10 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         '--connect_with_self', type=str_to_bool, default=False,
         help=('Establish a recursive arc to the token itself when there '
               'is not parent/child among the precedents?'))
+    data_group.add_argument(
+        '--masks_setting', type=str, choices=("complete", "current", "next"),
+        default="current",
+        help=('What dependencies to assign to the current token.'))
 
     # Subparsers
     # # Training Parser

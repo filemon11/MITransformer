@@ -1,18 +1,20 @@
-from model import MITransformer, MITransformerLM, MITransformerConfig
-from data import (DepDataset, DUMMY, ROOT, EOS,
-                  TransformMaskHeadChild, CoNLLUDataset,
-                  DataLoader, get_loader, IDSen, IDBatch,
-                  CoNNLUTokenisedBatch, EssentialBatch, D)
-from metrics import (sum_metrics, SupervisedEvalMetric,
-                     SupervisedMetric, Metric, EvalMetric,
-                     MetricWriter, M, N)
+from ..models.model import MITransformer, MITransformerLM, MITransformerConfig
+from ..data.data import (
+    DepDataset, TransformMaskHeadChild, CoNLLUDataset,
+    DataLoader, get_loader, IDSen, IDBatch,
+    CoNNLUTokenisedBatch, EssentialBatch, D)
+from ..train.metrics import (
+    sum_metrics, SupervisedEvalMetric,
+    SupervisedMetric, Metric, EvalMetric,
+    MetricWriter, M, N)
 
-from tokeniser import TokenMapper
-from parse import parse_list_of_words_with_spacy
-from dependencies import (mst, merge_head_child_scores,
-                          dummy_mask_removal, mask_to_headlist, uas_absolute)
-from hooks import Hook
-from params import Params
+from ..data.tokeniser import TokenMapper, DUMMY, ROOT, EOS
+from ..data.parse import parse_list_of_words_with_spacy
+from ..utils.dependencies import (
+    mst, merge_head_child_scores,
+    dummy_mask_removal, mask_to_headlist, uas_absolute)
+from ..train.hooks import Hook
+from ..utils.params import Params
 
 from tqdm import tqdm
 import pandas as pd
@@ -31,11 +33,13 @@ import pickle
 from dataclasses import dataclass, field
 from collections import defaultdict
 
+from ..utils import pickle
+
 from typing import (Self, Literal, cast,
                     Container, Iterable, Mapping,
                     Any, Generator, TypedDict, NotRequired)
 
-from logmaker import getLogger, info, get_timestr
+from ..utils.logmaker import getLogger, info, get_timestr
 
 logger = getLogger(__name__)
 
@@ -135,7 +139,8 @@ class LMTrainer():
         state_dict, transformer_config = torch.load(
             os.path.join(cls.model_dir, model_name, "model"),
             map_location=device,
-            weights_only=False).values()
+            weights_only=False,
+            pickle_module=pickle).values()
         transformer_config = cast(MITransformerConfig, transformer_config)
         model: MITransformerLM = MITransformerLM(
             MITransformer(transformer_config))

@@ -1,7 +1,6 @@
-from logging import (getLogger, Logger, basicConfig,
-                     INFO, WARNING, DEBUG, ERROR)
-import logging
-import sys
+from logging import (
+    getLogger, Logger, basicConfig,
+    INFO, WARNING, DEBUG, ERROR)
 from pathlib import Path
 import os
 from time import localtime, strftime

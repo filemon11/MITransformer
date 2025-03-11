@@ -2,7 +2,8 @@
 Snippets taken from
 https://github.com/karpathy/nanoGPT/blob/master/model.py"""
 
-from params import Params
+from ..utils import params
+from ..models import pe
 
 import torch
 import torch.nn as nn
@@ -41,34 +42,6 @@ def combine_scores(
 class BatchInput(TypedDict):
     input_ids: torch.Tensor
     masks: NotRequired[dict[str, torch.Tensor | None]]
-
-
-class PositionalEncoding(nn.Module):
-
-    def __init__(
-            self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2)
-                             * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(max_len, d_model)
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe)
-
-        begin_emb = torch.zeros((2, d_model))
-        self.register_buffer('begin_emb', begin_emb)
-
-    def forward(self, len: int) -> torch.Tensor:
-        """
-        Arguments:
-            x: Tensor, shape ``[batch_size, seq_len, embedding_dim]``
-        """
-        x = torch.cat((self.begin_emb, self.pe[:len-2])).requires_grad_(False)
-        # do not positionally encode dummy and root
-        return self.dropout(x).unsqueeze(0)
 
 
 class FeedForward(nn.Module):
@@ -268,7 +241,7 @@ TransformerDescription = tuple[LayerDescription, ...]
 
 
 @dataclass
-class MITransformerConfig(Params):
+class MITransformerConfig(params.Params):
     transformer_description: TransformerDescription = ((("head", "child"), 1),)
     d_ff_factor: int = 4
     dropout_attn: float = 0.3
@@ -312,8 +285,9 @@ class MITransformer(nn.Module):
         if config.pos_enc == "embedding":
             self.wpe = nn.Embedding(self.block_size, n_embd)
         else:
-            self.wpe = PositionalEncoding(config.n_embd, 0,
-                                          config.block_size)
+            self.wpe = pe.PositionalEncoding(
+                config.n_embd, 0,
+                config.block_size)
 
         self.embd_dropout = nn.Dropout(config.dropout_embd)
 
@@ -417,7 +391,8 @@ class MITransformerLM(nn.Module):
             masksshould be a boolean mask with True being the elements not
             to mask and False being the entries to mask.
 
-            Output : Shape[B, S, E]"""
+            Output : Shape[B, S, E]
+        """
 
         x, scores = self.mi_transformer(input_ids, masks)
 

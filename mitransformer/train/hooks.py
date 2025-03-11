@@ -13,16 +13,18 @@ import os
 
 from abc import ABC, abstractmethod
 
-from data import (TokenMapper, CoNNLUTokenisedBatch, EssentialBatch,
-                  DataLoader)
-from trainer import (dummy_mask_removal, merge_head_child_scores, mst,
-                     mask_to_headlist)
+from ..data.data import (
+    CoNNLUTokenisedBatch, EssentialBatch, DataLoader)
+from ..data.tokeniser import TokenMapper
+from ..train.trainer import (
+    dummy_mask_removal, merge_head_child_scores, mst, mask_to_headlist)
 
 from typing import Sequence
 
 
-def get_attention_fig(pred_matrix: torch.Tensor, gold_matrix: torch.Tensor,
-                      tokens: None | Sequence[str] = None):
+def get_attention_fig(
+        pred_matrix: torch.Tensor, gold_matrix: torch.Tensor,
+        tokens: None | Sequence[str] = None):
     fontsize: float = 10
     fig, ax = plt.subplots(ncols=2, sharex=True, sharey=True)
     cbar_ax = fig.add_axes((.95, .25, .02, .5))
