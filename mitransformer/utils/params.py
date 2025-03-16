@@ -1,5 +1,9 @@
-from dataclasses import dataclass
+import dataclasses
+import json
 import inspect
+import os
+from pathlib import Path
+from ..utils import pickle
 
 from typing import Any, Self
 
@@ -59,7 +63,7 @@ def dict_info(d: dict[str, Any]) -> str:
             in d.items()])
 
 
-@dataclass
+@dataclasses.dataclass
 class Params():
     '''A data class that provides functionality for managing
     parameters.
@@ -89,15 +93,46 @@ class Params():
             object's attributes.
 
         '''
-        _dict = {
-            key: value for key, value    # type: ignore
-            in self.__dict__.copy().items()
-            if not omit_undefined or not is_undef(value)}
+        return self.asdict(as_str, omit_undefined)
+
+    def asdict(
+            self, as_str: bool = False,
+            omit_undefined: bool = True,
+            dict_factory=dict) -> dict[str, Any]:
+        '''Converts an object's attributes to a dictionary,
+        optionally converting
+        values to strings and omitting undefined values.
+
+        Parameters
+        ----------
+        as_str : bool, default=False
+            If `as_str` is set to `True`,
+            the values will be converted to strings
+            before being added to the dictionary.
+        omit_undefined : bool, default=True
+            If `omit_undefined` is set to `True`, any key in
+            the object's dictionary with an undefined value
+            will not be included in the output dictionary.
+            (See `Undefined`.)
+        dict_factory : default=dict
+            Function for the creation of the dictionary.
+
+        Returns
+        -------
+        dict[str, Any]
+            Returns a dictionary representation of the
+            object's attributes.
+
+        '''
+        _dict = dict_factory(
+            [(key, value) for key, value    # type: ignore
+                in self.__dict__.copy().items()
+                if not omit_undefined or not is_undef(value)])
         if as_str:
-            _dict = {
-                key: str(value)
-                for key, value in _dict.items()
-                if not omit_undefined or not is_undef(value)}
+            _dict = dict_factory(
+                [(key, str(value))
+                    for key, value in _dict.items()
+                    if not omit_undefined or not is_undef(value)])
         return _dict
 
     @property
@@ -151,7 +186,12 @@ class Params():
         }
         for k in inspect.signature(cls).parameters:
             if k not in params:
-                params[k] = getattr(cls, k)
+                try:
+                    params[k] = getattr(cls, k)
+                except AttributeError:
+                    raise Exception(
+                        f"{k} not present in kwargs and no default {k} "
+                        f"in {cls}.")
         return cls(**params)
 
     def update_from_kwargs(self, **kwargs: Any) -> None:
@@ -169,3 +209,46 @@ class Params():
         for k, v in kwargs.items():
             if k in inspect.signature(self.__class__).parameters:
                 setattr(self, k, v)
+
+    def save(self, file: str, legacy: bool = False) -> None:
+        Path(os.path.abspath(os.path.join(file, ".."))).mkdir(
+            parents=True, exist_ok=True)
+
+        if legacy:
+            with open(file, 'wb') as handle:
+                pickle.dump(self, handle,
+                            protocol=pickle.HIGHEST_PROTOCOL)
+        else:
+            if not file.split(".")[-1] == "json":
+                raise Exception(f"Wrong extension for {file}. Must be .json.")
+            with open(file, 'w') as handle:
+                json.dump(
+                    self, handle,
+                    cls=EnhancedJSONEncoder)
+
+    @classmethod
+    def load(
+            cls, file: str, legacy_support: bool = True,
+            check_legacy_filename: bool = True,
+            **optional_config: Any) -> Self:
+        obj: Self
+        if file.split(".")[-1] == "json" and os.path.exists(file):
+            with open(file, "r") as handle:
+                d = json.load(handle)
+            obj = cls(**d)
+        elif legacy_support:
+            if check_legacy_filename:
+                file = file.replace(".json", "")
+            with open(file, 'rb') as handle:
+                obj = pickle.load(handle)
+        else:
+            raise FileNotFoundError
+        obj.update_from_kwargs(**optional_config)
+        return obj
+
+
+class EnhancedJSONEncoder(json.JSONEncoder):
+    def default(self, o):
+        if dataclasses.is_dataclass(o):
+            return dataclasses.asdict(o)
+        return super().default(o)

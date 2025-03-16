@@ -1,15 +1,13 @@
 import torch
 import torch.distributed as dist
 
-from mitransformer.data.data import (
-    load_dataset, dataset_details_full,
-    DatasetDictTrain,
-    dataset_details_full_memmaped, get_loader, Dataset)
-from mitransformer.train.trainer import (
-    LMTrainer, TrainConfig, MITransformerConfig,
-    Result)
-from mitransformer.train.metrics import Metric, MetricWriter, metric_writer, sum_and_std_metrics, minimise
-from mitransformer.models.model import TransformerDescription, description_builder
+from mitransformer import (
+    DataProvider, DataConfig, Metric,
+    Result, LMTrainer, TrainConfig)
+from mitransformer.data.dataloader import (
+    get_loader)
+from mitransformer.train.metrics import MetricWriter, metric_writer, sum_and_std_metrics, minimise
+from mitransformer.models.model import TransformerDescription, description_builder, MITransformerConfig
 from mitransformer.utils.params import Params, dict_info, Undefined, is_undef
 from mitransformer.train.hooks import TreePlotHook, AttentionPlotHook
 
@@ -126,7 +124,7 @@ class HyperoptSpace(Generic[T]):
             f"Range must have one starting and one end point. Given: {value}")
 
         split = value.split(",")
-        if len(split) == 0:
+        if len(split) == 1:
             try:
                 return self.type(value)  # type: ignore
             except TypeError:
@@ -166,42 +164,45 @@ if not, search on huggingface and parse and load new.
 """
 
 
-def _load_dataset(args: "ParserArgs", memmaped: bool = False
-                  ) -> DatasetDictTrain:
-    if memmaped:
-        details = dataset_details_full_memmaped[args.dataset_name]
-        details["memmaped"] = details["memmaped"][0:2]  # type: ignore
-    else:
-        details = dataset_details_full[args.dataset_name]
-        details["dirs"] = details["dirs"][0:2]  # type: ignore
-    datasets = load_dataset(
-        details,
-        args.max_len_train,
-        args.max_len_eval_test,
-        args.vocab_size,
-        args.first_k,
-        args.first_k_eval_test,
-        args.triangulate,
-        args.connect_with_dummy,
-        args.connect_with_self,
-        args.masks_setting)
-    info(args.rank, logger, (
-        "Loaded datasets with "
-        + ', '.join([str(len(ds)) for ds  # type: ignore
-                     in datasets.values() if isinstance(ds, Dataset)])
-        + " sentences."))
-    return datasets
+def _load_data_provider(
+        args: "ParserArgs | TestParserArgs | CompareParserArgs",
+        memmaped: bool = False,
+        model_num: int | None = None
+        ) -> DataProvider:
+    try:
+        if isinstance(args, TestParserArgs):
+            provider = DataProvider.load(
+                os.path.join(
+                    LMTrainer.model_dir, args.model_name, "data_config.json"),
+                **args.to_dict())
+        elif isinstance(args, CompareParserArgs):
+            assert isinstance(model_num, int)
+            provider = DataProvider.load(
+                os.path.join(
+                    LMTrainer.model_dir,
+                    args.model1_name if model_num == 1 else args.model2_name,
+                    "data_config.json"),
+                **args.to_dict())
+        else:
+            raise FileNotFoundError
+    except FileNotFoundError:
+        config = DataConfig.from_kwargs(
+            include_test=False,
+            memmapped=memmaped,
+            **args.to_dict())
+        provider = DataProvider(config, args.rank)
+    return provider
 
 
 def main_dataprep(args: "ParserArgs") -> None:
-    _load_dataset(args, memmaped=False)
+    _load_data_provider(args, memmaped=False)
 
 
 def main_train(
         args: "TrainParserArgs",
         world_size: int,
         iterate: bool = False,
-        datasets: DatasetDictTrain | None = None
+        data_provider: DataProvider | None = None
         ) -> Iterator[Result]:
 
     # device: where to execute computation
@@ -212,16 +213,15 @@ def main_train(
         **args.to_dict(),
         world_size=world_size)
 
-    if datasets is None:
+    if data_provider is None:
         # TODO: do this entirely in the load dataset method
         # load memmap
-        datasets = _load_dataset(args, memmaped=True)
-    assert isinstance(datasets, dict)
+        data_provider = _load_data_provider(args, memmaped=True)
 
     # Model
     # 24 heads, one layer approximately matches CBR-RRN
     # TODO: Make this a proper config
-    args.vocab_size = datasets["token_mapper"].vocab_size
+    args.vocab_size = data_provider.datasets["token_mapper"].vocab_size
 
     # make proper transformer description
     if args.transformer_description is None:
@@ -242,25 +242,28 @@ def main_train(
         use_input_mask=(args.dependency_mode == "input"))
 
     trainer = LMTrainer.new(transformer_config, train_config)
-
+    if isinstance(data_provider, DataProvider):
+        data_provider.save(os.path.join(trainer.model_dir,
+                                        train_config.model_name,
+                                        "data_config.json"))
     # Training setting
     if not iterate:
-        metrics = trainer.train(**datasets)
+        metrics = trainer.train(**data_provider.datasets)
         if args.rank is None or args.rank == 0:
             generated = []
             for _ in range(20):
-                generated.append(trainer.generate(datasets["token_mapper"]))
+                generated.append(trainer.generate(data_provider.datasets["token_mapper"]))
             info(args.rank, logger,
                  f"Generated model output sample: {generated}")
         yield metrics  # type: ignore
 
     # Hyperopt setting
     else:
-        for metrics in trainer.train_iter(**datasets):
+        for metrics in trainer.train_iter(**data_provider.datasets):
             yield metrics
 
     del trainer
-    del datasets
+    del data_provider
 
 
 MeanStdDict = dict[str, tuple[float, float]]
@@ -269,7 +272,7 @@ MeanStdDict = dict[str, tuple[float, float]]
 def main_train_multiple(
         args: "TrainParserArgs",
         world_size: int,
-        datasets: DatasetDictTrain | None = None
+        data_provider: DataProvider | None = None
         ) -> (tuple[MeanStdDict, MeanStdDict]
               | tuple[MeanStdDict, MeanStdDict, MeanStdDict]):
     start = time.time()
@@ -279,8 +282,8 @@ def main_train_multiple(
     # but shouldn't we also forward them to tensorboard?
     # but we only have the final results or should we compute
     # the mean over the models for each step?
-    if datasets is None:
-        datasets = _load_dataset(args, memmaped=True)
+    if data_provider is None:
+        data_provider = _load_data_provider(args, memmaped=True)
 
     assert args.n_runs != 0, "--n_runs cannot be 0"
 
@@ -297,7 +300,7 @@ def main_train_multiple(
                 run_args,
                 world_size,
                 iterate=False,
-                datasets=datasets)).values()))  # type: ignore
+                data_provider=data_provider)).values()))  # type: ignore
 
     means_and_stds = tuple(sum_and_std_metrics(seq)
                            for seq in zip(*metrics_list))
@@ -320,7 +323,7 @@ def main_train_multiple(
 def main_test(
         args: "TestParserArgs",
         world_size: int,
-        datasets: DatasetDictTrain | None = None
+        data_provider: DataProvider | None = None
         ) -> tuple[Metric, Metric, Metric]:
     """Calculates the mean and standard deviation of several
     runs."""
@@ -328,7 +331,7 @@ def main_test(
     # device: where to execute computation
     if world_size > 1:
         assert args.rank is not None, "Rank cannot be None if word_size > 1."
-    print(args.dependency_mode)
+
     if is_undef(args.dependency_mode):
         trainer = LMTrainer.load(
             world_size=world_size,
@@ -341,11 +344,10 @@ def main_test(
 
     args.update_from_kwargs(**trainer.config.to_dict())
 
-    if datasets is None:
-        datasets = _load_dataset(
+    if data_provider is None:
+        data_provider = _load_data_provider(
             args,
             memmaped=True)
-    assert isinstance(datasets, dict)
 
     # TODO: Hooks do not save dataset name or number.
     # Idea: add counter to trainer that counts number of received
@@ -360,14 +362,15 @@ def main_test(
 
     if args.tree_plot:
         trainer.add_hook(TreePlotHook(
-            os.path.join(model_dir, "hooks", "tree_plots")
+            os.path.join(model_dir, "hooks", "tree_plots"),
+            masks_setting=args.masks_setting
         ))
 
     # Training setting
-    metrics = trainer.test(**datasets)
+    metrics = trainer.test(**data_provider.datasets)
 
     del trainer
-    del datasets
+    del data_provider
 
     return metrics  # type: ignore
 
@@ -375,10 +378,11 @@ def main_test(
 def main_compare(
         args: "CompareParserArgs",
         world_size: int,
-        datasets: DatasetDictTrain | None = None
+        data_provider: DataProvider | None = None
         ) -> None:
     """Calculates the mean and standard deviation of several
     runs."""
+    data_provider_given: bool = data_provider is not None
     window = 20
     highest_num = 1000
 
@@ -396,13 +400,14 @@ def main_compare(
 
     args.update_from_kwargs(**trainer.config.to_dict())
 
-    if datasets is None:
-        datasets = _load_dataset(
+    if not data_provider_given:
+        data_provider = _load_data_provider(
             args,
-            memmaped=True)
-    assert isinstance(datasets, dict)
-    dataset = datasets["eval"]
-    token_mapper = datasets["token_mapper"]
+            memmaped=True,
+            model_num=1)
+
+    dataset = data_provider.datasets["eval"]
+    token_mapper = data_provider.datasets["token_mapper"]
 
     logprobs1, _ = trainer.predict(
         dataset,
@@ -415,6 +420,12 @@ def main_compare(
         model_name=args.model2_name,
         world_size=world_size,
         **extra_args)
+
+    if not data_provider_given:
+        data_provider = _load_data_provider(
+            args,
+            memmaped=True,
+            model_num=2)
 
     logprobs2, _ = trainer.predict(
         dataset,
@@ -556,30 +567,36 @@ class Objective:
         self.writer = writer
         self.pg = pg
 
-        self.datasets = _load_dataset(args, memmaped=True)
+        self.data_provider = None
+        self.datasets = None
 
-        # Since pin_memory=True, persistent_workers=True lead to too many files
-        # error when creating a lot of dataloaders, we need to construct
-        # dataloaders here
-        # Remove this if https://github.com/pytorch/pytorch/issues/91252
-        # is resolved
-        self.datasets["train"] = get_loader(  # type: ignore
-                self.datasets["train"],  # type: ignore
-                batch_size=self.args.batch_size,
-                bucket=False,
-                shuffle=True, droplast=True,
-                world_size=self.n_devices,
-                rank=self.args.rank,
-                n_workers=self.args.n_workers)
-
-        self.datasets["eval"] = get_loader(  # type: ignore
-                self.datasets["eval"],  # type: ignore
-                batch_size=self.args.batch_size,
-                bucket=False,
-                shuffle=False, droplast=False,
-                world_size=self.n_devices,
-                rank=self.args.rank,
-                n_workers=self.args.n_workers)
+        # TODO: do not use try but check if any of the relevant args are
+        # Hyperopt spaces
+        try:
+            self.data_provider = _load_data_provider(args, memmaped=True)
+            # Since pin_memory=True, persistent_workers=True lead to too many files
+            # error when creating a lot of dataloaders, we need to construct
+            # dataloaders here
+            # Remove this if https://github.com/pytorch/pytorch/issues/91252
+            # is resolved
+            self.data_provider.datasets["train"] = get_loader(  # type: ignore
+                    self.data_provider.datasets["train"],  # type: ignore
+                    batch_size=self.args.batch_size,
+                    bucket=False,
+                    shuffle=True, droplast=True,
+                    world_size=self.n_devices,
+                    rank=self.args.rank,
+                    n_workers=self.args.n_workers)
+            self.data_provider.datasets["eval"] = get_loader(  # type: ignore
+                    self.data_provider.datasets["eval"],  # type: ignore
+                    batch_size=self.args.batch_size,
+                    bucket=False,
+                    shuffle=False, droplast=False,
+                    world_size=self.n_devices,
+                    rank=self.args.rank,
+                    n_workers=self.args.n_workers)
+        except TypeError:
+            self.data_provider = None
 
     def __call__(self, trial) -> float:
         if self.n_devices > 1:
@@ -593,9 +610,12 @@ class Objective:
             n_runs=1)
         args.seed = args.seed + trial.number
         args_logic(args)
+        print(args.to_dict())
+
         train_iterator = main_train(
             args, self.n_devices,
-            iterate=True, datasets=self.datasets)
+            iterate=True,
+            data_provider=self.data_provider)
         assert train_iterator is not None
 
         should_prune = False
@@ -906,6 +926,8 @@ class CompareParserArgs(ParserArgs):
     model2_name: str
     batch_size: int
 
+
+# TODO:correct parser args for data loading
 # TODO: make bool args optionally just acccept flag for True
 
 
@@ -935,8 +957,18 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help="seed for random processes")
     # TODO: actually set seed
 
+    # Subparsers
+    # # Training Parser
+    subparsers = parser.add_subparsers(dest="mode")
+    train_parser = subparsers.add_parser(
+        "train", help="training mode")
+    train_parser.add_argument(
+        '--n_runs', type=int,
+        default=1,
+        help="Number of runs; if > 1 computes mean and std of final scores.")
+
     # Data parser group
-    data_group = parser.add_argument_group('data')
+    data_group = train_parser.add_argument_group('data')
     data_group.add_argument(
         '--dataset_name', type=str, help='name of the dataset to load',
         default='Wikitext_processed')
@@ -972,16 +1004,6 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         '--masks_setting', type=str, choices=("complete", "current", "next"),
         default="current",
         help=('What dependencies to assign to the current token.'))
-
-    # Subparsers
-    # # Training Parser
-    subparsers = parser.add_subparsers(dest="mode")
-    train_parser = subparsers.add_parser(
-        "train", help="training mode")
-    train_parser.add_argument(
-        '--n_runs', type=int,
-        default=1,
-        help="Number of runs; if > 1 computes mean and std of final scores.")
 
     # # # Trainer parser group
     trainer_group = train_parser.add_argument_group('trainer')
@@ -1149,6 +1171,46 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         '--n_trials', type=int,
         default=25,
         help="how many trials to run")
+    
+    # Data parser group
+    data_group = hyperopt_parser.add_argument_group('data')
+    data_group.add_argument(
+        '--dataset_name', type=HyperoptSpace(str),
+        help='name of the dataset to load',
+        default='Wikitext_processed')
+    data_group.add_argument(
+        '--max_len_train', type=HyperoptSpace(OptNone(int)), default=40,
+        help='maximum number of tokens in training set')
+    data_group.add_argument(
+        '--max_len_eval_test', type=HyperoptSpace(OptNone(int)), default=None,
+        help='maximum number of tokens in eval set')
+    data_group.add_argument(
+        '--triangulate', type=HyperoptSpace(int), default=0,
+        help='TODO')
+    data_group.add_argument(
+        '--vocab_size', type=HyperoptSpace(OptNone(int)), default=50_000,
+        help=('number of most frequent tokens to embed; all other '
+              'tokens are replaced with an UNK token;'
+              'can be None when loading existing token_mapper'))
+    data_group.add_argument(
+        '--first_k', type=HyperoptSpace(OptNone(int)), default=None,
+        help='only load first k sentences of the training set')
+    data_group.add_argument(
+        '--first_k_eval_test', type=HyperoptSpace(OptNone(int)), default=None,
+        help='only load first k sentences of the eval and test sets')
+    data_group.add_argument(
+        '--connect_with_dummy', type=HyperoptSpace(str_to_bool), default=True,
+        help=('Establish an arc to a dummy token when there is no '
+              'parent/child among the precedents?'))
+    data_group.add_argument(
+        '--connect_with_self', type=HyperoptSpace(str_to_bool), default=False,
+        help=('Establish a recursive arc to the token itself when there '
+              'is not parent/child among the precedents?'))
+    data_group.add_argument(
+        '--masks_setting', type=HyperoptSpace(
+            str, choices=("next", "complete", "current")),
+        default="current",
+        help=('What dependencies to assign to the current token.'))
 
     # # # Hyperopt Fixed Trainer parser group
     hyperopt_fixed_trainer_group = hyperopt_parser.add_argument_group(
@@ -1304,12 +1366,88 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help="What kind of positional encodings to use.")
 
     # # Dataprep Parser
-    subparsers.add_parser(
+    dataprep_parser = subparsers.add_parser(
         "dataprep", help="dataprep mode")
+
+    # Data parser group
+    data_group = dataprep_parser.add_argument_group('data')
+    data_group.add_argument(
+        '--dataset_name', type=str, help='name of the dataset to load',
+        default='Wikitext_processed')
+    data_group.add_argument(
+        '--max_len_train', type=OptNone(int), default=40,
+        help='maximum number of tokens in training set')
+    data_group.add_argument(
+        '--max_len_eval_test', type=OptNone(int), default=None,
+        help='maximum number of tokens in eval set')
+    data_group.add_argument(
+        '--triangulate', type=int, default=0,
+        help='TODO')
+    data_group.add_argument(
+        '--vocab_size', type=OptNone(int), default=50_000,
+        help=('number of most frequent tokens to embed; all other '
+              'tokens are replaced with an UNK token;'
+              'can be None when loading existing token_mapper'))
+    data_group.add_argument(
+        '--first_k', type=OptNone(int), default=None,
+        help='only load first k sentences of the training set')
+    data_group.add_argument(
+        '--first_k_eval_test', type=OptNone(int), default=None,
+        help='only load first k sentences of the eval and test sets')
+    data_group.add_argument(
+        '--connect_with_dummy', type=str_to_bool, default=True,
+        help=('Establish an arc to a dummy token when there is no '
+              'parent/child among the precedents?'))
+    data_group.add_argument(
+        '--connect_with_self', type=str_to_bool, default=False,
+        help=('Establish a recursive arc to the token itself when there '
+              'is not parent/child among the precedents?'))
+    data_group.add_argument(
+        '--masks_setting', type=str, choices=("complete", "current", "next"),
+        default="current",
+        help=('What dependencies to assign to the current token.'))
 
     # # Test Parser
     test_parser = subparsers.add_parser(
         "test", help="testing mode")
+
+    # # # Data parser group
+    data_group = test_parser.add_argument_group('data')
+    data_group.add_argument(
+        '--dataset_name', type=str, help='name of the dataset to load',
+        default=Undefined)
+    data_group.add_argument(
+        '--max_len_train', type=OptNone(int), default=Undefined,
+        help='maximum number of tokens in training set')
+    data_group.add_argument(
+        '--max_len_eval_test', type=OptNone(int), default=Undefined,
+        help='maximum number of tokens in eval set')
+    data_group.add_argument(
+        '--triangulate', type=int, default=Undefined,
+        help='TODO')
+    data_group.add_argument(
+        '--vocab_size', type=OptNone(int), default=Undefined,
+        help=('number of most frequent tokens to embed; all other '
+              'tokens are replaced with an UNK token;'
+              'can be None when loading existing token_mapper'))
+    data_group.add_argument(
+        '--first_k', type=OptNone(int), default=Undefined,
+        help='only load first k sentences of the training set')
+    data_group.add_argument(
+        '--first_k_eval_test', type=OptNone(int), default=Undefined,
+        help='only load first k sentences of the eval and test sets')
+    data_group.add_argument(
+        '--connect_with_dummy', type=str_to_bool, default=Undefined,
+        help=('Establish an arc to a dummy token when there is no '
+              'parent/child among the precedents?'))
+    data_group.add_argument(
+        '--connect_with_self', type=str_to_bool, default=Undefined,
+        help=('Establish a recursive arc to the token itself when there '
+              'is not parent/child among the precedents?'))
+    data_group.add_argument(
+        '--masks_setting', type=str, choices=("complete", "current", "next"),
+        default=Undefined,
+        help=('What dependencies to assign to the current token.'))
 
     # # # Trainer parser group
     trainer_group = test_parser.add_argument_group('trainer')
@@ -1358,6 +1496,12 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         '--batch_size', type=int, default=32,
         help=("batch size; in case of multiple GPUs it is "
               "chunked across the devices"))
+
+    # # # Data parser group
+    data_group = compare_parser.add_argument_group('data')
+    data_group.add_argument(
+        '--dataset_name', type=str, help='name of the dataset to load',
+        default='Wikitext_processed')
 
     args = parser.parse_args()
     match args.mode:

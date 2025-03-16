@@ -1,21 +1,21 @@
-"""
-Necessary: spacy_conll module
-"""
-from .natural_stories import load_natural_stories
+"""Module for parsing sentences. Uses spacy library.
 
-import spacy  # type: ignore
-from spacy.symbols import ORTH
-nlp = spacy.load("en_core_web_trf")
-import en_core_web_trf  # type: ignore # noqa: E402
+Required: spacy_conll module
+"""
+from . import naturalstories
+
+from spacy.symbols import ORTH  # type: ignore
+import en_core_web_trf  # type: ignore
+
+import conllu
+import os
+
+from typing import Iterator, Iterable, overload  # noqa: E402
+
 nlp = en_core_web_trf.load()
 nlp.add_pipe("conll_formatter", last=True)
 nlp.tokenizer.add_special_case("<unk>", [{ORTH: "<unk>"}])  # type: ignore
 
-import conllu   # noqa: E402
-
-import os   # noqa: E402
-
-from typing import Iterator, Iterable, overload  # noqa: E402
 
 ENCODING = "utf-8"
 
@@ -96,26 +96,6 @@ def load_conllu(file: str) -> Iterator[conllu.TokenList]:
         yield tokenlist
 
 
-def compare(doc, tokenlists: Iterator[conllu.TokenList]) -> None:
-
-    for spacy_sent, conllu_sent in zip(doc.sents, tokenlists):
-        print("Tokenisation and heads:")
-        print(" ".join(
-            [f"""{str(
-                tok.i-spacy_sent[0].i+1)+':'+str(tok)+':'+str(
-                    tok.head.i - spacy_sent[0].i+1):<10}"""
-             for tok in spacy_sent]))
-        print(" ".join(
-            [f"{str(tok['id'])+':'+str(tok['form'])+':'+str(tok['head']):<10}"
-             for tok in conllu_sent]))
-
-        i = input("Show next sentence? (yes, no) >>> ")
-        if i == "yes" or i == "":
-            continue
-        else:
-            break
-
-
 OUTPUT_DIR = "."
 
 
@@ -125,7 +105,7 @@ def parse_natural_stories_with_spacy(
         output_file_name: str = "natural_stories_spacy.conllu",
         min_len: int | None = None) -> None:
     """Files should not exist or be empty"""
-    tokens = load_natural_stories(tsv_file)[0]
+    tokens = naturalstories.load_natural_stories(tsv_file)[0]
     save_doc_as_conllu(
         parse(" ".join(tokens)),
         os.path.join(output_dir, output_file_name),
@@ -216,9 +196,27 @@ def remove_lines(lines: list[str]) -> list[str]:
     return new_lines
 
 
-def check_natural_stories(tsv_file: str,
-                          reparsed_file: str) -> bool:
-    tsv_tokens, _, _ = load_natural_stories(tsv_file)
+def check_natural_stories(
+        tsv_file: str,
+        reparsed_file: str) -> bool:
+    """Method to check whether a CoNLLU parse of the natural
+    stories corpus corresponds to the original .tsv file.
+
+    Parameters
+    ----------
+    tsv_file : str
+        Path to the .tsv file.
+    reparsed_file : str
+        Path to a conllu parse.
+
+    Returns
+    -------
+    bool
+        True if the two corpora are the same
+        after detokenising the conllu parse,
+        else False.
+    """    
+    tsv_tokens, _, _ = naturalstories.load_natural_stories(tsv_file)
     tokenlists = load_conllu(reparsed_file)
 
     append: bool = True

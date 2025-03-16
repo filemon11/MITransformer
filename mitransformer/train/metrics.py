@@ -8,6 +8,8 @@ metrics to a TensorBoard SummaryWriter.
 
 import pandas as pd
 import torch
+import numpy as np
+import numbers
 
 from torch.utils.tensorboard.writer import SummaryWriter
 
@@ -771,10 +773,18 @@ class MetricWriter(SummaryWriter):
                     or isinstance(value, str)):
                 return True
             return False
+
+        def check_numeral(value: Any) -> bool:
+            if (isinstance(value, numbers.Number)
+                    or isinstance(value, torch.Tensor)
+                    or isinstance(value, np.ndarray)):
+                return True
+            return False
         self.add_hparams(
             {key: value for key, value
                 in params.items() if check_type(value)},
-            {f"_{key}": value for key, value in metric.to_dict().items()},
+            {f"_{key}": value for key, value in metric.to_dict().items()
+                if check_numeral(value)},
             run_name=run_name,
             global_step=global_step)
 

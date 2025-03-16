@@ -6,11 +6,11 @@ Linearity-of-surprisal-on-RT/blob/main/Preparing%20Corpora/get_frequency.py"""
 import pandas as pd
 import wordfreq     # type: ignore
 import nltk  # type: ignore
-from mitransformer.data.tokeniser import TokenMapper
 from mitransformer.data.data import CoNLLUDataset, TransformMaskHeadChild
 from mitransformer.train.trainer import LMTrainer, inverse_sigmoid
-from mitransformer.data.parse import parse_list_of_words_with_spacy
-from mitransformer.data.natural_stories import load_natural_stories
+from mitransformer.data import (
+    parse_list_of_words_with_spacy, load_natural_stories,
+    TokenMapper)
 
 import torch
 import numpy as np
