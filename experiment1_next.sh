@@ -1,5 +1,9 @@
 #!/bin/sh
 
+ALPHA=$1
+ALPHA=$((${ALPHA}00/10))
+ALPHA=${ALPHA:0:-2}.${ALPHA: -2}
+
 N_GPUS=1 #$(lspci|grep -i nvidia | grep -e VGA -e 3D | wc -l)
 # if not usind nvidia gpus, nede to set manually
 N_THREADS=12 #$(nproc --all)
@@ -25,18 +29,14 @@ fi
 
 prefix="--standalone --nnodes=1 --nproc-per-node=${N_GPUS} main.py"
 
-general_params="--seed 1895 --n_workers ${THREADS_PER_GPU} --device ${DEVICE} --use_ddp ${USE_DDP} --first_k none --first_k_eval_test none --dataset_name Wikitext_processed"
-hyperparams='--early_stop_metric lm_metric --discriminative true --loss_alpha 0.12 --batch_size 8 --epochs 2 --early_stop_after none --eval_interval 16000 --use_steps 1 --max_steps none --n_embd 812 --dropout 0.065 --learning_rate 1.1e-3'
+general_params="--n_workers ${THREADS_PER_GPU} --device ${DEVICE} --use_ddp ${USE_DDP}"
+hyperparams='--first_k none --first_k_eval_test 8 --dataset_name Wikitext_processed --masks_setting next --batch_size 8 --epochs 1 --early_stop_after none --eval_interval 10 --use_steps 1 --max_steps none --n_embd 812 --dropout 0.065 --learning_rate 1.1e-3'
 
 core="${general_params} train ${hyperparams}"
 
 # python main.py --first_k none --first_k_eval_test none dataprep
 torchrun ${prefix} \
-    --name exp_discriminative_baseline \
+    --name exp1_next_test__${ALPHA} \
     ${core} \
-    --dependency_mode 'standard'
-
-torchrun ${prefix} \
-    --name exp_discriminative_supervised \
-    ${core} \
-    --dependency_mode 'supervised'
+    --dependency_mode 'supervised' \
+    --loss_alpha ${ALPHA}

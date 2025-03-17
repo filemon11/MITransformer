@@ -1,15 +1,16 @@
-from ..models.model import MITransformer, MITransformerLM, MITransformerConfig
-from ..data.data import (
-    DepDataset, TransformMaskHeadChild, CoNLLUDataset,
-    DataLoader, get_loader, IDSen, IDBatch,
-    CoNNLUTokenisedBatch, EssentialBatch, D)
+from ..models import MITransformer, MITransformerLM, MITransformerConfig
+from ..data.dataloader import (
+    DataLoader, get_loader, IDBatch,
+    CoNLLUTokenisedBatch, EssentialBatch, D)
+from ..data.dataset import (
+    DepDataset, TransformMaskHeadChild, CoNLLUDataset, IDSen)
 from ..train.metrics import (
     sum_metrics, SupervisedEvalMetric,
     SupervisedMetric, Metric, EvalMetric,
     MetricWriter, M, N)
 
-from ..data.tokeniser import TokenMapper, DUMMY, ROOT, EOS
-from ..data.parse import parse_list_of_words_with_spacy
+from ..data.tokeniser import DUMMY, ROOT, EOS
+from ..data import parse_list_of_words_with_spacy, TokenMapper
 from ..utils.dependencies import (
     mst, merge_head_child_scores,
     dummy_mask_removal, mask_to_headlist, uas_absolute)
@@ -70,6 +71,7 @@ class GeneralConfig(Params):
     early_stop_metric: str = "loss"
     use_ddp: bool = False
     discriminative: bool = False
+    masks_setting: Literal["next", "current", "complete"] = "current"
 
 
 @dataclass
@@ -134,13 +136,25 @@ class LMTrainer():
             return None
 
     @classmethod
-    def load_model(cls, model_name: str, device: str = "cpu"
-                   ) -> tuple[MITransformerLM, MITransformerConfig]:
-        state_dict, transformer_config = torch.load(
-            os.path.join(cls.model_dir, model_name, "model"),
-            map_location=device,
-            weights_only=False,
-            pickle_module=pickle).values()
+    def load_model(
+                cls, model_name: str, device: str = "cpu",
+                legacy_support: bool = True
+                ) -> tuple[MITransformerLM, MITransformerConfig]:
+        if (legacy_support
+                and "config" in (loaded_dict := torch.load(
+                os.path.join(cls.model_dir, model_name, "model"),
+                map_location=device,
+                weights_only=False,
+                pickle_module=pickle)).keys()):
+            state_dict, transformer_config = loaded_dict.values()
+
+        else:
+            transformer_config = MITransformerConfig.load(os.path.join(
+                cls.model_dir, model_name, "transformer_config.json"
+            ))
+            state_dict = torch.load(
+                    os.path.join(cls.model_dir, model_name, "model"),
+                    weights_only=True)
         transformer_config = cast(MITransformerConfig, transformer_config)
         model: MITransformerLM = MITransformerLM(
             MITransformer(transformer_config))
@@ -148,19 +162,26 @@ class LMTrainer():
         return model, transformer_config
 
     @classmethod
-    def load(cls, model_name: str,
-             device: str = "cpu",
-             **optional_config: Any) -> Self:
+    def load(
+            cls, model_name: str,
+            device: str = "cpu",
+            legacy_support: bool = True,
+            check_legacy_filename: bool = True,
+            **optional_config: Any) -> Self:
         optional_config["model_name"] = model_name
 
         model, transformer_config = cls.load_model(
             model_name,
-            device)
+            device,
+            legacy_support=legacy_support)
 
-        with open(
+        train_config: TrainConfig = TrainConfig.load(
             os.path.join(
-            cls.model_dir, model_name, "config"), 'rb') as handle:
-                config: GeneralConfig = pickle.load(handle)
+                cls.model_dir, model_name, "config.json"),
+            legacy_support=legacy_support,
+            check_legacy_filename=check_legacy_filename)
+        config = GeneralConfig.from_kwargs(
+            **train_config.asdict())
         config.update_from_kwargs(device=device, **optional_config)
 
         cls.model_info(model, transformer_config, config)
@@ -195,7 +216,7 @@ class LMTrainer():
              "Initialised trainer with params:\n")
         info(config.rank, logger, config.info)
 
-    def save(self) -> None:
+    def save(self, legacy: bool = False) -> None:
         assert self.train_config is not None
         if self.use_ddp:
             dist.barrier()
@@ -206,16 +227,20 @@ class LMTrainer():
                 model = self.transformerlm.module
             dir = os.path.join(self.model_dir, self.train_config.model_name)
             Path(dir).mkdir(parents=True, exist_ok=True)
-            torch.save(
-                {"model": model.state_dict(),
-                 "config": self.transformer_config},
-                os.path.join(dir, "model"))
+            if legacy:
+                torch.save(
+                    {"model": model.state_dict(),
+                     "config": self.transformer_config},
+                    os.path.join(dir, "model"))
+            else:
+                torch.save(
+                    model.state_dict(),
+                    os.path.join(dir, "model"))
+                self.transformer_config.save(
+                    os.path.join(dir, "transformer_config.json"))
 
             # overwrites config
-            with open(os.path.join(dir, "config"), 'wb') as handle:
-                pickle.dump(self.train_config,
-                            handle,
-                            protocol=pickle.HIGHEST_PROTOCOL)
+            self.train_config.save(os.path.join(dir, "config.json"))
 
     def load_state(
             self, model_name: str | None = None) -> None:
@@ -235,7 +260,7 @@ class LMTrainer():
                  ) -> None:
         self.hooks.append(hook)
 
-    def run_hooks(self, input: CoNNLUTokenisedBatch | EssentialBatch,
+    def run_hooks(self, input: CoNLLUTokenisedBatch | EssentialBatch,
                   output: tuple[torch.Tensor, dict[str, list[torch.Tensor]]]
                   ) -> None:
         for hook in self.hooks:
@@ -483,7 +508,7 @@ class LMTrainer():
                 main_metric=self.config.early_stop_metric)
 
     def train_step(self,
-                   batch: CoNNLUTokenisedBatch | EssentialBatch,
+                   batch: CoNLLUTokenisedBatch | EssentialBatch,
                    ignore_index: int) -> Metric:
         assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
@@ -529,7 +554,7 @@ class LMTrainer():
         return metric
 
     def eval_step(self,
-                  batch: CoNNLUTokenisedBatch | EssentialBatch,
+                  batch: CoNLLUTokenisedBatch | EssentialBatch,
                   mode: Mode,
                   ignore_index: int) -> Metric:
         self.batch_to(batch, device=self.config.device)  # type: ignore
@@ -589,6 +614,19 @@ class LMTrainer():
                     middle:].float().mean(0).detach().cpu().numpy()
                 # print("golds_head", golds_head.astype(float))
                 # print("golds_child", golds_child.astype(float))
+                if self.config.masks_setting == "next":
+                    zeros = np.zeros((
+                        preds_head.shape[0],
+                        1, preds_head.shape[2]))
+                    preds_head = np.concatenate(
+                        (zeros, preds_head[:, :-1]), axis=1)
+                    preds_child = np.concatenate(
+                        (zeros, preds_child[:, :-1]), axis=1)
+                    golds_head = np.concatenate(
+                        (zeros, golds_head[:, :-1]), axis=1)
+                    golds_child = np.concatenate(
+                        (zeros, golds_child[:, :-1]), axis=1)
+
                 preds_arcs = dummy_mask_removal(
                     merge_head_child_scores(preds_head, preds_child))
                 golds_arcs = dummy_mask_removal(
@@ -596,8 +634,9 @@ class LMTrainer():
 
                 # print(preds_arcs.round(2))
                 # print(golds_arcs.astype(float))
-                not_padding = (batch["label_ids"]
-                               != ignore_index).cpu().numpy()[:, 1:]
+                not_padding = (
+                    batch["label_ids"]
+                    != ignore_index).cpu().numpy()[:, 1:]
 
                 uas_abs = sum(map(get_uas_abs, zip(
                     preds_arcs, golds_arcs, not_padding)))

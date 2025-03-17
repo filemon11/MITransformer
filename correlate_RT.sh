@@ -21,4 +21,4 @@ done
 cd RT
 Rscript --vanilla analysis.R ${model} ${baseline} ${model_count} > results/log_${model}.log
 
-# sh correlate_RT.sh exp1_dep-alphaselect_0.120_0 exp1_dep-alphaselect_1.0_0
+# sh correlate_RT.sh exp2_lstm_0.120_0 exp2_lstm_1.0_0

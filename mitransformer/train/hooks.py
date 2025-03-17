@@ -13,13 +13,13 @@ import os
 
 from abc import ABC, abstractmethod
 
-from ..data.data import (
-    CoNNLUTokenisedBatch, EssentialBatch, DataLoader)
-from ..data.tokeniser import TokenMapper
+from ..data import (
+    CoNLLUTokenisedBatch, EssentialBatch, DataLoader,
+    TokenMapper)
 from ..train.trainer import (
     dummy_mask_removal, merge_head_child_scores, mst, mask_to_headlist)
 
-from typing import Sequence
+from typing import Sequence, Literal
 
 
 def get_attention_fig(
@@ -65,7 +65,7 @@ class Hook(ABC):
         self.note: str | None = note
 
     @abstractmethod
-    def __call__(self, input: CoNNLUTokenisedBatch | EssentialBatch,
+    def __call__(self, input: CoNLLUTokenisedBatch | EssentialBatch,
                  output: tuple[
                     torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
         ...
@@ -85,7 +85,7 @@ class AttentionPlotHook(Hook):
         self.ignore_idx: int | None = ignore_idx
         self.token_mapper: TokenMapper | None = token_mapper
 
-    def __call__(self, input: CoNNLUTokenisedBatch | EssentialBatch,
+    def __call__(self, input: CoNLLUTokenisedBatch | EssentialBatch,
                  output: tuple[
                     torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
         for head_type, att_preds in output[1].items():
@@ -131,13 +131,16 @@ class AttentionPlotHook(Hook):
 class TreePlotHook(Hook):
     def __init__(self, directory: str, ignore_idx: int | None = None,
                  token_mapper: TokenMapper | None = None,
-                 note: str | None = None) -> None:
+                 note: str | None = None,
+                 masks_setting: Literal[
+                     "next", "current", "complete"] = "current") -> None:
         super().__init__(note)
         self.directory: str = directory
         self.ignore_idx: int | None = ignore_idx
         self.token_mapper: TokenMapper | None = token_mapper
+        self.masks_setting = masks_setting
 
-    def __call__(self, input: CoNNLUTokenisedBatch | EssentialBatch,
+    def __call__(self, input: CoNLLUTokenisedBatch | EssentialBatch,
                  output: tuple[
                     torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
         for i, (att_mats_head, att_mats_child) in enumerate(
@@ -150,6 +153,19 @@ class TreePlotHook(Hook):
                     input["label_ids"],
                     input["input_ids"]):
                 labels = labels[1:].cpu()
+                if self.masks_setting == "next":
+                    zeros = torch.zeros((
+                        1, att_p_h.shape[1]),
+                        device=att_p_h.device)
+                    att_p_h = torch.concatenate(
+                        (zeros, att_p_h[:-1]), dim=0)
+                    att_p_c = torch.concatenate(
+                        (zeros, att_p_c[:-1]), dim=0)
+                    att_g_h = torch.concatenate(
+                        (zeros, att_g_h[:-1]), dim=0)
+                    att_g_c = torch.concatenate(
+                        (zeros, att_g_c[:-1]), dim=0)
+
                 pred_arcs = dummy_mask_removal(
                     merge_head_child_scores(att_p_h.cpu(), att_p_c.cpu()))
                 gold_arcs = dummy_mask_removal(
