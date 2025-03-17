@@ -29,7 +29,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from pathlib import Path
 import os
-import pickle
 
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -87,9 +86,10 @@ class TrainConfig(GeneralConfig):
 class LMTrainer():
     model_dir: str = "./models/"
 
-    def __init__(self, transformerlm: MITransformerLM,
-                 transformer_config: MITransformerConfig,
-                 config: GeneralConfig):
+    def __init__(
+            self, transformerlm: MITransformerLM,
+            transformer_config: MITransformerConfig,
+            config: GeneralConfig):
         self.writer = MetricWriter(
             log_dir=os.path.join("./runs", config.model_name))
         self.transformerlm: MITransformerLM | DDP = transformerlm
@@ -199,21 +199,25 @@ class LMTrainer():
         return cls(model, transformer_config, config)
 
     @classmethod
-    def model_info(cls, model: MITransformerLM,
-                   transformer_config: MITransformerConfig,
-                   config: GeneralConfig) -> None:
-        info(config.rank, logger,
-             "Initialised model with params:\n")
-        info(config.rank, logger,
-             transformer_config.info)
+    def model_info(
+            cls, model: MITransformerLM,
+            transformer_config: MITransformerConfig,
+            config: GeneralConfig) -> None:
+        info(
+            config.rank, logger,
+            "Initialised model with params:\n")
+        info(
+            config.rank, logger,
+            transformer_config.info)
 
         model_parameters = filter(
             lambda p: p.requires_grad, model.parameters())
         params = sum([np.prod(p.size()) for p in model_parameters])
         info(config.rank, logger, f"Number of parameters: {params}")
 
-        info(config.rank, logger,
-             "Initialised trainer with params:\n")
+        info(
+            config.rank, logger,
+            "Initialised trainer with params:\n")
         info(config.rank, logger, config.info)
 
     def save(self, legacy: bool = False) -> None:
@@ -229,8 +233,9 @@ class LMTrainer():
             Path(dir).mkdir(parents=True, exist_ok=True)
             if legacy:
                 torch.save(
-                    {"model": model.state_dict(),
-                     "config": self.transformer_config},
+                    {
+                        "model": model.state_dict(),
+                        "config": self.transformer_config},
                     os.path.join(dir, "model"))
             else:
                 torch.save(
@@ -255,31 +260,36 @@ class LMTrainer():
             self.transformerlm.load_state_dict(state_dict)
         self.transformerlm.to(self.config.device)
 
-    def add_hook(self,
-                 hook: Hook
-                 ) -> None:
+    def add_hook(
+            self,
+            hook: Hook
+            ) -> None:
         self.hooks.append(hook)
 
-    def run_hooks(self, input: CoNLLUTokenisedBatch | EssentialBatch,
-                  output: tuple[torch.Tensor, dict[str, list[torch.Tensor]]]
-                  ) -> None:
+    def run_hooks(
+            self, input: CoNLLUTokenisedBatch | EssentialBatch,
+            output: tuple[torch.Tensor, dict[str, list[torch.Tensor]]]
+            ) -> None:
         for hook in self.hooks:
             hook(input, output)
 
-    def init_hooks(self, dataloader: DataLoader, dataset_name: str,
-                   epoch: int | None = None,
-                   token_mapper: TokenMapper | None = None) -> None:
+    def init_hooks(
+            self, dataloader: DataLoader, dataset_name: str,
+            epoch: int | None = None,
+            token_mapper: TokenMapper | None = None) -> None:
         for hook in self.hooks:
             if epoch is None:
                 hook.init(dataloader, token_mapper, dataset_name)
             else:
-                hook.init(dataloader, token_mapper,
-                          "_".join((dataset_name, f"ep:{epoch}")))
+                hook.init(
+                    dataloader, token_mapper,
+                    "_".join((dataset_name, f"ep:{epoch}")))
 
-    def loss(self, logits: torch.Tensor, labels: torch.Tensor,
-             ignore_index: int = -100,
-             reduction: Literal["sum", "mean"] = "mean"
-             ) -> torch.Tensor:
+    def loss(
+            self, logits: torch.Tensor, labels: torch.Tensor,
+            ignore_index: int = -100,
+            reduction: Literal["sum", "mean"] = "mean"
+            ) -> torch.Tensor:
 
         logits = torch.swapaxes(logits, 1, 2)
         if self.config.discriminative:
@@ -295,7 +305,8 @@ class LMTrainer():
 
             # # mask randomly
             # mask_rate = 0.5
-            # rand_mask = torch.rand(loss.shape, device=mask.device) < mask_rate
+            # rand_mask = torch.rand(
+            #    loss.shape, device=mask.device) < mask_rate
             # rand_mask[one_hot] = 0  # unmask gold items
             # loss[rand_mask] = 0
 
@@ -373,8 +384,9 @@ class LMTrainer():
             false_el = num_scores - true_el
             f_true = 0.5*num_scores/true_el
             f_false = 0.5*num_scores/false_el
-            weights = torch.zeros(*score_preds.shape,
-                                  device=score_preds.device)
+            weights = torch.zeros(
+                *score_preds.shape,
+                device=score_preds.device)
             weights[score_gold] = f_true
             weights[~score_gold] = f_false
             loss *= weights
@@ -402,8 +414,9 @@ class LMTrainer():
         if len(arc_scores) == 0:
             return None
         return torch.concat(
-            [torch.stack(sc_list)
-             for sc_list in arc_scores.values()])
+            [
+                torch.stack(sc_list)
+                for sc_list in arc_scores.values()])
 
     @staticmethod
     def expand_gold_scores(
@@ -471,13 +484,14 @@ class LMTrainer():
             elif isinstance(value, dict):
                 cls.batch_to(value, device)
 
-    def get_metric(self,
-                   num_instances: int,
-                   lm_loss: torch.Tensor,
-                   arc_loss: torch.Tensor | None = None,
-                   perplexity: float | None = None,
-                   uas: float | None = None,
-                   att_entropy: pd.DataFrame | None = None) -> Metric:
+    def get_metric(
+            self,
+            num_instances: int,
+            lm_loss: torch.Tensor,
+            arc_loss: torch.Tensor | None = None,
+            perplexity: float | None = None,
+            uas: float | None = None,
+            att_entropy: pd.DataFrame | None = None) -> Metric:
         if perplexity is not None:
             if arc_loss is not None:
                 assert uas is not None
@@ -507,9 +521,10 @@ class LMTrainer():
                 alpha=self.config.loss_alpha,
                 main_metric=self.config.early_stop_metric)
 
-    def train_step(self,
-                   batch: CoNLLUTokenisedBatch | EssentialBatch,
-                   ignore_index: int) -> Metric:
+    def train_step(
+            self,
+            batch: CoNLLUTokenisedBatch | EssentialBatch,
+            ignore_index: int) -> Metric:
         assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
         self.batch_to(batch, device=self.config.device)  # type: ignore
@@ -553,10 +568,11 @@ class LMTrainer():
         metric.to_("cpu")
         return metric
 
-    def eval_step(self,
-                  batch: CoNLLUTokenisedBatch | EssentialBatch,
-                  mode: Mode,
-                  ignore_index: int) -> Metric:
+    def eval_step(
+            self,
+            batch: CoNLLUTokenisedBatch | EssentialBatch,
+            mode: Mode,
+            ignore_index: int) -> Metric:
         self.batch_to(batch, device=self.config.device)  # type: ignore
 
         logits, arc_scores = self.transformerlm(**batch)
@@ -672,9 +688,10 @@ class LMTrainer():
             and early_stop_after <= evals_without_improvement)
         early_stop = sum(self.gather_ddp(early_stop)) > 0
         if early_stop:
-            info(self.config.rank, logger,
-                 f"Aborting training after {evals_without_improvement} "
-                 "evals without improvement.")
+            info(
+                self.config.rank, logger,
+                f"Aborting training after {evals_without_improvement} "
+                "evals without improvement.")
             return True
         return False
 
@@ -683,9 +700,10 @@ class LMTrainer():
             train: DepDataset[IDSen] | DataLoader,
             eval: DepDataset[IDSen] | DataLoader,
             token_mapper: TokenMapper | None = None,
-            **kwargs) -> Generator[Result,
-                                   None,
-                                   tuple[tuple[int, int], tuple[int, int]]]:
+            **kwargs) -> Generator[
+                Result,
+                None,
+                tuple[tuple[int, int], tuple[int, int]]]:
         assert self.train_config is not None, "Config missing training params."
         train_config = self.train_config
         device = train_config.device
@@ -702,9 +720,10 @@ class LMTrainer():
         evals_without_improvement: int = 0
         total_steps: int = 0
         break_training: bool = False
-        max_epochs = (train_config.epochs
-                      if train_config is not None
-                      else train_config.max_steps)
+        max_epochs = (
+            train_config.epochs
+            if train_config is not None
+            else train_config.max_steps)
         # since we cannot run out of epochs if we use
         # max_steps
         best_epoch: int = 0
@@ -719,8 +738,9 @@ class LMTrainer():
             if break_training:
                 epoch -= 1
                 break
-            info(self.config.rank,
-                 logger, f"Epoch: {epoch}/{max_epochs}")
+            info(
+                self.config.rank,
+                logger, f"Epoch: {epoch}/{max_epochs}")
             if self.use_ddp:
                 train.sampler.set_epoch(epoch)  # type: ignore
 
@@ -731,15 +751,19 @@ class LMTrainer():
                     pbar_steps.update(1)
 
                 if total_steps % eval_interval == 0:
-                    info(self.config.rank,
-                         logger,
-                         (f"Step: {total_steps}/" +
-                          ('inf' if train_config.max_steps
-                           is None  # type: ignore
-                           else str(train_config.max_steps))))
+                    info(
+                        self.config.rank,
+                        logger,
+                        (
+                            f"Step: {total_steps}/" +
+                            (
+                                'inf' if train_config.max_steps
+                                is None  # type: ignore
+                                else str(train_config.max_steps))))
                     self.log_metric(train_metric, total_steps, "train")
-                    info(self.config.rank, logger,
-                         f"train metric:\n{train_metric.info}")
+                    info(
+                        self.config.rank, logger,
+                        f"train metric:\n{train_metric.info}")
 
                     self.init_hooks(eval, "eval", epoch, token_mapper)
                     eval_metric = self._eval(eval)
@@ -748,8 +772,9 @@ class LMTrainer():
                     self.transformerlm.train()
 
                     self.log_metric(eval_metric, total_steps, "eval")
-                    info(self.config.rank, logger,
-                         f"eval metric:\n{eval_metric.info}")
+                    info(
+                        self.config.rank, logger,
+                        f"eval metric:\n{eval_metric.info}")
 
                     # TODO make it possible to save without checking if
                     # there was an improvement
@@ -762,15 +787,17 @@ class LMTrainer():
                         best_epoch = epoch
                         best_step = total_steps
 
-                        info(self.config.rank, logger,
-                             "Saving model at epoch "
-                             f"{epoch} ({total_steps})...")
+                        info(
+                            self.config.rank, logger,
+                            "Saving model at epoch "
+                            f"{epoch} ({total_steps})...")
                         evals_without_improvement = 0
                     else:
                         evals_without_improvement += 1
 
-                    yield {"train": train_metric,
-                           "eval": eval_metric}
+                    yield {
+                        "train": train_metric,
+                        "eval": eval_metric}
 
                     if self.check_early_stop(evals_without_improvement):
                         break_training = True
@@ -785,11 +812,12 @@ class LMTrainer():
             pbar_steps.close()
         return (epoch, total_steps), (best_epoch, best_step)
 
-    def train(self,
-              train: DepDataset[IDSen] | DataLoader,
-              eval: DepDataset[IDSen] | DataLoader,
-              test: DepDataset[IDSen] | DataLoader | None = None,
-              **kwargs) -> TestResult:
+    def train(
+            self,
+            train: DepDataset[IDSen] | DataLoader,
+            eval: DepDataset[IDSen] | DataLoader,
+            test: DepDataset[IDSen] | DataLoader | None = None,
+            **kwargs) -> TestResult:
         assert self.train_config is not None, "Config missing training params."
 
         train = self.get_loader(train)
@@ -808,14 +836,17 @@ class LMTrainer():
         # load best (saved) into transformerlm
         self.load_state()
 
-        info(self.config.rank, logger,
-             f"Ended training after {current[0]} epochs, {current[1]} steps.")
-        info(self.config.rank, logger,
-             f"Found best model after {best[0]} epochs, {best[1]} steps.")
+        info(
+            self.config.rank, logger,
+            f"Ended training after {current[0]} epochs, {current[1]} steps.")
+        info(
+            self.config.rank, logger,
+            f"Found best model after {best[0]} epochs, {best[1]} steps.")
 
-        return self.test(train=train,  # type: ignore
-                         eval=eval,
-                         test=test)
+        return self.test(
+            train=train,  # type: ignore
+            eval=eval,
+            test=test)
         # if score_preds is not None and score_gold is not None:
         #    token_mapper: TokenMapper = TokenMapper.load("./tokmap.pickle")
         #    for i in range(10):
@@ -892,17 +923,19 @@ class LMTrainer():
                 for batch in tqdm(loader, desc="Batches")]
         return self.gather_metrics(sum_metrics(metrics))
 
-    def test(self, token_mapper: TokenMapper | None = None,
-             **datasets: DepDataset | DataLoader | Any
-             ) -> dict[str, Metric]:
+    def test(
+            self, token_mapper: TokenMapper | None = None,
+            **datasets: DepDataset | DataLoader | Any
+            ) -> dict[str, Metric]:
         metrics: dict[str, Metric] = {}
         for n, ds in datasets.items():
             if isinstance(ds, (DataLoader, DepDataset)):
                 ds = self.get_loader(ds)
                 self.init_hooks(ds, n, token_mapper=token_mapper)
                 metrics[n] = self._eval(self.get_loader(ds))
-                info(self.config.rank, logger,
-                     f"Test metric for {n} split:\n{metrics[n].info}")
+                info(
+                    self.config.rank, logger,
+                    f"Test metric for {n} split:\n{metrics[n].info}")
         return metrics
 
     def predict(
@@ -971,9 +1004,10 @@ class LMTrainer():
             model = self.transformerlm
 
         if start is None:
-            idx = torch.zeros((1, 2),
-                              dtype=torch.long,
-                              device=self.config.device)
+            idx = torch.zeros(
+                (1, 2),
+                dtype=torch.long,
+                device=self.config.device)
             idx[0, 0] = token_mapper.token2id[DUMMY]
             idx[0, 1] = token_mapper.token2id[ROOT]
             g = model.generate(
@@ -1003,8 +1037,9 @@ class LMTrainer():
                 pass
 
             # TODO: support mask
-            g = model.generate(batch["input_ids"][0],
-                               max_new_tokens=max_len).tolist()[0]
+            g = model.generate(
+                batch["input_ids"][0],
+                max_new_tokens=max_len).tolist()[0]
 
         eos_id = token_mapper.token2id[EOS]
         first_eos = next((i for i, x in enumerate(g) if x == eos_id), len(g))
@@ -1029,9 +1064,10 @@ class LMTrainer():
         else:
             return metric
 
-    def log_metric(self, metric: Metric,
-                   epoch: int,
-                   split: Literal["train", "eval", "test"]) -> None:
+    def log_metric(
+            self, metric: Metric,
+            epoch: int,
+            split: Literal["train", "eval", "test"]) -> None:
         if not self.use_ddp or self.config.rank == 0:
             self.writer.add_metric(metric, epoch, split)
 
@@ -1088,10 +1124,11 @@ def logits_to_probs(logits: torch.Tensor, softmax: bool = True
         return torch.sigmoid(logits)
 
 
-def logits_to_true_probs(logits: torch.Tensor,
-                         labels: torch.Tensor,
-                         ignore_index: int | None = None,
-                         softmax: bool = True) -> torch.Tensor:
+def logits_to_true_probs(
+        logits: torch.Tensor,
+        labels: torch.Tensor,
+        ignore_index: int | None = None,
+        softmax: bool = True) -> torch.Tensor:
     probs = logits_to_probs(logits, softmax)
     return select_true(probs, labels, ignore_index)
 
@@ -1104,33 +1141,37 @@ def logits_to_surprisal(logits: torch.Tensor,
         logits, labels, ignore_index, softmax))
 
 
-def sum_depadded(values: torch.Tensor,
-                 labels: torch.Tensor,
-                 ignore_index: int) -> torch.Tensor:
+def sum_depadded(
+        values: torch.Tensor,
+        labels: torch.Tensor,
+        ignore_index: int) -> torch.Tensor:
     values[labels == ignore_index] = 0
     return values.sum(-1)
 
 
-def mean_depadded(values: torch.Tensor,
-                  labels: torch.Tensor,
-                  ignore_index: int) -> torch.Tensor:
+def mean_depadded(
+        values: torch.Tensor,
+        labels: torch.Tensor,
+        ignore_index: int) -> torch.Tensor:
     num_items = (labels != ignore_index).sum(-1)
     sums = sum_depadded(values, labels, ignore_index)
     return sums / num_items
 
 
-def logits_to_perplexity(logits: torch.Tensor,
-                         labels: torch.Tensor,
-                         ignore_index: int,
-                         softmax: bool = True) -> torch.Tensor:
+def logits_to_perplexity(
+        logits: torch.Tensor,
+        labels: torch.Tensor,
+        ignore_index: int,
+        softmax: bool = True) -> torch.Tensor:
     # Should we disregard first node (root from dummy?)
     surprisal = logits_to_surprisal(logits, labels, softmax)
     means = mean_depadded(surprisal, labels, ignore_index)
     return torch.exp(means)
 
 
-def unpad(sentences: torch.Tensor, labels: torch.Tensor,
-          ignore_index: int) -> list[torch.Tensor]:
+def unpad(
+        sentences: torch.Tensor, labels: torch.Tensor,
+        ignore_index: int) -> list[torch.Tensor]:
     unpadded_list: list[torch.Tensor] = []
     for sentence, sen_labels in zip(sentences, labels):
         unpadded_list.append(sentence[sen_labels != ignore_index])

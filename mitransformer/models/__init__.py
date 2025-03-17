@@ -1,2 +1,2 @@
-from .model import (
-    MITransformerConfig, MITransformerLM, MITransformer)  # noqa: F401
+from .model import (  # noqa: F401
+    MITransformerConfig, MITransformerLM, MITransformer)  # type: ignore

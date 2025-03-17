@@ -65,29 +65,33 @@ class Hook(ABC):
         self.note: str | None = note
 
     @abstractmethod
-    def __call__(self, input: CoNLLUTokenisedBatch | EssentialBatch,
-                 output: tuple[
-                    torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
+    def __call__(
+            self, input: CoNLLUTokenisedBatch | EssentialBatch,
+            output: tuple[
+                torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
         ...
 
-    def init(self, dataloader: DataLoader | None = None,
-             token_mapper: TokenMapper | None = None,
-             note: str | None = None) -> None:
+    def init(
+            self, dataloader: DataLoader | None = None,
+            token_mapper: TokenMapper | None = None,
+            note: str | None = None) -> None:
         self.note = note
 
 
 class AttentionPlotHook(Hook):
-    def __init__(self, directory: str, ignore_idx: int | None = None,
-                 token_mapper: TokenMapper | None = None,
-                 note: str | None = None) -> None:
+    def __init__(
+            self, directory: str, ignore_idx: int | None = None,
+            token_mapper: TokenMapper | None = None,
+            note: str | None = None) -> None:
         super().__init__(note)
         self.directory: str = directory
         self.ignore_idx: int | None = ignore_idx
         self.token_mapper: TokenMapper | None = token_mapper
 
-    def __call__(self, input: CoNLLUTokenisedBatch | EssentialBatch,
-                 output: tuple[
-                    torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
+    def __call__(
+            self, input: CoNLLUTokenisedBatch | EssentialBatch,
+            output: tuple[
+                torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
         for head_type, att_preds in output[1].items():
             for i, att_mats in enumerate(att_preds):
                 for idx, att_p, att_g, labels, input_ids in zip(
@@ -113,14 +117,16 @@ class AttentionPlotHook(Hook):
                         os.path.join(
                             self.directory,
                             "att_" + "_".join(
-                                base_name + (str(idx),
-                                             f"{head_type}:{i}")) + ".pdf"),
+                                base_name + (
+                                    str(idx),
+                                    f"{head_type}:{i}")) + ".pdf"),
                         bbox_inches='tight')
                     plt.close()
 
-    def init(self, dataloader: DataLoader | None = None,
-             token_mapper: TokenMapper | None = None,
-             note: str | None = None) -> None:
+    def init(
+            self, dataloader: DataLoader | None = None,
+            token_mapper: TokenMapper | None = None,
+            note: str | None = None) -> None:
         super().init(dataloader, token_mapper, note)
         if dataloader is not None:
             self.ignore_idx = dataloader.dataset.keys_for_padding["label_ids"]
@@ -129,24 +135,27 @@ class AttentionPlotHook(Hook):
 
 
 class TreePlotHook(Hook):
-    def __init__(self, directory: str, ignore_idx: int | None = None,
-                 token_mapper: TokenMapper | None = None,
-                 note: str | None = None,
-                 masks_setting: Literal[
-                     "next", "current", "complete"] = "current") -> None:
+    def __init__(
+            self, directory: str, ignore_idx: int | None = None,
+            token_mapper: TokenMapper | None = None,
+            note: str | None = None,
+            masks_setting: Literal[
+                "next", "current", "complete"] = "current") -> None:
         super().__init__(note)
         self.directory: str = directory
         self.ignore_idx: int | None = ignore_idx
         self.token_mapper: TokenMapper | None = token_mapper
         self.masks_setting = masks_setting
 
-    def __call__(self, input: CoNLLUTokenisedBatch | EssentialBatch,
-                 output: tuple[
+    def __call__(
+            self, input: CoNLLUTokenisedBatch | EssentialBatch,
+            output: tuple[
                     torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
         for i, (att_mats_head, att_mats_child) in enumerate(
                 zip(output[1]["head"], output[1]["child"])):
-            for (idx, att_p_h, att_p_c, att_g_h,
-                 att_g_c, labels, input_ids) in zip(
+            for (
+                idx, att_p_h, att_p_c, att_g_h,
+                att_g_c, labels, input_ids) in zip(
                     input["idx"], att_mats_head, att_mats_child,
                     input["masks"]["head"],
                     input["masks"]["child"],
@@ -213,9 +222,10 @@ class TreePlotHook(Hook):
                 with Path(path_gold).open("w", encoding="utf-8") as fh:
                     fh.write(pdf_gold)
 
-    def init(self, dataloader: DataLoader | None = None,
-             token_mapper: TokenMapper | None = None,
-             note: str | None = None) -> None:
+    def init(
+            self, dataloader: DataLoader | None = None,
+            token_mapper: TokenMapper | None = None,
+            note: str | None = None) -> None:
         super().init(dataloader, token_mapper, note)
         if dataloader is not None:
             self.ignore_idx = dataloader.dataset.keys_for_padding["label_ids"]

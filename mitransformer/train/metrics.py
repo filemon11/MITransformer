@@ -18,7 +18,7 @@ import math
 from dataclasses import dataclass, fields
 from functools import total_ordering
 from contextlib import contextmanager
-from flatten_json import flatten
+from flatten_json import flatten  # type: ignore
 
 from typing import (Self, Literal, cast,
                     Iterable, Mapping,
@@ -794,7 +794,7 @@ def metric_writer(*args, **kwargs):
     '''Context manager for `MetricWriter`.
     Closes the writer automatically when leaving
     its scope.
-    
+
     Parameters
     ----------
     args

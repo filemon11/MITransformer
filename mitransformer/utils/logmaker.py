@@ -1,4 +1,4 @@
-from logging import (
+from logging import (  # type: ignore  # noqa: F401
     getLogger, Logger, basicConfig,
     INFO, WARNING, DEBUG, ERROR)
 from pathlib import Path
@@ -21,8 +21,9 @@ def log(rank: int | None, logger: Logger,
             getattr(logger, level)(msg)
 
 
-def info(rank: int | None, logger: Logger,
-         msg: str) -> None:
+def info(
+        rank: int | None, logger: Logger,
+        msg: str) -> None:
     log(rank, logger, INFO, msg)
 
 
@@ -31,8 +32,9 @@ def warning(rank: int | None, logger: Logger,
     log(rank, logger, WARNING, msg)
 
 
-def logging_config(logname: str | None = None,
-                   logpath: str = "./logs") -> None:
+def logging_config(
+        logname: str | None = None,
+        logpath: str = "./logs") -> None:
     if logname is None:
         logname = os.path.join(logpath, get_timestr() + ".log")
     else:

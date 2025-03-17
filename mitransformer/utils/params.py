@@ -5,7 +5,10 @@ import os
 from pathlib import Path
 from ..utils import pickle
 
-from typing import Any, Self
+from typing import Any, Self, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
 
 
 class Undefined():
@@ -248,7 +251,7 @@ class Params():
 
 
 class EnhancedJSONEncoder(json.JSONEncoder):
-    def default(self, o):
+    def default(self, o: DataclassInstance):
         if dataclasses.is_dataclass(o):
             return dataclasses.asdict(o)
         return super().default(o)

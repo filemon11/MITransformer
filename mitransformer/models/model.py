@@ -145,14 +145,16 @@ class MIAttention(nn.Module):
         qkv = self.w_qkv(x).chunk(3, dim=-1)
         mh = self.n_head * self.n_multihead
         q, k, v = map(
-            lambda t: einops.rearrange(t, 'b s (mh e) -> b mh s e',
-                                       mh=mh), qkv)
+            lambda t: einops.rearrange(
+                t, 'b s (mh e) -> b mh s e',
+                mh=mh), qkv)
 
         att: torch.Tensor = torch.matmul(q, k.transpose(-1, -2)) * self.scale
         # (B, MH, S, S)
 
-        att = einops.rearrange(att, 'b (m h) s1 s2 -> b m h s1 s2',
-                               m=self.n_multihead)
+        att = einops.rearrange(
+            att, 'b (m h) s1 s2 -> b m h s1 s2',
+            m=self.n_multihead)
         att *= (1.0 / math.sqrt(k.shape[-1]))
 
         # (B, M, H, S, S)
@@ -282,6 +284,7 @@ class MITransformer(nn.Module):
         self.wte = nn.Embedding(config.vocab_size, n_embd)
         # self.wpe = PositionalEncoding(n_embd, 0, self.block_size)
         self.pos_enc_type = config.pos_enc
+        self.wpe: nn.Embedding | pe.PositionalEncoding
         if config.pos_enc == "embedding":
             self.wpe = nn.Embedding(self.block_size, n_embd)
         else:
@@ -364,8 +367,9 @@ class MITransformerLM(nn.Module):
         n_embd = mi_transformer.wte.weight.shape[1]
 
         self.ln = nn.LayerNorm(n_embd)
-        self.lm_head = nn.Linear(n_embd,
-                                 mi_transformer.vocab_size, bias=False)
+        self.lm_head = nn.Linear(
+            n_embd,
+            mi_transformer.vocab_size, bias=False)
 
         self.lm_head.weight = mi_transformer.wte.weight
 

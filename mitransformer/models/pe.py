@@ -31,4 +31,3 @@ class PositionalEncoding(nn.Module):
         x = torch.cat((self.begin_emb, self.pe[:len-2])).requires_grad_(False)
         # do not positionally encode dummy and root
         return self.dropout(x).unsqueeze(0)
-
