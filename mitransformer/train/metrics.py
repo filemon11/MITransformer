@@ -90,10 +90,11 @@ def sum_and_std_metrics(
     out_dict: dict[str, tuple[float, float]] = dict()
     means: dict[str, float] = sum_metrics(ms).to_dict()
     for key, mean_value in means.items():
-        xs = [getattr(m, key) for m in ms]
-        out_dict[key] = (
-            mean_value,
-            math.sqrt(sum([(x-mean_value)**2 for x in xs]) / n))
+        if check_numeral(mean_value):
+            xs = [getattr(m, key) for m in ms]
+            out_dict[key] = (
+                mean_value,
+                math.sqrt(sum([(x-mean_value)**2 for x in xs]) / n))
     return out_dict
 
 
@@ -765,21 +766,6 @@ class MetricWriter(SummaryWriter):
             parameters and metrics are being added. It is used to track
             the progress of the training process.
         '''
-        def check_type(value: Any) -> bool:
-            if (isinstance(value, float)
-                    or isinstance(value, int)
-                    or isinstance(value, torch.Tensor)
-                    or isinstance(value, bool)
-                    or isinstance(value, str)):
-                return True
-            return False
-
-        def check_numeral(value: Any) -> bool:
-            if (isinstance(value, numbers.Number)
-                    or isinstance(value, torch.Tensor)
-                    or isinstance(value, np.ndarray)):
-                return True
-            return False
         self.add_hparams(
             {key: value for key, value
                 in params.items() if check_type(value)},
@@ -809,3 +795,21 @@ def metric_writer(*args, **kwargs):
     finally:
         # Code to release resource, e.g.:
         writer.flush()
+
+
+def check_type(value: Any) -> bool:
+    if (isinstance(value, float)
+            or isinstance(value, int)
+            or isinstance(value, torch.Tensor)
+            or isinstance(value, bool)
+            or isinstance(value, str)):
+        return True
+    return False
+
+
+def check_numeral(value: Any) -> bool:
+    if (isinstance(value, numbers.Number)
+            or isinstance(value, torch.Tensor)
+            or isinstance(value, np.ndarray)):
+        return True
+    return False
