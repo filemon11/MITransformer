@@ -385,6 +385,14 @@ def main_test(
     # Training setting
     metrics = trainer.test(**data_provider.datasets)
 
+    generated = []
+    for _ in range(20):
+        generated.append(
+            trainer.generate(data_provider.datasets["token_mapper"]))
+    info(
+        args.rank, logger,
+        f"Generated model output sample: {generated}")
+
     del trainer
     del data_provider
 

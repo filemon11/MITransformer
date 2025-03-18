@@ -250,12 +250,22 @@ class LMTrainer():
             self.train_config.save(os.path.join(dir, "config.json"))
 
     def load_state(
-            self, model_name: str | None = None) -> None:
+            self, model_name: str | None = None,
+            legacy_support: bool = True) -> None:
         if model_name is None:
             model_name = self.config.model_name
-        state_dict, _ = torch.load(
-            os.path.join(self.model_dir, model_name, "model"),
-            weights_only=False).values()
+        if (legacy_support
+                and "config" in (loaded_dict := torch.load(
+                os.path.join(self.model_dir, model_name, "model"),
+                map_location=str(self.config.device),
+                weights_only=False,
+                pickle_module=pickle)).keys()):
+            state_dict, _ = loaded_dict.values()
+
+        else:
+            state_dict = torch.load(
+                    os.path.join(self.model_dir, model_name, "model"),
+                    weights_only=True)
         if self.use_ddp:
             assert isinstance(
                 self.transformerlm.module, models.MITransformerLM)
