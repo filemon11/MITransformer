@@ -2,10 +2,8 @@
 import os
 from pathlib import Path
 
-from . import dataset
-from . import tokeniser
-from ..utils.params import Params
-
+from . import dataset, tokeniser
+from .. import utils
 
 from dataclasses import dataclass
 from typing import (TypedDict, Literal, Any,
@@ -325,7 +323,7 @@ def load_dataset(
 
 
 @dataclass
-class DataConfig(Params):
+class DataConfig(utils.Params):
     dataset_name: str
     include_test: bool
     memmapped: bool

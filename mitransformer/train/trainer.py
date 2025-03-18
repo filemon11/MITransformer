@@ -1,4 +1,5 @@
-from ..models import MITransformer, MITransformerLM, MITransformerConfig
+from .. import models, data, utils
+from . import hooks
 from ..data.dataloader import (
     DataLoader, get_loader, IDBatch,
     CoNLLUTokenisedBatch, EssentialBatch, D)
@@ -10,12 +11,9 @@ from ..train.metrics import (
     MetricWriter, M, N)
 
 from ..data.tokeniser import DUMMY, ROOT, EOS
-from ..data import parse_list_of_words_with_spacy, TokenMapper
 from ..utils.dependencies import (
     mst, merge_head_child_scores,
     dummy_mask_removal, mask_to_headlist, uas_absolute)
-from ..train.hooks import Hook
-from ..utils.params import Params
 
 from tqdm import tqdm
 import pandas as pd
@@ -57,7 +55,7 @@ Mode = Literal["standard", "input", "supervised"]
 
 
 @dataclass
-class GeneralConfig(Params):
+class GeneralConfig(utils.Params):
     batch_size: int = 16
     dependency_mode: Mode = "supervised"
     loss_alpha: float | None = 0.5
@@ -87,14 +85,15 @@ class LMTrainer():
     model_dir: str = "./models/"
 
     def __init__(
-            self, transformerlm: MITransformerLM,
-            transformer_config: MITransformerConfig,
+            self, transformerlm: models.MITransformerLM,
+            transformer_config: models.MITransformerConfig,
             config: GeneralConfig):
         self.writer = MetricWriter(
             log_dir=os.path.join("./runs", config.model_name))
-        self.transformerlm: MITransformerLM | DDP = transformerlm
+        self.transformerlm: models.MITransformerLM | DDP = transformerlm
         self.transformerlm.to(config.device)
-        self.transformer_config: MITransformerConfig = transformer_config
+        self.transformer_config: models.MITransformerConfig
+        self.transformer_config = transformer_config
 
         self.optimiser: Optimizer | None
         self.__config: GeneralConfig
@@ -112,7 +111,7 @@ class LMTrainer():
                 output_device=device,
                 find_unused_parameters=False)
 
-        self.hooks: list[Hook] = []
+        self.hooks: list[hooks.Hook] = []
 
     @property
     def config(self) -> GeneralConfig:
@@ -139,7 +138,8 @@ class LMTrainer():
     def load_model(
                 cls, model_name: str, device: str = "cpu",
                 legacy_support: bool = True
-                ) -> tuple[MITransformerLM, MITransformerConfig]:
+                ) -> tuple[
+                    models.MITransformerLM, models.MITransformerConfig]:
         if (legacy_support
                 and "config" in (loaded_dict := torch.load(
                 os.path.join(cls.model_dir, model_name, "model"),
@@ -149,15 +149,16 @@ class LMTrainer():
             state_dict, transformer_config = loaded_dict.values()
 
         else:
-            transformer_config = MITransformerConfig.load(os.path.join(
+            transformer_config = models.MITransformerConfig.load(os.path.join(
                 cls.model_dir, model_name, "transformer_config.json"
             ))
             state_dict = torch.load(
                     os.path.join(cls.model_dir, model_name, "model"),
                     weights_only=True)
-        transformer_config = cast(MITransformerConfig, transformer_config)
-        model: MITransformerLM = MITransformerLM(
-            MITransformer(transformer_config))
+        transformer_config = cast(
+            models.MITransformerConfig, transformer_config)
+        model: models.MITransformerLM = models.MITransformerLM(
+            models.MITransformer(transformer_config))
         model.load_state_dict(state_dict)
         return model, transformer_config
 
@@ -189,19 +190,19 @@ class LMTrainer():
         return cls(model, transformer_config, config)
 
     @classmethod
-    def new(cls, transformer_config: MITransformerConfig,
+    def new(cls, transformer_config: models.MITransformerConfig,
             config: GeneralConfig) -> Self:
 
-        model: MITransformerLM = MITransformerLM(
-            MITransformer(transformer_config))
+        model: models.MITransformerLM = models.MITransformerLM(
+            models.MITransformer(transformer_config))
 
         cls.model_info(model, transformer_config, config)
         return cls(model, transformer_config, config)
 
     @classmethod
     def model_info(
-            cls, model: MITransformerLM,
-            transformer_config: MITransformerConfig,
+            cls, model: models.MITransformerLM,
+            transformer_config: models.MITransformerConfig,
             config: GeneralConfig) -> None:
         info(
             config.rank, logger,
@@ -227,7 +228,8 @@ class LMTrainer():
         if not self.use_ddp or self.config.rank == 0:
             model = self.transformerlm
             if self.use_ddp:
-                assert isinstance(self.transformerlm.module, MITransformerLM)
+                assert isinstance(
+                    self.transformerlm.module, models.MITransformerLM)
                 model = self.transformerlm.module
             dir = os.path.join(self.model_dir, self.train_config.model_name)
             Path(dir).mkdir(parents=True, exist_ok=True)
@@ -255,6 +257,8 @@ class LMTrainer():
             os.path.join(self.model_dir, model_name, "model"),
             weights_only=False).values()
         if self.use_ddp:
+            assert isinstance(
+                self.transformerlm.module, models.MITransformerLM)
             self.transformerlm.module.load_state_dict(state_dict)
         else:
             self.transformerlm.load_state_dict(state_dict)
@@ -262,7 +266,7 @@ class LMTrainer():
 
     def add_hook(
             self,
-            hook: Hook
+            hook: hooks.Hook
             ) -> None:
         self.hooks.append(hook)
 
@@ -276,7 +280,7 @@ class LMTrainer():
     def init_hooks(
             self, dataloader: DataLoader, dataset_name: str,
             epoch: int | None = None,
-            token_mapper: TokenMapper | None = None) -> None:
+            token_mapper: data.TokenMapper | None = None) -> None:
         for hook in self.hooks:
             if epoch is None:
                 hook.init(dataloader, token_mapper, dataset_name)
@@ -699,7 +703,7 @@ class LMTrainer():
             self,
             train: DepDataset[IDSen] | DataLoader,
             eval: DepDataset[IDSen] | DataLoader,
-            token_mapper: TokenMapper | None = None,
+            token_mapper: data.TokenMapper | None = None,
             **kwargs) -> Generator[
                 Result,
                 None,
@@ -924,7 +928,7 @@ class LMTrainer():
         return self.gather_metrics(sum_metrics(metrics))
 
     def test(
-            self, token_mapper: TokenMapper | None = None,
+            self, token_mapper: data.TokenMapper | None = None,
             **datasets: DepDataset | DataLoader | Any
             ) -> dict[str, Metric]:
         metrics: dict[str, Metric] = {}
@@ -943,7 +947,7 @@ class LMTrainer():
             make_prob: bool = False,
             only_true: bool = False,
             dataset_name: str | None = None,
-            token_mapper: TokenMapper | None = None
+            token_mapper: data.TokenMapper | None = None
             ) -> tuple[list[torch.Tensor], dict[str, list[torch.Tensor]]]:
         """Returns logits and arc scores"""
         # TODO: Does this work with ddp? Batches are distributed but not
@@ -993,7 +997,7 @@ class LMTrainer():
         return unpadded_logits, dict(unpadded_arc_scores)
 
     def generate(
-            self, token_mapper: TokenMapper,
+            self, token_mapper: data.TokenMapper,
             start: str | None = None, max_len: int = 40) -> str:
 
         g: list[int]
@@ -1002,6 +1006,8 @@ class LMTrainer():
             model = self.transformerlm.module
         else:
             model = self.transformerlm
+
+        assert isinstance(model, models.MITransformerLM)
 
         if start is None:
             idx = torch.zeros(
@@ -1014,7 +1020,8 @@ class LMTrainer():
                 idx, max_new_tokens=max_len).tolist()[0]
             # support an initial mask here
         else:
-            conllu = parse_list_of_words_with_spacy(start.split(), min_len=0)
+            conllu = data.parse_list_of_words_with_spacy(
+                start.split(), min_len=0)
 
             transform = TransformMaskHeadChild(
                 keys_for_head={"head"},

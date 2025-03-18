@@ -2,8 +2,8 @@
 Snippets taken from
 https://github.com/karpathy/nanoGPT/blob/master/model.py"""
 
-from ..utils import params
-from ..models import pe
+from .. import utils
+from . import pe
 
 import torch
 import torch.nn as nn
@@ -159,7 +159,8 @@ class MIAttention(nn.Module):
 
         # (B, M, H, S, S)
         if self.overlay_causal:
-            att = att.masked_fill(self.tril[:S, :S] == 0, float('-inf'))
+            att = att.masked_fill(
+                self.tril[:S, :S] == 0, float('-inf'))  # type: ignore
 
         # TODO: get an empty mask for all tags not occurring in the
         # mask argument; then stack all masks on dim 0 and fill masks
@@ -170,7 +171,8 @@ class MIAttention(nn.Module):
                 if tag in masks.keys() and masks[tag] is not None:
                     mask_list.append(masks[tag])    # type: ignore
                 else:
-                    mask_list.append(self.ones[:S, :S].unsqueeze(0))
+                    mask_list.append(
+                        self.ones[:S, :S].unsqueeze(0))  # type: ignore
 
             masks_stacked = torch.stack(mask_list, dim=1)
             masks_stacked = masks_stacked.unsqueeze(2)  # (B, M, 1, S, S)
@@ -243,7 +245,7 @@ TransformerDescription = tuple[LayerDescription, ...]
 
 
 @dataclass
-class MITransformerConfig(params.Params):
+class MITransformerConfig(utils.Params):
     transformer_description: TransformerDescription = ((("head", "child"), 1),)
     d_ff_factor: int = 4
     dropout_attn: float = 0.3

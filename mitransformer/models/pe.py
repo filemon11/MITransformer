@@ -28,6 +28,9 @@ class PositionalEncoding(nn.Module):
         Arguments:
             x: Tensor, shape ``[batch_size, seq_len, embedding_dim]``
         """
-        x = torch.cat((self.begin_emb, self.pe[:len-2])).requires_grad_(False)
+        x = torch.cat(
+            (
+                self.begin_emb,
+                self.pe[:len-2])).requires_grad_(False)  # type: ignore
         # do not positionally encode dummy and root
         return self.dropout(x).unsqueeze(0)

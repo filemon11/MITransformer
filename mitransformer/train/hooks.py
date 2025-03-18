@@ -1,7 +1,7 @@
 
 import torch
 import numpy as np
-import seaborn as sns
+import seaborn as sns  # type: ignore
 import matplotlib.pyplot as plt
 
 from spacy.vocab import Vocab
@@ -13,11 +13,8 @@ import os
 
 from abc import ABC, abstractmethod
 
-from ..data import (
-    CoNLLUTokenisedBatch, EssentialBatch, DataLoader,
-    TokenMapper)
-from ..train.trainer import (
-    dummy_mask_removal, merge_head_child_scores, mst, mask_to_headlist)
+from .. import data
+from . import trainer
 
 from typing import Sequence, Literal
 
@@ -66,14 +63,14 @@ class Hook(ABC):
 
     @abstractmethod
     def __call__(
-            self, input: CoNLLUTokenisedBatch | EssentialBatch,
+            self, input: data.CoNLLUTokenisedBatch | data.EssentialBatch,
             output: tuple[
                 torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
         ...
 
     def init(
-            self, dataloader: DataLoader | None = None,
-            token_mapper: TokenMapper | None = None,
+            self, dataloader: data.DataLoader | None = None,
+            token_mapper: data.TokenMapper | None = None,
             note: str | None = None) -> None:
         self.note = note
 
@@ -81,15 +78,15 @@ class Hook(ABC):
 class AttentionPlotHook(Hook):
     def __init__(
             self, directory: str, ignore_idx: int | None = None,
-            token_mapper: TokenMapper | None = None,
+            token_mapper: data.TokenMapper | None = None,
             note: str | None = None) -> None:
         super().__init__(note)
         self.directory: str = directory
         self.ignore_idx: int | None = ignore_idx
-        self.token_mapper: TokenMapper | None = token_mapper
+        self.token_mapper: data.TokenMapper | None = token_mapper
 
     def __call__(
-            self, input: CoNLLUTokenisedBatch | EssentialBatch,
+            self, input: data.CoNLLUTokenisedBatch | data.EssentialBatch,
             output: tuple[
                 torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
         for head_type, att_preds in output[1].items():
@@ -124,8 +121,8 @@ class AttentionPlotHook(Hook):
                     plt.close()
 
     def init(
-            self, dataloader: DataLoader | None = None,
-            token_mapper: TokenMapper | None = None,
+            self, dataloader: data.DataLoader | None = None,
+            token_mapper: data.TokenMapper | None = None,
             note: str | None = None) -> None:
         super().init(dataloader, token_mapper, note)
         if dataloader is not None:
@@ -137,18 +134,18 @@ class AttentionPlotHook(Hook):
 class TreePlotHook(Hook):
     def __init__(
             self, directory: str, ignore_idx: int | None = None,
-            token_mapper: TokenMapper | None = None,
+            token_mapper: data.TokenMapper | None = None,
             note: str | None = None,
             masks_setting: Literal[
                 "next", "current", "complete"] = "current") -> None:
         super().__init__(note)
         self.directory: str = directory
         self.ignore_idx: int | None = ignore_idx
-        self.token_mapper: TokenMapper | None = token_mapper
+        self.token_mapper: data.TokenMapper | None = token_mapper
         self.masks_setting = masks_setting
 
     def __call__(
-            self, input: CoNLLUTokenisedBatch | EssentialBatch,
+            self, input: data.CoNLLUTokenisedBatch | data.EssentialBatch,
             output: tuple[
                     torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
         for i, (att_mats_head, att_mats_child) in enumerate(
@@ -175,17 +172,19 @@ class TreePlotHook(Hook):
                     att_g_c = torch.concatenate(
                         (zeros, att_g_c[:-1]), dim=0)
 
-                pred_arcs = dummy_mask_removal(
-                    merge_head_child_scores(att_p_h.cpu(), att_p_c.cpu()))
-                gold_arcs = dummy_mask_removal(
-                    merge_head_child_scores(att_g_h.cpu(), att_g_c.cpu()))
+                pred_arcs = trainer.dummy_mask_removal(
+                    trainer.merge_head_child_scores(
+                        att_p_h.cpu(), att_p_c.cpu()))
+                gold_arcs = trainer.dummy_mask_removal(
+                    trainer.merge_head_child_scores(
+                        att_g_h.cpu(), att_g_c.cpu()))
 
                 pred_arcs = pred_arcs[:, labels != self.ignore_idx][
                         labels != self.ignore_idx, :]
                 gold_arcs = gold_arcs[:, labels != self.ignore_idx][
                         labels != self.ignore_idx, :]
-                pred_headlist = mst(pred_arcs)
-                gold_headlist = mask_to_headlist(gold_arcs)
+                pred_headlist = trainer.mst(pred_arcs)
+                gold_headlist = trainer.mask_to_headlist(gold_arcs)
                 pred_headlist[0] = 0
                 gold_headlist[0] = 0
 
@@ -223,8 +222,8 @@ class TreePlotHook(Hook):
                     fh.write(pdf_gold)
 
     def init(
-            self, dataloader: DataLoader | None = None,
-            token_mapper: TokenMapper | None = None,
+            self, dataloader: data.DataLoader | None = None,
+            token_mapper: data.TokenMapper | None = None,
             note: str | None = None) -> None:
         super().init(dataloader, token_mapper, note)
         if dataloader is not None:

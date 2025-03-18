@@ -15,6 +15,8 @@ The masks use boolean arrays/tensors.
 
 from torch.utils.data import Dataset
 import conllu
+from conllu.models import TokenList
+
 import numpy as np
 import numpy.typing as npt
 from mmap_ninja import RaggedMmap   # type: ignore
@@ -298,7 +300,7 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
         self.keys_for_mask_padding: dict[str, bool] = {}
 
     @staticmethod
-    def make_conlludict(tokenlists: Iterable[conllu.TokenList]) -> CoNLLUDict:
+    def make_conlludict(tokenlists: Iterable[TokenList]) -> CoNLLUDict:
         d = filldict(
             ("tokens", "heads", "space_after", "deprels"),
             (get_tokens, get_head_list, get_space_after, get_deprels),
@@ -355,7 +357,8 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
         masks: dict[str, npt.NDArray[np.bool_] | None] = dict()
         if self.transform_mask is not None:
             masks.update(
-                self.transform_mask(head_list_to_adjacency_matrix(heads)))
+                self.transform_mask(
+                    head_list_to_adjacency_matrix(heads)).items())
 
         match self.masks_setting:
             case "current":
@@ -458,7 +461,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
 
     @staticmethod
     def get_sentence(
-            tokenlist: conllu.TokenList
+            tokenlist: TokenList
             ) -> tuple[list[str], npt.NDArray[np.uint8]]:
         return get_tokens(tokenlist), get_head_list(tokenlist)
 
@@ -738,7 +741,7 @@ class MemMapWindowDataset(MemMapDataset):
 
     @staticmethod
     def get_sentence(
-            tokenlist: conllu.TokenList
+            tokenlist: TokenList
             ) -> tuple[list[str], npt.NDArray[np.uint8]]:
         return get_tokens(tokenlist, False), get_head_list(tokenlist, False)
 
@@ -770,13 +773,13 @@ class MemMapWindowDataset(MemMapDataset):
 
 def load_conllu_from_str(
         conllu_str: str, max_len: int | None = 40
-        ) -> list[conllu.TokenList]:
+        ) -> list[TokenList]:
     return [tokenlist for tokenlist in conllu.parse(conllu_str)
             if max_len is None or len(tokenlist) <= max_len]
 
 
 def get_tokens(
-        tokenlist: conllu.TokenList,
+        tokenlist: TokenList,
         add_dummy_and_root: bool = True) -> list[str]:
     tokens = [tokeniser.DUMMY, tokeniser.ROOT] if add_dummy_and_root else []
     tokens.extend(token["form"] for token in tokenlist)
@@ -785,7 +788,7 @@ def get_tokens(
 
 
 def get_head_list(
-        tokenlist: conllu.TokenList,
+        tokenlist: TokenList,
         add_dummy_and_root: bool = True) -> npt.NDArray[np.uint8]:
     heads = [0, 0] if add_dummy_and_root else []
     heads.extend(
@@ -797,7 +800,7 @@ def get_head_list(
     return np.asarray(heads, dtype=np.uint8)
 
 
-def get_deprels(tokenlist: conllu.TokenList,
+def get_deprels(tokenlist: TokenList,
                 add_dummy_and_root: bool = True) -> list[str]:
     tokens = [DUMMY_DEPREL, ROOT_DEPREL] if add_dummy_and_root else []
     tokens.extend(token["deprel"] for token in tokenlist)
@@ -805,7 +808,7 @@ def get_deprels(tokenlist: conllu.TokenList,
     return tokens
 
 
-def get_space_after(tokenlist: conllu.TokenList) -> npt.NDArray[np.bool_]:
+def get_space_after(tokenlist: TokenList) -> npt.NDArray[np.bool_]:
     spaces: list[bool] = []
 
     def token_space_after(token) -> bool:
@@ -821,7 +824,7 @@ def get_space_after(tokenlist: conllu.TokenList) -> npt.NDArray[np.bool_]:
 
 
 def head_list_to_adjacency_matrix(
-        headlist: Sequence[int] | npt.NDArray[np.uint],
+        headlist: Sequence[int] | npt.NDArray[np.int_] | npt.NDArray[np.uint],
         correct_underflow_overflow: bool = False,
         ) -> npt.NDArray[np.bool_]:
     sen_len = len(headlist)
@@ -838,13 +841,13 @@ def head_list_to_adjacency_matrix(
     return adjacenceny_matrix
 
 
-def get_adjacency_matrix(tokenlist: conllu.TokenList) -> npt.NDArray[np.bool_]:
+def get_adjacency_matrix(tokenlist: TokenList) -> npt.NDArray[np.bool_]:
     return head_list_to_adjacency_matrix(get_head_list(tokenlist))
 
 
 def apply_to_tokenlist(
-        tokenlist: conllu.TokenList,
-        funcs: tuple[Callable[[conllu.TokenList], Any], ...]
+        tokenlist: TokenList,
+        funcs: tuple[Callable[[TokenList], Any], ...]
         ) -> tuple[Any, ...]:
     return tuple(fn(tokenlist) for fn in funcs)
 
@@ -852,13 +855,13 @@ def apply_to_tokenlist(
 def load_conllu(
         file: str, max_len: int | None = 40,
         first_k: int | None = None
-        ) -> Iterator[conllu.TokenList]:
+        ) -> Iterator[TokenList]:
     data_file = open(file, "r", encoding=ENCODING)
     loaded_num = 0
     for tokenlist in conllu.parse_incr(data_file):
         if max_len is None or len(tokenlist) <= max_len:
             # Disregard contracted tokens
-            yield conllu.TokenList(
+            yield TokenList(
                 [token for token in tokenlist
                     if isinstance(token["id"], int)],
                 metadata=tokenlist.metadata,
