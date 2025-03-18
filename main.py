@@ -240,7 +240,7 @@ def main_train(
             args.unrestricted_after
         )
     # make n_embd divisible by number of heads
-    n_heads = len(args.transformer_description[0][0])
+    n_heads = len(args.layer_design * args.width)
     args.n_embd = args.n_embd // n_heads * n_heads
 
     transformer_config = MITransformerConfig.from_kwargs(
