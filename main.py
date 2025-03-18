@@ -6,8 +6,10 @@ from mitransformer import (
     Result, LMTrainer, TrainConfig)
 from mitransformer.data.dataloader import (
     get_loader)
-from mitransformer.train.metrics import MetricWriter, metric_writer, sum_and_std_metrics, minimise
-from mitransformer.models.model import TransformerDescription, description_builder, MITransformerConfig
+from mitransformer.train.metrics import (
+    MetricWriter, metric_writer, sum_and_std_metrics, minimise)
+from mitransformer.models.model import (
+    TransformerDescription, description_builder, MITransformerConfig)
 from mitransformer.utils.params import Params, dict_info, Undefined, is_undef
 from mitransformer.train.hooks import TreePlotHook, AttentionPlotHook
 
@@ -24,7 +26,8 @@ from ast import literal_eval as make_tuple
 from copy import copy
 from collections import Counter, defaultdict
 
-from mitransformer.utils.logmaker import getLogger, info, logging_config, get_timestr
+from mitransformer.utils.logmaker import (
+    getLogger, info, logging_config, get_timestr)
 
 from typing import (
     Literal, Any, Iterable, cast, Iterator, TypeVar, Generic,
@@ -81,8 +84,9 @@ def str_to_bool(string: str) -> bool:
             return False
     except ValueError:
         pass
-    raise Exception((f"argument value {string} cannot"
-                     "be parsed as a string!"))
+    raise Exception((
+        f"argument value {string} cannot"
+        "be parsed as a string!"))
 
 
 class OptNone(Generic[T]):
@@ -100,8 +104,9 @@ class OptNone(Generic[T]):
 
 
 class HyperoptSpace(Generic[T]):
-    def __init__(self, type: Callable[[Any], T],
-                 choices: Sequence[T] | None = None):
+    def __init__(
+            self, type: Callable[[Any], T],
+            choices: Sequence[T] | None = None):
         self.type = type
         self.choices = choices
 
@@ -110,8 +115,9 @@ class HyperoptSpace(Generic[T]):
         split = value.split(":")
         if len(split) == 2:
             try:
-                h_range = (self.type(split[0]),
-                           self.type(split[1]))  # type: ignore
+                h_range = (
+                    self.type(split[0]),
+                    self.type(split[1]))  # type: ignore
                 assert (isinstance(h_range[0], (int, float, complex))
                         and not isinstance(h_range[0], bool)), (
                         f"Non-numeric range detected: {h_range}")
@@ -246,15 +252,18 @@ def main_train(
         data_provider.save(os.path.join(trainer.model_dir,
                                         train_config.model_name,
                                         "data_config.json"))
+    metrics: Result
     # Training setting
     if not iterate:
         metrics = trainer.train(**data_provider.datasets)
         if args.rank is None or args.rank == 0:
             generated = []
             for _ in range(20):
-                generated.append(trainer.generate(data_provider.datasets["token_mapper"]))
-            info(args.rank, logger,
-                 f"Generated model output sample: {generated}")
+                generated.append(
+                    trainer.generate(data_provider.datasets["token_mapper"]))
+            info(
+                args.rank, logger,
+                f"Generated model output sample: {generated}")
         yield metrics  # type: ignore
 
     # Hyperopt setting
@@ -273,8 +282,9 @@ def main_train_multiple(
         args: "TrainParserArgs",
         world_size: int,
         data_provider: DataProvider | None = None
-        ) -> (tuple[MeanStdDict, MeanStdDict]
-              | tuple[MeanStdDict, MeanStdDict, MeanStdDict]):
+        ) -> (
+            tuple[MeanStdDict, MeanStdDict]
+            | tuple[MeanStdDict, MeanStdDict, MeanStdDict]):
     start = time.time()
     """Calculates the mean and standard deviation of several
     runs."""
@@ -287,8 +297,9 @@ def main_train_multiple(
 
     assert args.n_runs != 0, "--n_runs cannot be 0"
 
-    metrics_list: (list[tuple[Metric, Metric]]
-                   | list[tuple[Metric, Metric, Metric]]) = []
+    metrics_list: (
+        list[tuple[Metric, Metric]]
+        | list[tuple[Metric, Metric, Metric]]) = []
     for n_run in tqdm(range(args.n_runs), desc="Runs"):
         run_args = copy(args)
         run_args.model_name = f"{args.name}_{n_run}"
@@ -302,18 +313,23 @@ def main_train_multiple(
                 iterate=False,
                 data_provider=data_provider)).values()))  # type: ignore
 
-    means_and_stds = tuple(sum_and_std_metrics(seq)
-                           for seq in zip(*metrics_list))
+    means_and_stds = tuple(
+        sum_and_std_metrics(seq)
+        for seq in zip(*metrics_list))
 
-    info(args.rank, logger,
-         f"Performed {args.n_runs} training runs.")
-    info(args.rank, logger,
-         f"Final mean and std train: {dict_info(means_and_stds[0])}")
-    info(args.rank, logger,
-         f"Final mean and std dev: {dict_info(means_and_stds[1])}")
+    info(
+        args.rank, logger,
+        f"Performed {args.n_runs} training runs.")
+    info(
+        args.rank, logger,
+        f"Final mean and std train: {dict_info(means_and_stds[0])}")
+    info(
+        args.rank, logger,
+        f"Final mean and std dev: {dict_info(means_and_stds[1])}")
     if len(means_and_stds) > 2:
-        info(args.rank, logger,
-             f"Final mean and std test: {dict_info(means_and_stds[2])}")
+        info(
+            args.rank, logger,
+            f"Final mean and std test: {dict_info(means_and_stds[2])}")
 
     end = time.time()
     info(args.rank, logger, f"Took {end - start} seconds!")
@@ -406,6 +422,8 @@ def main_compare(
             memmaped=True,
             model_num=1)
 
+    assert data_provider is not None
+    assert "eval" in data_provider.datasets
     dataset = data_provider.datasets["eval"]
     token_mapper = data_provider.datasets["token_mapper"]
 
@@ -440,18 +458,20 @@ def main_compare(
         positions = list(range(0, probs1.shape[0]))
         diffs.extend(list(zip(diff_tensor, sen_nums, positions)))
 
-    highest = list(sorted(diffs,
-                          key=lambda x: abs(x[0]),
-                          reverse=True))[:highest_num]
+    highest = list(sorted(
+        diffs,
+        key=lambda x: abs(x[0]),
+        reverse=True))[:highest_num]
 
     assert dataset.id_hl is not None
     highest_tokens = [token_mapper.id2word[
         dataset.id_hl[x[1]][0][x[2]]] for x in highest]
     highest_tokens_count = Counter(highest_tokens)
 
-    info(args.rank, logger,
-         f"{highest_num} tokens with the highest "
-         f"difference: {highest_tokens_count}")
+    info(
+        args.rank, logger,
+        f"{highest_num} tokens with the highest "
+        f"difference: {highest_tokens_count}")
 
     info(args.rank, logger, "Tokens with window:")
 
@@ -459,9 +479,11 @@ def main_compare(
         tokens = token_mapper.decode([dataset.id_hl[c_sen_num][0]])[0]
         left = max(0, c_pos-window)
         right = min(len(tokens), c_pos+window)
-        info(args.rank, logger,
-             (f"diff={round(c_diff, 2)}: {' '.join(tokens[left:c_pos])} "
-              f"[{tokens[c_pos]}] {' '.join(tokens[c_pos+1:right])}"))
+        info(
+            args.rank, logger,
+            (
+                f"diff={round(c_diff, 2)}: {' '.join(tokens[left:c_pos])} "
+                f"[{tokens[c_pos]}] {' '.join(tokens[c_pos+1:right])}"))
 
     token_to_diffs: defaultdict[str, list[tuple[float, int, int]]]
     token_to_diffs = defaultdict(list)
@@ -477,10 +499,13 @@ def main_compare(
             tokens = token_mapper.decode([dataset.id_hl[c_sen_num][0]])[0]
             left = max(0, c_pos-window)
             right = min(len(tokens), c_pos+window)
-            info(args.rank, logger,
-                 (f"diff={round(c_diff, 2)}: "
-                  f"{' '.join(tokens[left:c_pos])[-80:]:>80} "
-                  f"[{tokens[c_pos]}] {' '.join(tokens[c_pos+1:right])[:81]}"))
+            info(
+                args.rank, logger,
+                (
+                    f"diff={round(c_diff, 2)}: "
+                    f"{' '.join(tokens[left:c_pos])[-80:]:>80} "
+                    f"[{tokens[c_pos]}] "
+                    f"{' '.join(tokens[c_pos+1:right])[:81]}"))
 
     # Mean differences
     total_tokens = [token_mapper.id2word[
@@ -505,29 +530,34 @@ def main_compare(
     mean_differences = {token: diff_sum/total_tokens_count[token]
                         for token, diff_sum in summed_differences.items()}
 
-    info(args.rank, logger,
-         "\nProbability diffs ordered by improvement contribution:\n"
-         + "\n".join(f"'{tup[0]}': {tup[1]}" for tup in sorted(
+    info(
+        args.rank, logger,
+        "\nProbability diffs ordered by improvement contribution:\n"
+        + "\n".join(f"'{tup[0]}': {tup[1]}" for tup in sorted(
             mean_differences.items(),
             key=lambda x: x[1]*total_tokens_count[x[0]],
             reverse=True)))
 
-    info(args.rank, logger,
-         "\nProbability diffs ordered by worsening contribution:\n"
-         + "\n".join(f"'{tup[0]}': {tup[1]}" for tup in sorted(
+    info(
+        args.rank, logger,
+        "\nProbability diffs ordered by worsening contribution:\n"
+        + "\n".join(f"'{tup[0]}': {tup[1]}" for tup in sorted(
             mean_differences.items(),
             key=lambda x: x[1]*total_tokens_count[x[0]],
             reverse=False)))
 
-    info(args.rank, logger,
-         f"Perplexity 1: {np.exp(np.mean(ppl1))}")
+    info(
+        args.rank, logger,
+        f"Perplexity 1: {np.exp(np.mean(ppl1))}")
 
-    info(args.rank, logger,
-         f"Perplexity 2: {np.exp(np.mean(ppl2))}")
+    info(
+        args.rank, logger,
+        f"Perplexity 2: {np.exp(np.mean(ppl2))}")
 
-    info(args.rank, logger,
-         "Change of perplexity in total: "
-         f"{np.exp(np.mean(ppl2)) - np.exp(np.mean(ppl1))}")
+    info(
+        args.rank, logger,
+        "Change of perplexity in total: "
+        f"{np.exp(np.mean(ppl2)) - np.exp(np.mean(ppl1))}")
 
 
 USE_LOG = {"learning_rate"}
@@ -541,15 +571,18 @@ def hyperopt_args_sampler(
     if isinstance(arg, list):
         assert len(arg) > 0, f"Provided an empty selection for {name}!"
         return trial.suggest_categorical(name, arg)
-    elif (isinstance(arg, tuple)
-          and len(arg) == 2
-          and isinstance(arg[0], (int, float))):
+    elif (
+            isinstance(arg, tuple)
+            and len(arg) == 2
+            and isinstance(arg[0], (int, float))):
         if isinstance(arg[0], float) and isinstance(arg[1], float):
-            return trial.suggest_float(name, arg[0], arg[1],
-                                       log=name in USE_LOG)
+            return trial.suggest_float(
+                name, arg[0], arg[1],
+                log=name in USE_LOG)
         elif isinstance(arg[0], int) and isinstance(arg[1], int):
-            return trial.suggest_int(name, arg[0], arg[1],
-                                     log=name in USE_LOG)
+            return trial.suggest_int(
+                name, arg[0], arg[1],
+                log=name in USE_LOG)
         else:
             raise Exception(
                 f"Range {arg} for arg {name} inconsistently typed!")
@@ -558,10 +591,11 @@ def hyperopt_args_sampler(
 
 
 class Objective:
-    def __init__(self, n_devices: int,
-                 args: "HyperoptParserArgs",
-                 writer: MetricWriter,
-                 pg):
+    def __init__(
+            self, n_devices: int,
+            args: "HyperoptParserArgs",
+            writer: MetricWriter,
+            pg):
         self.n_devices = n_devices
         self.args = args
         self.writer = writer
@@ -574,7 +608,8 @@ class Objective:
         # Hyperopt spaces
         try:
             self.data_provider = _load_data_provider(args, memmaped=True)
-            # Since pin_memory=True, persistent_workers=True lead to too many files
+            # Since pin_memory=True, persistent_workers=True lead
+            # to too many files
             # error when creating a lot of dataloaders, we need to construct
             # dataloaders here
             # Remove this if https://github.com/pytorch/pytorch/issues/91252
@@ -647,8 +682,9 @@ class Objective:
         return loss
 
 
-def main_hyperopt(args: "HyperoptParserArgs",
-                  world_size: int) -> None:
+def main_hyperopt(
+        args: "HyperoptParserArgs",
+        world_size: int) -> None:
     direction = "minimize" if minimise[args.optimise.lower()] else "maximize"
 
     ld = os.path.join("./runs", f"{args.name}_hyperopt")
@@ -680,14 +716,17 @@ def main_hyperopt(args: "HyperoptParserArgs",
         complete_trials = study.get_trials(
             deepcopy=False, states=[optuna.trial.TrialState.COMPLETE])
 
-        info(args.rank, logger,
-             (f"Pruned {len(pruned_trials)}, "
-              f"completed {len(complete_trials)} trials"))
+        info(
+            args.rank, logger,
+            (
+                f"Pruned {len(pruned_trials)}, "
+                f"completed {len(complete_trials)} trials"))
 
-        info(args.rank, logger,
-             f"Best trial: {study.best_trial.number}\n"
-             f"with results: {study.best_value}\n"
-             f"with params: {study.best_params}")
+        info(
+            args.rank, logger,
+            f"Best trial: {study.best_trial.number}\n"
+            f"with results: {study.best_value}\n"
+            f"with params: {study.best_params}")
 
     return None
 
@@ -706,8 +745,9 @@ def options(seq_of_items: list[tuple[str, Iterable[Any]]]
 
 def setup_group(world_size, backend: str = "gloo") -> dist.ProcessGroup | None:
     if world_size > 1:
-        info(None, logger,
-             f"Initialising process group with backend {backend}")
+        info(
+            None, logger,
+            f"Initialising process group with backend {backend}")
         pg = dist.new_group(backend=backend)
         return pg
     else:
@@ -720,8 +760,10 @@ def clean_group(world_size, pg) -> None:
 
 
 @contextmanager
-def new_pg(world_size, backend: str = "gloo") -> Iterator[dist.ProcessGroup
-                                                          | None]:
+def new_pg(
+        world_size, backend: str = "gloo") -> Iterator[
+            dist.ProcessGroup
+            | None]:
     try:
         pg = setup_group(world_size, backend)
         yield pg
@@ -731,9 +773,11 @@ def new_pg(world_size, backend: str = "gloo") -> Iterator[dist.ProcessGroup
 
 def setup_ddp(rank, world_size, backend: str = "nccl") -> bool:
     if world_size > 1:
-        info(None, logger,
-             (f"Initialising process group with backend {backend}, "
-              f"world size {world_size} and rank {rank}."))
+        info(
+            None, logger,
+            (
+                f"Initialising process group with backend {backend}, "
+                f"world size {world_size} and rank {rank}."))
         dist.init_process_group(backend, world_size=world_size, rank=rank)
         torch.cuda.set_device(torch.distributed.get_rank())
         return True
@@ -795,8 +839,9 @@ def main(args: "ParserArgs") -> None:
 
 @dataclass
 class ParserArgs(Params):
-    mode: Literal["train", "hyperopt", "dataprep", "test",
-                  "compare"]
+    mode: Literal[
+        "train", "hyperopt", "dataprep", "test",
+        "compare"]
     rank: int | None
     n_workers: int
     name: str
@@ -880,8 +925,9 @@ class HyperoptParserArgs(ParserArgs):
     block_size: int
     overlay_causal: bool
 
-    transformer_description: (TransformerDescription
-                              | list[TransformerDescription])
+    transformer_description: (
+        TransformerDescription
+        | list[TransformerDescription])
     layer_design: tuple[str, ...] | list[tuple[str, ...]]
     use_standard: bool | list[bool]
     width: int | tuple[int, int] | list[int]
@@ -899,8 +945,9 @@ class HyperoptParserArgs(ParserArgs):
     n_embd: int | tuple[int, int] | list[int]
     use_dual_fixed: bool | list[bool]
     bias: bool | list[bool]
-    pos_enc: (Literal["embedding", "sinusoidal"]
-              | list[Literal["embedding", "sinusoidal"]])
+    pos_enc: (
+        Literal["embedding", "sinusoidal"]
+        | list[Literal["embedding", "sinusoidal"]])
 
 
 @dataclass
@@ -931,9 +978,10 @@ class CompareParserArgs(ParserArgs):
 # TODO: make bool args optionally just acccept flag for True
 
 
-def parse_args() -> (TrainParserArgs | HyperoptParserArgs
-                     | DataprepParserArgs | TestParserArgs
-                     | CompareParserArgs):
+def parse_args() -> (
+        TrainParserArgs | HyperoptParserArgs
+        | DataprepParserArgs | TestParserArgs
+        | CompareParserArgs):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--rank', '--local-rank', type=OptNone(int), default=None,
@@ -983,9 +1031,10 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help='TODO')
     data_group.add_argument(
         '--vocab_size', type=OptNone(int), default=50_000,
-        help=('number of most frequent tokens to embed; all other '
-              'tokens are replaced with an UNK token;'
-              'can be None when loading existing token_mapper'))
+        help=(
+            'number of most frequent tokens to embed; all other '
+            'tokens are replaced with an UNK token;'
+            'can be None when loading existing token_mapper'))
     data_group.add_argument(
         '--first_k', type=OptNone(int), default=None,
         help='only load first k sentences of the training set')
@@ -994,12 +1043,14 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help='only load first k sentences of the eval and test sets')
     data_group.add_argument(
         '--connect_with_dummy', type=str_to_bool, default=True,
-        help=('Establish an arc to a dummy token when there is no '
-              'parent/child among the precedents?'))
+        help=(
+            'Establish an arc to a dummy token when there is no '
+            'parent/child among the precedents?'))
     data_group.add_argument(
         '--connect_with_self', type=str_to_bool, default=False,
-        help=('Establish a recursive arc to the token itself when there '
-              'is not parent/child among the precedents?'))
+        help=(
+            'Establish a recursive arc to the token itself when there '
+            'is not parent/child among the precedents?'))
     data_group.add_argument(
         '--masks_setting', type=str, choices=("complete", "current", "next"),
         default="current",
@@ -1018,28 +1069,33 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help="how to use dependency information")
     trainer_group.add_argument(
         '--batch_size', type=int, default=32,
-        help=("batch size; in case of multiple GPUs it is "
-              "chunked across the devices"))
+        help=(
+            "batch size; in case of multiple GPUs it is "
+            "chunked across the devices"))
     trainer_group.add_argument(
         '--use_steps', type=str_to_bool, default=False,
-        help=("Where the unit of evaluation are steps (i.e. batches) "
-              "instead of epochs. If true, --eval_interval "
-              "refers to number of batches processed."))
+        help=(
+            "Where the unit of evaluation are steps (i.e. batches) "
+            "instead of epochs. If true, --eval_interval "
+            "refers to number of batches processed."))
     trainer_group.add_argument(
         '--max_steps', type=OptNone(int), default=100_000,
-        help=("maximum number of steps (batches) to process "
-              "if --use_steps is set to true"))
+        help=(
+            "maximum number of steps (batches) to process "
+            "if --use_steps is set to true"))
     trainer_group.add_argument(
         '--eval_interval', type=int,
         default=1, help="frequency to perform evaluations in")
     trainer_group.add_argument(
         '--early_stop_after', type=OptNone(int), default=None,
-        help=("abort training after x evaluations without "
-              "improvement on the eval loss; if None, no early stopping"))
+        help=(
+            "abort training after x evaluations without "
+            "improvement on the eval loss; if None, no early stopping"))
     trainer_group.add_argument(
         '--early_stop_metric', type=OptNone(str), default='perplexity',
-        help=("metric to chose for early stopping if "
-              "--early_stop_after is not none"))
+        help=(
+            "metric to chose for early stopping if "
+            "--early_stop_after is not none"))
     trainer_group.add_argument(
         '--epochs', type=int, default=100,
         help="how many epochs to train for")
@@ -1048,8 +1104,9 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help="learning rate for the optimiser")
     trainer_group.add_argument(
         '--loss_alpha', type=OptNone(float), default=0.5,
-        help=("loss weight for supervised learning; 1.0 is only "
-              "language model training while 0.0 is only arc training"))
+        help=(
+            "loss weight for supervised learning; 1.0 is only "
+            "language model training while 0.0 is only arc training"))
     trainer_group.add_argument(
         '--arc_loss_weighted', type=str_to_bool, default=False,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
@@ -1062,17 +1119,19 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
     model_group.add_argument(
         '--transformer_description',
         type=OptNone(make_tuple), default=None,
-        help=("Architecture of the transformer model. Tuple of layers "
-              "where each layer is a tuple of a tuple of "
-              "head types and a width."
-              "The width is applied to every head type in the layer."
-              "If provised, overrides --layer_design, --use_standard, "
-              "--width, --depth, --unrestricted_before, --unrestricted_after"))
+        help=(
+            "Architecture of the transformer model. Tuple of layers "
+            "where each layer is a tuple of a tuple of "
+            "head types and a width."
+            "The width is applied to every head type in the layer."
+            "If provised, overrides --layer_design, --use_standard, "
+            "--width, --depth, --unrestricted_before, --unrestricted_after"))
     model_group.add_argument(
         '--layer_design',
         type=make_tuple, default=("head", "child"),
-        help=("design of the core transformer layer; tuple of head types "
-              "is overriden if --transformer_description is provided"))
+        help=(
+            "design of the core transformer layer; tuple of head types "
+            "is overriden if --transformer_description is provided"))
     model_group.add_argument(
         '--use_standard',
         type=str_to_bool, default=False,
@@ -1080,50 +1139,60 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
     model_group.add_argument(
         '--width',
         type=int, default=1,
-        help=("width of the core transformer; "
-              "is overriden if --transformer_description is provided"))
+        help=(
+            "width of the core transformer; "
+            "is overriden if --transformer_description is provided"))
     model_group.add_argument(
         '--depth',
         type=int, default=1,
-        help=("depth of the core transformer; "
-              "is overriden if --transformer_description is provided"))
+        help=(
+            "depth of the core transformer; "
+            "is overriden if --transformer_description is provided"))
     model_group.add_argument(
         '--unrestricted_before',
         type=int, default=0,
-        help=("number of unrestricted layers below the core transformer; "
-              "is overriden if --transformer_description is provided"))
+        help=(
+            "number of unrestricted layers below the core transformer; "
+            "is overriden if --transformer_description is provided"))
     model_group.add_argument(
         '--unrestricted_after',
         type=int, default=0,
-        help=("number of unrestricted layers above the core transformer; "
-              "is overriden if --transformer_description is provided"))
+        help=(
+            "number of unrestricted layers above the core transformer; "
+            "is overriden if --transformer_description is provided"))
     model_group.add_argument(
         '--d_ff_factor', type=int, default=4,
         help="hidden dimensionality of the feed-forward layers (*n_embd)")
     model_group.add_argument(
         '--dropout', type=OptNone(float), default=0.3,
-        help=("hidden dimensionality of the feed-forward layers; "
-              "can be further specified by additional dropout params"))
+        help=(
+            "hidden dimensionality of the feed-forward layers; "
+            "can be further specified by additional dropout params"))
     model_group.add_argument(
         '--dropout_attn', type=OptNone(float), default=-1,
-        help=("DEPREPCATED; dropout for the attention module; "
-              "overridden by --dropout if set to -1"))
+        help=(
+            "DEPREPCATED; dropout for the attention module; "
+            "overridden by --dropout if set to -1"))
     model_group.add_argument(
         '--dropout_resid', type=OptNone(float), default=-1,
-        help=("dropout for the residual connections; "
-              "overridden by --dropout if set to -1"))
+        help=(
+            "dropout for the residual connections; "
+            "overridden by --dropout if set to -1"))
     model_group.add_argument(
         '--dropout_ff', type=OptNone(float), default=-1,
-        help=("dropout for the feed-forward layers; "
-              "overridden by --dropout if set to -1"))
+        help=(
+            "dropout for the feed-forward layers; "
+            "overridden by --dropout if set to -1"))
     model_group.add_argument(
         '--dropout_embd', type=OptNone(float), default=-1,
-        help=("dropout for the embedding layer; "
-              "overridden by --dropout if set to -1"))
+        help=(
+            "dropout for the embedding layer; "
+            "overridden by --dropout if set to -1"))
     model_group.add_argument(
         '--dropout_lstm', type=OptNone(float), default=-1,
-        help=("dropout for the LSTM (if existant); "
-              "overridden by --dropout if set to -1"))
+        help=(
+            "dropout for the LSTM (if existant); "
+            "overridden by --dropout if set to -1"))
     model_group.add_argument(
         '--use_lstm', type=str_to_bool, default=True,
         help=("use LSTM layer"))
@@ -1135,13 +1204,15 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help="model embedding size")
     model_group.add_argument(
         '--overlay_causal', type=str_to_bool, default=True,
-        help=("whether to overlay a casual mask if providing"
-              "masks as additional inputs"))
+        help=(
+            "whether to overlay a casual mask if providing"
+            "masks as additional inputs"))
     model_group.add_argument(
         '--use_dual_fixed', type=str_to_bool, default=False,
-        help=("whether to cross-fix key and query weights of "
-              "the head and child attention heads. Only allowed "
-              "if both are present in the description with width 1"))
+        help=(
+            "whether to cross-fix key and query weights of "
+            "the head and child attention heads. Only allowed "
+            "if both are present in the description with width 1"))
     model_group.add_argument(
         '--bias', type=str_to_bool, default=False,
         help="Whether to use bias in all of the model weights")
@@ -1161,8 +1232,9 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
     hyperopt_parser.add_argument(
         '--n_warmup_steps', type=int,
         default=1,
-        help=("how many epochs to wait before pruning can "
-              "happen within a trial"))
+        help=(
+            "how many epochs to wait before pruning can "
+            "happen within a trial"))
     hyperopt_parser.add_argument(
         '--n_startup_trials', type=int,
         default=5,
@@ -1171,7 +1243,7 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         '--n_trials', type=int,
         default=25,
         help="how many trials to run")
-    
+
     # Data parser group
     data_group = hyperopt_parser.add_argument_group('data')
     data_group.add_argument(
@@ -1189,9 +1261,10 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help='TODO')
     data_group.add_argument(
         '--vocab_size', type=HyperoptSpace(OptNone(int)), default=50_000,
-        help=('number of most frequent tokens to embed; all other '
-              'tokens are replaced with an UNK token;'
-              'can be None when loading existing token_mapper'))
+        help=(
+            'number of most frequent tokens to embed; all other '
+            'tokens are replaced with an UNK token;'
+            'can be None when loading existing token_mapper'))
     data_group.add_argument(
         '--first_k', type=HyperoptSpace(OptNone(int)), default=None,
         help='only load first k sentences of the training set')
@@ -1200,12 +1273,14 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help='only load first k sentences of the eval and test sets')
     data_group.add_argument(
         '--connect_with_dummy', type=HyperoptSpace(str_to_bool), default=True,
-        help=('Establish an arc to a dummy token when there is no '
-              'parent/child among the precedents?'))
+        help=(
+            'Establish an arc to a dummy token when there is no '
+            'parent/child among the precedents?'))
     data_group.add_argument(
         '--connect_with_self', type=HyperoptSpace(str_to_bool), default=False,
-        help=('Establish a recursive arc to the token itself when there '
-              'is not parent/child among the precedents?'))
+        help=(
+            'Establish a recursive arc to the token itself when there '
+            'is not parent/child among the precedents?'))
     data_group.add_argument(
         '--masks_setting', type=HyperoptSpace(
             str, choices=("next", "complete", "current")),
@@ -1222,28 +1297,33 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help="how to use dependency information")
     hyperopt_fixed_trainer_group.add_argument(
         '--batch_size', type=int, default=32,
-        help=("batch size; in case of multiple GPUs it is"
-              "chunked across the devices"))
+        help=(
+            "batch size; in case of multiple GPUs it is"
+            "chunked across the devices"))
     hyperopt_fixed_trainer_group.add_argument(
         '--use_steps', type=str_to_bool, default=False,
-        help=("Where the unit of evaluation are steps (i.e. batches) "
-              "instead of epochs. If true, --eval_interval "
-              "and n_warmup_steps refer to number of batches processed."))
+        help=(
+            "Where the unit of evaluation are steps (i.e. batches) "
+            "instead of epochs. If true, --eval_interval "
+            "and n_warmup_steps refer to number of batches processed."))
     hyperopt_fixed_trainer_group.add_argument(
         '--max_steps', type=OptNone(int), default=100_000,
-        help=("maximum number of steps (batches) to process "
-              "if --use_steps is set to true"))
+        help=(
+            "maximum number of steps (batches) to process "
+            "if --use_steps is set to true"))
     hyperopt_fixed_trainer_group.add_argument(
         '--eval_interval', type=int,
         default=1, help="frequency to perform evaluations in")
     hyperopt_fixed_trainer_group.add_argument(
         '--early_stop_after', type=OptNone(int), default=None,
-        help=("abort training after x evaluations without"
-              "improvement on the eval loss"))
+        help=(
+            "abort training after x evaluations without"
+            "improvement on the eval loss"))
     hyperopt_fixed_trainer_group.add_argument(
         '--early_stop_metric', type=str, default='perplexity',
-        help=("metric to chose for early stopping if "
-              "--early_stop_after is not none"))
+        help=(
+            "metric to chose for early stopping if "
+            "--early_stop_after is not none"))
     hyperopt_fixed_trainer_group.add_argument(
         '--epochs', type=int, default=100,
         help="how many epochs to train for")
@@ -1256,8 +1336,9 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help="learning rate for the optimiser")
     hyperopt_flexible_trainer_group.add_argument(
         '--loss_alpha', type=HyperoptSpace(float), default=0.5,
-        help=("loss weight for supervised learning; 1.0 is only"
-              "language model training while 0.0 is only arc training"))
+        help=(
+            "loss weight for supervised learning; 1.0 is only"
+            "language model training while 0.0 is only arc training"))
     hyperopt_flexible_trainer_group.add_argument(
         '--arc_loss_weighted', type=HyperoptSpace(str_to_bool), default=False,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
@@ -1273,8 +1354,9 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help="maximum sequence length of the model")
     hyperopt_fixed_model_group.add_argument(
         '--overlay_causal', type=str_to_bool, default=True,
-        help=("whether to overlay a casual mask if providing"
-              "masks as additional inputs"))
+        help=(
+            "whether to overlay a casual mask if providing"
+            "masks as additional inputs"))
 
     # # # Hyperopt Flexible Model parser group
     hyperopt_flexible_model_group = hyperopt_parser.add_argument_group(
@@ -1283,15 +1365,17 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         '--transformer_description',
         type=HyperoptSpace(OptNone(make_tuple)),
         default=((('head', 'child'), 1),),
-        help=("Architecture of the transformer model. Tuple of layers "
-              "where each layer is a tuple of a tuple of "
-              "head types and a width."
-              "The width is applied to every head type in the layer."))
+        help=(
+            "Architecture of the transformer model. Tuple of layers "
+            "where each layer is a tuple of a tuple of "
+            "head types and a width."
+            "The width is applied to every head type in the layer."))
     hyperopt_flexible_model_group.add_argument(
         '--layer_design',
         type=HyperoptSpace(make_tuple), default=("head", "child"),
-        help=("design of the core transformer layer; tuple of head types "
-              "is overriden if --transformer_description is provided"))
+        help=(
+            "design of the core transformer layer; tuple of head types "
+            "is overriden if --transformer_description is provided"))
     hyperopt_flexible_model_group.add_argument(
         '--use_standard',
         type=HyperoptSpace(str_to_bool), default=False,
@@ -1299,52 +1383,62 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
     hyperopt_flexible_model_group.add_argument(
         '--width',
         type=HyperoptSpace(int), default=1,
-        help=("width of the core transformer; "
-              "is overriden if --transformer_description is provided"))
+        help=(
+            "width of the core transformer; "
+            "is overriden if --transformer_description is provided"))
     hyperopt_flexible_model_group.add_argument(
         '--depth',
         type=HyperoptSpace(int), default=1,
-        help=("depth of the core transformer; "
-              "is overriden if --transformer_description is provided"))
+        help=(
+            "depth of the core transformer; "
+            "is overriden if --transformer_description is provided"))
     hyperopt_flexible_model_group.add_argument(
         '--unrestricted_before',
         type=HyperoptSpace(int), default=0,
-        help=("number of unrestricted layers below the core transformer; "
-              "is overriden if --transformer_description is provided"))
+        help=(
+            "number of unrestricted layers below the core transformer; "
+            "is overriden if --transformer_description is provided"))
     hyperopt_flexible_model_group.add_argument(
         '--unrestricted_after',
         type=HyperoptSpace(int), default=0,
-        help=("number of unrestricted layers above the core transformer; "
-              "is overriden if --transformer_description is provided"))
+        help=(
+            "number of unrestricted layers above the core transformer; "
+            "is overriden if --transformer_description is provided"))
     hyperopt_flexible_model_group.add_argument(
         '--d_ff_factor', type=HyperoptSpace(int), default=4,
         help="hidden dimensionality of the feed-forward layers (*n_embd)")
     hyperopt_flexible_model_group.add_argument(
         '--dropout', type=HyperoptSpace(OptNone(float)), default=0.3,
-        help=("hidden dimensionality of the feed-forward layers; "
-              "if provided, fixes the search for all specific dropouts;"
-              "if provided, specific dropouts establish individual "
-              " search spaces"))
+        help=(
+            "hidden dimensionality of the feed-forward layers; "
+            "if provided, fixes the search for all specific dropouts;"
+            "if provided, specific dropouts establish individual "
+            " search spaces"))
     hyperopt_flexible_model_group.add_argument(
         '--dropout_attn', type=HyperoptSpace(OptNone(float)), default=-1,
-        help=("dropout for the attention module; "
-              "overriden by --dropout if specified"))
+        help=(
+            "dropout for the attention module; "
+            "overriden by --dropout if specified"))
     hyperopt_flexible_model_group.add_argument(
         '--dropout_resid', type=HyperoptSpace(OptNone(float)), default=-1,
-        help=("dropout for the residual connections; "
-              "overriden by --dropout if specified"))
+        help=(
+            "dropout for the residual connections; "
+            "overriden by --dropout if specified"))
     hyperopt_flexible_model_group.add_argument(
         '--dropout_ff', type=HyperoptSpace(OptNone(float)), default=-1,
-        help=("dropout for the feed-forward layers; "
-              "overriden by --dropout if specified"))
+        help=(
+            "dropout for the feed-forward layers; "
+            "overriden by --dropout if specified"))
     hyperopt_flexible_model_group.add_argument(
         '--dropout_embd', type=HyperoptSpace(OptNone(float)), default=-1,
-        help=("dropout for the embedding layer; "
-              "overriden by --dropout if specified"))
+        help=(
+            "dropout for the embedding layer; "
+            "overriden by --dropout if specified"))
     hyperopt_flexible_model_group.add_argument(
         '--dropout_lstm', type=HyperoptSpace(OptNone(float)), default=-1,
-        help=("dropout for the LSTM (if existant); "
-              "overriden by --dropout if specified"))
+        help=(
+            "dropout for the LSTM (if existant); "
+            "overriden by --dropout if specified"))
     hyperopt_flexible_model_group.add_argument(
         '--use_lstm', type=HyperoptSpace(str_to_bool), default=True,
         help=("use LSTM layer"))
@@ -1353,9 +1447,10 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help="model embedding size")
     hyperopt_flexible_model_group.add_argument(
         '--use_dual_fixed', type=HyperoptSpace(str_to_bool), default=False,
-        help=("whether to cross-fix key and query weights of "
-              "the head and child attention heads. Only allowed "
-              "if both are present in the description with width 1"))
+        help=(
+            "whether to cross-fix key and query weights of "
+            "the head and child attention heads. Only allowed "
+            "if both are present in the description with width 1"))
     hyperopt_flexible_model_group.add_argument(
         '--bias', type=HyperoptSpace(str_to_bool), default=False,
         help="Whether to use bias in all of the model weights")
@@ -1385,9 +1480,10 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help='TODO')
     data_group.add_argument(
         '--vocab_size', type=OptNone(int), default=50_000,
-        help=('number of most frequent tokens to embed; all other '
-              'tokens are replaced with an UNK token;'
-              'can be None when loading existing token_mapper'))
+        help=(
+            'number of most frequent tokens to embed; all other '
+            'tokens are replaced with an UNK token;'
+            'can be None when loading existing token_mapper'))
     data_group.add_argument(
         '--first_k', type=OptNone(int), default=None,
         help='only load first k sentences of the training set')
@@ -1396,12 +1492,14 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help='only load first k sentences of the eval and test sets')
     data_group.add_argument(
         '--connect_with_dummy', type=str_to_bool, default=True,
-        help=('Establish an arc to a dummy token when there is no '
-              'parent/child among the precedents?'))
+        help=(
+            'Establish an arc to a dummy token when there is no '
+            'parent/child among the precedents?'))
     data_group.add_argument(
         '--connect_with_self', type=str_to_bool, default=False,
-        help=('Establish a recursive arc to the token itself when there '
-              'is not parent/child among the precedents?'))
+        help=(
+            'Establish a recursive arc to the token itself when there '
+            'is not parent/child among the precedents?'))
     data_group.add_argument(
         '--masks_setting', type=str, choices=("complete", "current", "next"),
         default="current",
@@ -1427,9 +1525,10 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help='TODO')
     data_group.add_argument(
         '--vocab_size', type=OptNone(int), default=Undefined,
-        help=('number of most frequent tokens to embed; all other '
-              'tokens are replaced with an UNK token;'
-              'can be None when loading existing token_mapper'))
+        help=(
+            'number of most frequent tokens to embed; all other '
+            'tokens are replaced with an UNK token;'
+            'can be None when loading existing token_mapper'))
     data_group.add_argument(
         '--first_k', type=OptNone(int), default=Undefined,
         help='only load first k sentences of the training set')
@@ -1438,12 +1537,14 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help='only load first k sentences of the eval and test sets')
     data_group.add_argument(
         '--connect_with_dummy', type=str_to_bool, default=Undefined,
-        help=('Establish an arc to a dummy token when there is no '
-              'parent/child among the precedents?'))
+        help=(
+            'Establish an arc to a dummy token when there is no '
+            'parent/child among the precedents?'))
     data_group.add_argument(
         '--connect_with_self', type=str_to_bool, default=Undefined,
-        help=('Establish a recursive arc to the token itself when there '
-              'is not parent/child among the precedents?'))
+        help=(
+            'Establish a recursive arc to the token itself when there '
+            'is not parent/child among the precedents?'))
     data_group.add_argument(
         '--masks_setting', type=str, choices=("complete", "current", "next"),
         default=Undefined,
@@ -1462,12 +1563,14 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help="how to use dependency information")
     trainer_group.add_argument(
         '--batch_size', type=int, default=Undefined,
-        help=("batch size; in case of multiple GPUs it is "
-              "chunked across the devices"))
+        help=(
+            "batch size; in case of multiple GPUs it is "
+            "chunked across the devices"))
     trainer_group.add_argument(
         '--loss_alpha', type=OptNone(float), default=Undefined,
-        help=("loss weight for supervised learning; 1.0 is only "
-              "language model training while 0.0 is only arc training"))
+        help=(
+            "loss weight for supervised learning; 1.0 is only "
+            "language model training while 0.0 is only arc training"))
     trainer_group.add_argument(
         '--arc_loss_weighted', type=str_to_bool, default=Undefined,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
@@ -1494,8 +1597,9 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
         help="name of model 2")
     compare_parser.add_argument(
         '--batch_size', type=int, default=32,
-        help=("batch size; in case of multiple GPUs it is "
-              "chunked across the devices"))
+        help=(
+            "batch size; in case of multiple GPUs it is "
+            "chunked across the devices"))
 
     # # # Data parser group
     data_group = compare_parser.add_argument_group('data')
@@ -1517,19 +1621,21 @@ def parse_args() -> (TrainParserArgs | HyperoptParserArgs
             return CompareParserArgs(**vars(args))
 
 
-def args_logic(args: (TrainParserArgs | HyperoptParserArgs
-                      | DataprepParserArgs | TestParserArgs
-                      | CompareParserArgs)
-               ) -> None:
+def args_logic(args: (
+        TrainParserArgs | HyperoptParserArgs
+        | DataprepParserArgs | TestParserArgs
+        | CompareParserArgs)
+        ) -> None:
     seed_everything(args.seed)
     args.device = make_device_str(args.device)
     if isinstance(args, TrainParserArgs):
         # parse transformer description
 
         # override dropout that was not set specifically
-        for specific_dropout in ("dropout_attn", "dropout_resid",
-                                 "dropout_ff", "dropout_embd",
-                                 "dropout_lstm"):
+        for specific_dropout in (
+                "dropout_attn", "dropout_resid",
+                "dropout_ff", "dropout_embd",
+                "dropout_lstm"):
             if getattr(args, specific_dropout) == -1:
                 setattr(args, specific_dropout, args.dropout)
 
@@ -1545,9 +1651,10 @@ def args_logic(args: (TrainParserArgs | HyperoptParserArgs
 
 
 if __name__ == "__main__":
-    args: (TrainParserArgs | HyperoptParserArgs
-           | DataprepParserArgs | TestParserArgs
-           | CompareParserArgs)
+    args: (
+        TrainParserArgs | HyperoptParserArgs
+        | DataprepParserArgs | TestParserArgs
+        | CompareParserArgs)
     args = parse_args()
     logging_config(logname=args.name)
     # logging_config(

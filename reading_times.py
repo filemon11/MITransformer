@@ -7,10 +7,12 @@ import pandas as pd
 import wordfreq     # type: ignore
 import nltk  # type: ignore
 from mitransformer import LMTrainer
-from mitransformer.data.dataset import CoNLLUDataset, TransformMaskHeadChild
+from mitransformer.data.dataset import TransformMaskHeadChild
 from mitransformer.train.trainer import inverse_sigmoid
 from mitransformer.data import (
-    parse_list_of_words_with_spacy, load_natural_stories,
+    CoNLLUDataset,
+    parse_list_of_words_with_spacy,
+    load_natural_stories,
     TokenMapper)
 
 import torch
@@ -58,21 +60,23 @@ BATCH_SIZE = 8
 TAGSET = None  # "universal"  # None
 
 if TAGSET is None:
-    CONTENT_POS = {"FW", "MD", "NN", "NNS", "NNP",
-                   "NNPS", "VB", "VBD", "VBG", "VBN",
-                   "VBP", "VBZ", "JJ", "JJR", "JJS"}
+    CONTENT_POS = {
+        "FW", "MD", "NN", "NNS", "NNP",
+        "NNPS", "VB", "VBD", "VBG", "VBN",
+        "VBP", "VBZ", "JJ", "JJR", "JJS"}
     PUNCTUATION = {"''", "(", "SYM", "POS"}
-    MERGE_MAPPING = {"JJS": "JJ", "JJR": "JJ",
-                     "PRP$": "PRP",
-                     "WP$": "PRP", "WP": "PRP", "WRB": "RB", "WDT": "DT",
-                     "VBD": "VB", "VBG": "VB", "VBN": "VB",
-                     "VBP": "VB", "VBZ": "VB",
-                     "PDT": "DT",
-                     "RBR": "RB", "RBS": "RB",
-                     "NNS": "NN", "NNPS": "NN", "NNP": "NN",
-                     "PRP$": "PRP",
-                     "UH": "RP",
-                     "SYM": "NN"}
+    MERGE_MAPPING = {
+        "JJS": "JJ", "JJR": "JJ",
+        "PRP$": "PRP",
+        "WP$": "PRP", "WP": "PRP", "WRB": "RB", "WDT": "DT",
+        "VBD": "VB", "VBG": "VB", "VBN": "VB",
+        "VBP": "VB", "VBZ": "VB",
+        "PDT": "DT",
+        "RBR": "RB", "RBS": "RB",
+        "NNS": "NN", "NNPS": "NN", "NNP": "NN",
+        "PRP$": "PRP",
+        "UH": "RP",
+        "SYM": "NN"}
     # in natural stories SYM is assigned e.g. to thirty-two in 1632
 
 else:
@@ -95,7 +99,8 @@ DEPREL_MERGE_MAPPING = {
     "advmod": "npreddep", "npadvmod": "npreddep",
     "agent": "npreddep", "relcl": "npreddep", "neg": "npreddep",
     "vocative": "spcldep", "discourse": "spcldep", "expl": "spcldep",
-    "aux": "spcldep", "auxpass": "spcldep", "cop": "spcldep", "punct": "spcldep",
+    "aux": "spcldep", "auxpass": "spcldep", "cop": "spcldep",
+    "punct": "spcldep",
     "mark": "spcldep",
     "prt": "spcldep",
     "compound": "comp", "name": "comp",
@@ -107,7 +112,6 @@ DEPREL_MERGE_MAPPING = {
     "list": "loose", "dislocated": "loose", "parataxis": "loose",
     "remnant": "loose", "reparandum": "loose",
     "root": "other", "dep": "other", "intj": "other", "quantmod": "other"
-    
 }
 
 
@@ -129,9 +133,10 @@ def get_frequency(token, language: str = LANG):
     return wordfreq.zipf_frequency(token, language)
 
 
-def add_frequency(input_file, output_file, language: str = LANG,
-                  token_col: str = TOKEN_COL,
-                  logfreq_col: str = LOGFREQ_COL) -> None:
+def add_frequency(
+        input_file, output_file, language: str = LANG,
+        token_col: str = TOKEN_COL,
+        logfreq_col: str = LOGFREQ_COL) -> None:
     df = pd.read_csv(input_file)
     df[logfreq_col] = df.apply(
             lambda df: get_frequency(df[token_col], language), axis=1)
@@ -147,12 +152,13 @@ def add_word_length(input_file, output_file,
     df.to_csv(output_file, index=False)
 
 
-def tsv_to_csv(input_file: str, output_file: str,
-               token_col: str = TOKEN_COL,
-               text_id_col: str = TEXT_ID_COL,
-               wnum_col: str = WNUM_COL,
-               token_mapper_dir: str | None = None
-               ) -> None:
+def tsv_to_csv(
+        input_file: str, output_file: str,
+        token_col: str = TOKEN_COL,
+        text_id_col: str = TEXT_ID_COL,
+        wnum_col: str = WNUM_COL,
+        token_mapper_dir: str | None = None
+        ) -> None:
     tokens, text_ids, wnums = load_natural_stories(
         input_file, token_mapper_dir=token_mapper_dir)
     # making lowercase makes no difference
@@ -168,8 +174,9 @@ def generate_probs(
         trainer: LMTrainer,
         dataset: CoNLLUDataset,
         untokenise: bool = False,
-        surprisal: bool = False) -> tuple[torch.Tensor, npt.NDArray[np.int_],
-                                          dict[str, list[torch.Tensor]]]:
+        surprisal: bool = False) -> tuple[
+            torch.Tensor, npt.NDArray[np.int_],
+            dict[str, list[torch.Tensor]]]:
     """WARNING: untested"""
 
     pred_probs, attention = trainer.predict(
@@ -290,8 +297,11 @@ def get_content_word_cost(
 
     # cw_intermediate[mask_gov[:, 0]] = 1  # for dummy set 1
     # cw_intermediate[mask_gov[:, 1]] = 1  # for root set 1
-    cost = cw_intermediate + content_word_mask.astype(int)  # new discourse referents
-    cost[~content_word_mask] = 0  # integration and instantiation cost for function words is 0
+
+    # new discourse referents
+    cost = cw_intermediate + content_word_mask.astype(int)
+    cost[~content_word_mask] = 0  # integration and instantiation
+    # cost for function words is 0
     return cost
 
 
@@ -351,6 +361,8 @@ def generate_first_dep_distance(
         sentence = dataset[i]
         # assumes that governor and child mask are called head and child
         # these are already triangulated
+        assert sentence["masks"]["head"] is not None
+        assert sentence["masks"]["child"] is not None
         mask_gov = sentence["masks"]["head"].copy()
         mask_dep = sentence["masks"]["child"].copy()
 
@@ -360,10 +372,10 @@ def generate_first_dep_distance(
         #             elements_in:elements_in+mask_gov.shape[0]-2],
         #         CONTENT_POS,
         #         dummies_present=False)
-        # 
+        #
         #     mask_gov[:, 2:][:, ~content_word_mask] = False
         #     mask_dep[:, 2:][:, ~content_word_mask] = False
-        # 
+        #
         # assert mask_gov is not None and mask_dep is not None
 
         mask_dep[:, 1] = 0
@@ -402,7 +414,7 @@ def generate_first_dep_distance(
         # which may connect over long distances
         cost_list: list[int] = cost_array.tolist()
         new_cost_list: list[int] = []
-        current_cost: float | None = None
+        current_cost: int | None = None
         found_non_punct: bool = False
         for space_after_tok, pos, new_cost in zip(
                 space_after, pos_tags, cost_list):
@@ -440,10 +452,12 @@ def generate_fdd_deprel(
         sentence = dataset[i]
         # assumes that governor and child mask are called head and child
         # these are already triangulated
+        assert sentence["masks"]["head"] is not None
+        assert sentence["masks"]["child"] is not None
         mask_gov = sentence["masks"]["head"].copy()
         mask_dep = sentence["masks"]["child"].copy()
 
-        #if only_content_words:
+        # if only_content_words:
         #    content_word_mask = get_content_word_mask_by_POS_tags(
         #        pos_tags[
         #            elements_in:elements_in+mask_gov.shape[0]-2],
@@ -867,7 +881,8 @@ def generate_integration_costs(
         #         if delete:
         #             indices[j, 0] = 1
         #         else:
-        #             indices[j, 0] = 5  # -= 1  # skip over root node for distance
+        #             indices[j, 0] = 5  # -= 1
+        #             # skip over root node for distance
         #
         # # add cost dependent on intermediate nodes without left governor
         # extra_cost = np.array([0]*len(heads))
@@ -924,8 +939,9 @@ def generate_head_distance(
         mask_gov[:, 0] = 0
         mask_dep[:, 0] = 0      # no cost if no children
         mask = mask_gov + mask_dep.T
-        mask[np.arange(mask.shape[0]),
-             np.arange(mask.shape[0])] = mask_gov[:, 1]
+        mask[
+            np.arange(mask.shape[0]),
+            np.arange(mask.shape[0])] = mask_gov[:, 1]
         mask[:, 1] = 0
 
         # restrict this to new content words OR IDEA: do not add if
@@ -1056,24 +1072,25 @@ def prob_to_surprisal(
         yield -math.log(prob)
 
 
-def add_surprisal(input_file: str, output_file: str,
-                  model_dir: str, token_mapper_dir: str,
-                  token_col: str = TOKEN_COL,
-                  surprisal_col: str = SURPRISAL_COL,
-                  word_position_col: str = WORD_POSITION_COL,
-                  integration_cost_col: str = INTEGRATION_COST_COL,
-                  pos_tag_col: str = POS_TAG_COL,
-                  deprel_col: str = DEPREL_COL,
-                  fdd_col: str = FDD_COL,
-                  fddc_col: str = FDDC_COL,
-                  fddw_col: str = FDDW_COL,
-                  fdd_deprels_col: str = FDD_DEPRELS_COL,
-                  ldds_col: str = LDDS_COL,
-                  ldc_col: str = LDC_COL,
-                  device: str = DEVICE,
-                  batch_size: int = BATCH_SIZE,
-                  masks_setting: Literal[
-                      "complete", "current", "next"] = "current") -> None:
+def add_surprisal(
+        input_file: str, output_file: str,
+        model_dir: str, token_mapper_dir: str,
+        token_col: str = TOKEN_COL,
+        surprisal_col: str = SURPRISAL_COL,
+        word_position_col: str = WORD_POSITION_COL,
+        integration_cost_col: str = INTEGRATION_COST_COL,
+        pos_tag_col: str = POS_TAG_COL,
+        deprel_col: str = DEPREL_COL,
+        fdd_col: str = FDD_COL,
+        fddc_col: str = FDDC_COL,
+        fddw_col: str = FDDW_COL,
+        fdd_deprels_col: str = FDD_DEPRELS_COL,
+        ldds_col: str = LDDS_COL,
+        ldc_col: str = LDC_COL,
+        device: str = DEVICE,
+        batch_size: int = BATCH_SIZE,
+        masks_setting: Literal[
+            "complete", "current", "next"] = "current") -> None:
     df = pd.read_csv(input_file)
     words = df[token_col]
     conllu = parse_list_of_words_with_spacy(words, min_len=0)
@@ -1089,11 +1106,12 @@ def add_surprisal(input_file: str, output_file: str,
     token_mapper: TokenMapper = TokenMapper.load(token_mapper_dir)
     dataset.map_to_ids(token_mapper)
 
-    trainer = LMTrainer.load(model_dir,
-                             batch_size=batch_size,
-                             device=device,
-                             use_ddp=False,
-                             world_size=1)
+    trainer = LMTrainer.load(
+        model_dir,
+        batch_size=batch_size,
+        device=device,
+        use_ddp=False,
+        world_size=1)
     surprisal, indices, attention = generate_probs(
         trainer, dataset,
         untokenise=True, surprisal=True)
@@ -1105,14 +1123,15 @@ def add_surprisal(input_file: str, output_file: str,
     integration_costs = generate_head_distance(
         dataset, pos_tag_list, untokenise=True)
 
-    fdd = generate_first_dep_distance(dataset, pos_tag_list, untokenise=True,
-                                      only_content_words=True)
+    fdd = generate_first_dep_distance(
+        dataset, pos_tag_list, untokenise=True,
+        only_content_words=True)
     fddc = generate_fddc(
         dataset, attention, pos_tag_list, untokenise=True).astype(int)
     fddw = generate_fddw(
         dataset, attention, pos_tag_list, untokenise=True)
     deprels = generate_deprels(dataset, pos_tag_list, untokenise=True)
-    
+
     deprels_raw = generate_deprels(dataset, pos_tag_list, untokenise=False)
     fdd_deprels = generate_fdd_deprel(
         dataset, pos_tag_list, deprels_raw,
@@ -1164,21 +1183,24 @@ def process_tsv(
         masks_setting: Literal[
             "current", "next", "complete"] = "current"
         ) -> None:
-    tsv_to_csv(input_file, output_file,
-               token_col, text_id_col,
-               wnum_col, None if raw else token_mapper_dir)
-    add_frequency(output_file, output_file,
-                  language, token_col, logfreq_col)
+    tsv_to_csv(
+        input_file, output_file,
+        token_col, text_id_col,
+        wnum_col, None if raw else token_mapper_dir)
+    add_frequency(
+        output_file, output_file,
+        language, token_col, logfreq_col)
     add_word_length(output_file, output_file,
                     token_col, wlen_col)
-    add_surprisal(output_file, output_file, model_dir,
-                  token_mapper_dir, token_col,
-                  surprisal_col, word_position_col,
-                  integration_cost_col, pos_tag_col,
-                  deprel_col, fdd_col, fddc_col, fddw_col,
-                  fdd_deprels_col,
-                  ldds_col, ldc_col,
-                  device, batch_size, masks_setting=masks_setting)
+    add_surprisal(
+        output_file, output_file, model_dir,
+        token_mapper_dir, token_col,
+        surprisal_col, word_position_col,
+        integration_cost_col, pos_tag_col,
+        deprel_col, fdd_col, fddc_col, fddw_col,
+        fdd_deprels_col,
+        ldds_col, ldc_col,
+        device, batch_size, masks_setting=masks_setting)
 
 
 if __name__ == "__main__":

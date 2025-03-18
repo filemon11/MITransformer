@@ -251,7 +251,7 @@ class Params():
 
 
 class EnhancedJSONEncoder(json.JSONEncoder):
-    def default(self, o: DataclassInstance):
+    def default(self, o: "DataclassInstance"):
         if dataclasses.is_dataclass(o):
             return dataclasses.asdict(o)
         return super().default(o)
