@@ -125,23 +125,25 @@ class TransformMaskHeadChild(MaskTransform):
             tril_head = np.tril(head, -1)
             length = head.shape[0]
             set_true = ~tril_head.any(1)
-            head[np.arange(0, length),
-                 np.arange(0, length)] = np.logical_or(
-                     set_true,
-                     head.diagonal(
-                         axis1=-1,
-                         axis2=-2
-                     ))
+            head[
+                np.arange(0, length),
+                np.arange(0, length)] = np.logical_or(
+                    set_true,
+                    head.diagonal(
+                        axis1=-1,
+                        axis2=-2
+                    ))
             tril_child = np.tril(child, -1)
             length = head.shape[0]
             set_true = ~tril_child.any(1)
-            child[np.arange(0, length),
-                  np.arange(0, length)] = np.logical_or(
-                      set_true,
-                      child.diagonal(
-                          axis1=-1,
-                          axis2=-2
-                      ))
+            child[
+                np.arange(0, length),
+                np.arange(0, length)] = np.logical_or(
+                    set_true,
+                    child.diagonal(
+                        axis1=-1,
+                        axis2=-2
+                    ))
 
         if self.triangulate is not None:
             head = np.tril(head, self.triangulate)

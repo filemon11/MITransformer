@@ -969,7 +969,7 @@ class LMTrainer():
         self.transformerlm.eval()
         with torch.no_grad():
             # eval loop: no backprop on this data, to avoid storing
-            # all intermediatte variable
+            # all intermediate variable
             logits: torch.Tensor
             arc_scores: dict[str, list[torch.Tensor]]
             for batch in tqdm(loader, desc="Batches"):
