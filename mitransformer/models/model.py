@@ -45,7 +45,10 @@ class BatchInput(TypedDict):
 
 
 class FeedForward(nn.Module):
-    def __init__(self, n_embd, d_ff_factor, dropout, bias: bool = True):
+    def __init__(
+            self, n_embd: int,
+            d_ff_factor: int, dropout: float,
+            bias: bool = True):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, d_ff_factor*n_embd, bias=bias),
@@ -59,7 +62,7 @@ class FeedForward(nn.Module):
 
 
 class DualFixedLinear(nn.Module):
-    def __init__(self, in_dim, out_dim, bias: bool = False):
+    def __init__(self, in_dim: int, out_dim: int, bias: bool = False):
         super().__init__()
         # TODO: make possible to use when having other keys
         # => then head, child must be first pair
@@ -69,7 +72,7 @@ class DualFixedLinear(nn.Module):
         self.w_qkv = nn.Linear(in_dim, 2 * out_dim // 3, bias=bias)
         # -> 2*(M * H/2 * (E/3)*2)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         # x : [B, S, E]
         # -> B x (M/2 * H * E/3)
         qk, v = self.w_qkv(x).chunk(2, dim=-1)
@@ -88,9 +91,9 @@ class MIAttention(nn.Module):
     # NOTE: This layer design only works for descriptions with
     # multihead-attention modules of the same size
     def __init__(
-            self, n_embd, layer_description: LayerDescription,
-            block_size, attn_dropout,
-            resid_dropout, overlay_causal: bool = False,
+            self, n_embd: int, layer_description: LayerDescription,
+            block_size: int, attn_dropout: float,
+            resid_dropout: float, overlay_causal: bool = False,
             use_dual_fixed: bool = False, bias: bool = False):
         # n_embd: embedding dimensionType[DependencyMultiHeadAttention]
         # n_heads : the number of heads we'd like to use
@@ -209,9 +212,10 @@ class MILayer(nn.Module):
     # multihead-attention modules of the same size
 
     def __init__(
-            self, n_embd, layer_description: LayerDescription,
-            d_ff_factor, block_size, attn_dropout, resid_dropout,
-            dropout_ff, overlay_causal: bool = False,
+            self, n_embd: int, layer_description: LayerDescription,
+            d_ff_factor: int, block_size: int, attn_dropout: float,
+            resid_dropout: float,
+            dropout_ff: float, overlay_causal: bool = False,
             use_dual_fixed: bool = False, bias: bool = False):
         # n_embd: embedding dimensionType[DependencyMultiHeadAttention]
         # n_heads : the number of heads we'd like to use
@@ -278,7 +282,6 @@ class MITransformer(nn.Module):
             config.overlay_causal, config.use_dual_fixed,
             config.bias)
             for layer_description in transformer_description])
-
         self.block_size = config.block_size
 
         self.vocab_size = config.vocab_size
@@ -312,9 +315,10 @@ class MITransformer(nn.Module):
         if config.use_lstm:
             self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
             self.lstm_dropout = nn.Dropout(config.dropout_lstm)
+            # self.ln = nn.LayerNorm(n_embd)
             # TODO separate dropout for LSTM
 
-    def _init_weights(self, module):
+    def _init_weights(self, module: nn.Module):
         if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if module.bias is not None:
@@ -351,6 +355,7 @@ class MITransformer(nn.Module):
         if self.lstm is not None:
             x = self.lstm(x)[0]
             x = self.lstm_dropout(x)
+            # x = self.ln(x)
 
         scores = []
         for layer in self.layers:
