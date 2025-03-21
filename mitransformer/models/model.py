@@ -315,7 +315,7 @@ class MITransformer(nn.Module):
         if config.use_lstm:
             self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
             self.lstm_dropout = nn.Dropout(config.dropout_lstm)
-            # self.ln = nn.LayerNorm(n_embd)
+            self.ln = nn.LayerNorm(n_embd)
             # TODO separate dropout for LSTM
 
     def _init_weights(self, module: nn.Module):
@@ -355,7 +355,7 @@ class MITransformer(nn.Module):
         if self.lstm is not None:
             x = self.lstm(x)[0]
             x = self.lstm_dropout(x)
-            # x = self.ln(x)
+            x = self.ln(x)
 
         scores = []
         for layer in self.layers:
