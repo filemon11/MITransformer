@@ -363,14 +363,15 @@ class LMTrainer():
         S = shape[seq1_dim]
 
         # Calculation if unpadded (no ignore mask)
+        # assumes that all sentences have same length
         total_len = B * S
-        factor = int((S+1) / 2 * M)
+        factor = int((S + 1) / 2 * M)
         num_scores = total_len * factor
 
         if to_ignore_mask is not None:
             # assumes lens are the same for each M
             lens = (~to_ignore_mask).select(
-                seq2_dim, 0).select(masks_dim, 0).sum(seq1_dim-1).float()
+                seq2_dim, 0).select(masks_dim, 0).float().sum(seq1_dim-1)
             # TODO: make it possbile to give lens as parameter
             # since we compute them already in normal loss calculation
             # and compute the to_ignore_mask here using broadcasting...
@@ -379,7 +380,7 @@ class LMTrainer():
             # divide through M since each head mask contributes 1x total_len
 
             num_scores = (
-                torch.dot((lens+1), lens) / 2 * M).item()  # type: ignore
+                torch.dot((lens+1), lens) * M / 2).item()  # type: ignore
             # divide score/factor by number of tokens to get average
             # per-token loss
             # score_gold = cast(torch.BoolTensor,
@@ -406,7 +407,13 @@ class LMTrainer():
             weights[~score_gold] = f_false
             loss *= weights
 
+        if to_ignore_mask is not None:
+            loss = (~to_ignore_mask)*loss
+        else:
+            loss = torch.tril(loss)
+
         loss = torch.sum(loss)
+
         if reduction == "mean":
             loss /= num_scores
         else:

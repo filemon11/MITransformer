@@ -242,8 +242,9 @@ class PaddingCollate(Collate):
             for key, b in self.pad_mask_with.items():
                 for mask_k, mask in new_sentence[key].items():  # type: ignore
                     new_mask = np.full((max_lens[key], max_lens[key]), b)
-                    if self.connect_with_dummy:
-                        new_mask[:, 0] = not b
+                    # if self.connect_with_dummy:
+                    #     # prevent rows without a single true value
+                    #     new_mask[:, 0] = not b
                     new_mask[:mask.shape[0], :mask.shape[1]] = mask
                     new_sentence[key][mask_k] = new_mask  # type: ignore
 
