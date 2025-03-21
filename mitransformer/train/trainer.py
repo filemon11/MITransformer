@@ -357,7 +357,6 @@ class LMTrainer():
         seq1_dim = 2
         seq2_dim = 3
         shape = score_preds.shape
-        print(shape)
         M = shape[masks_dim]
         B = shape[batch_dim]
         S = shape[seq1_dim]
