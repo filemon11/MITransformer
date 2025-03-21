@@ -873,14 +873,16 @@ class LMTrainer():
         def iterate():
             assert self.train_config is not None, (
                 "Config missing training params.")
+            metrics: list[Metric] = list()
             for i, batch in tqdm(enumerate(loader), desc="Batches"):
-                metric = self.train_step(
+                metrics.append(self.train_step(
                     batch,
                     loader.dataset.keys_for_padding["label_ids"],
                     perform_opt=(po := check_perform_opt(
-                        self.train_config.gradient_acc, i)))
+                        self.train_config.gradient_acc, i))))
                 if po:
-                    yield metric
+                    yield sum_metrics(metrics)
+                    metrics = list()
 
         if self.train_config.use_steps:
             for e in iterate():
