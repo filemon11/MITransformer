@@ -357,7 +357,7 @@ class LMTrainer():
         seq1_dim = 2
         seq2_dim = 3
         shape = score_preds.shape
-
+        print(shape)
         M = shape[masks_dim]
         B = shape[batch_dim]
         S = shape[seq1_dim]
@@ -683,9 +683,11 @@ class LMTrainer():
 
                 # TODO: make the model output logits and apply sigmoid later
                 head_entropy = get_attention_entropy(
-                    inverse_sigmoid(score_preds[:middle])).detach().cpu()
+                    inverse_sigmoid(score_preds[:middle]),
+                    to_ignore[:middle]).detach().cpu()
                 child_entropy = get_attention_entropy(
-                    inverse_sigmoid(score_preds[middle:])).detach().cpu()
+                    inverse_sigmoid(score_preds[middle:]),
+                    to_ignore[middle:]).detach().cpu()
 
                 att_entropy = pd.DataFrame({"head": head_entropy.tolist(),
                                             "child": child_entropy.tolist()})
@@ -1194,12 +1196,17 @@ def get_uas_abs(inp: tuple[np.ndarray, np.ndarray, int]) -> int:
     return uas_s
 
 
-def get_attention_entropy(logits: torch.Tensor) -> torch.Tensor:
+def get_attention_entropy(
+        logits: torch.Tensor,
+        to_ignore: torch.Tensor | None = None) -> torch.Tensor:
     """input shape [H, B, S, S]
     with H: heads, B: batch size, S: sequence length.
     output shape: [H]"""
     probs = F.softmax(logits, dim=-1)
     entropy = -(probs*torch.log(probs))
+
+    if to_ignore is not None:
+        entropy[to_ignore] = torch.nan
     entropy[entropy.isnan()] = 0
     entropy = entropy.flatten(1).sum(-1)
     return entropy
