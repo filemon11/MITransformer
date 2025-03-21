@@ -881,6 +881,7 @@ class TrainParserArgs(ParserArgs):
     early_stop_after: int | None
     early_stop_metric: str | None
     epochs: int
+    gradient_acc: int | None
     learning_rate: float
     loss_alpha: float | None
     arc_loss_weighted: bool
@@ -924,6 +925,7 @@ class HyperoptParserArgs(ParserArgs):
     early_stop_after: int | None
     early_stop_metric: str | None
     epochs: int
+    gradient_acc: int | None
 
     learning_rate: float | tuple[float, float] | list[float]
     loss_alpha: float | tuple[float, float] | list[float | None] | None
@@ -1107,6 +1109,9 @@ def parse_args() -> (
     trainer_group.add_argument(
         '--epochs', type=int, default=100,
         help="how many epochs to train for")
+    trainer_group.add_argument(
+        '--gradient_acc', type=OptNone(int), default=None,
+        help="If specified, only optimises after n iterations.")
     trainer_group.add_argument(
         '--learning_rate', type=float, default=1e-3,
         help="learning rate for the optimiser")
@@ -1335,6 +1340,9 @@ def parse_args() -> (
     hyperopt_fixed_trainer_group.add_argument(
         '--epochs', type=int, default=100,
         help="how many epochs to train for")
+    hyperopt_fixed_trainer_group.add_argument(
+        '--gradient_acc', type=OptNone(int), default=None,
+        help="If specified, only optimises after n iterations.")
 
     # # # Hyperopt Flexible Trainer parser group
     hyperopt_flexible_trainer_group = hyperopt_parser.add_argument_group(

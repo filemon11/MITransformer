@@ -79,6 +79,7 @@ class TrainConfig(GeneralConfig):
     early_stop_after: int | None = 1
     use_steps: bool = False
     max_steps: int | None = None
+    gradient_acc: int | None = None
 
 
 class LMTrainer():
@@ -538,7 +539,8 @@ class LMTrainer():
     def train_step(
             self,
             batch: CoNLLUTokenisedBatch | EssentialBatch,
-            ignore_index: int) -> Metric:
+            ignore_index: int,
+            perform_opt: bool = True) -> Metric:
         assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
         self.batch_to(batch, device=self.config.device)  # type: ignore
@@ -575,8 +577,9 @@ class LMTrainer():
             arc_loss=arc_loss)
 
         metric.loss.backward()   # backward pass
-        self.optimiser.step()   # update parameters
-        self.optimiser.zero_grad(set_to_none=True)
+        if perform_opt:
+            self.optimiser.step()   # update parameters
+            self.optimiser.zero_grad(set_to_none=True)
 
         metric.detach()
         metric.to_("cpu")
@@ -761,6 +764,7 @@ class LMTrainer():
             # Steps
             for train_metric in self._train(train):
                 total_steps += 1  # equal epochs in case of not use_steps
+
                 if pbar_steps is not None:
                     pbar_steps.update(1)
 
@@ -861,68 +865,28 @@ class LMTrainer():
             train=train,  # type: ignore
             eval=eval,
             test=test)
-        # if score_preds is not None and score_gold is not None:
-        #    token_mapper: TokenMapper = TokenMapper.load("./tokmap.pickle")
-        #    for i in range(10):
-        #        pred_head = score_preds[0][i].detach().cpu().numpy()
-        #        gold_head = score_gold[0][i].detach().cpu().numpy()
-        #        pred_child = score_preds[1][i].detach().cpu().numpy()
-        #        gold_child = score_gold[1][i].detach().cpu().numpy()
-        #        fig, ax = plt.subplots(2, 2)
-        #        sns.heatmap(
-        #            pred_head, ax=ax[0][0])
-        #        sns.heatmap(
-        #            gold_head, ax=ax[0][1])
-        #        sns.heatmap(
-        #            pred_child, ax=ax[1][0])
-        #        sns.heatmap(
-        #            gold_child, ax=ax[1][1])
-        #        fig.savefig(f"plot_{i}.png")
-        #
-        #        not_padding = (batch["input_ids"][i]
-        #                       != token_mapper.pad_id).cpu().numpy()
-        #
-        #        # TODO: use heuristic of leaving out root node
-        #        # and then calculating MST
-        #        pred_scores = merge_head_child_scores(
-        #            pred_head, pred_child)[not_padding][:, not_padding]
-        #        pred_scores = dummy_mask_removal(pred_scores)
-        #        gold_scores = merge_head_child_scores(
-        #            gold_head, gold_child)[not_padding][:, not_padding]
-        #        gold_scores = dummy_mask_removal(gold_scores)
-        #
-        #        pred_headlist = mst(pred_scores)
-        #        gold_headlist = mask_to_headlist(gold_scores)
-        #
-        #        ids = batch["input_ids"].detach().cpu().numpy()[
-        #            i, not_padding][1:]
-        #        labels = token_mapper.decode([ids.tolist()])[0]
-        #        plot_tree(f"dep_plot_pred_{i}.png",
-        #                  pred_headlist.tolist(),
-        #                  labels)
-        #
-        #        plot_tree(f"dep_plot_gold_{i}.png",
-        #                  gold_headlist.tolist(),
-        #                  labels)
 
     def _train(self, loader: DataLoader[IDBatch, D]) -> Iterable[Metric]:
         assert self.train_config is not None, "Config missing training params."
         self.transformerlm.train()
 
-        metrics: list[Metric]
-        if self.train_config.use_steps:
-            for batch in tqdm(loader, desc="Batches"):
+        def iterate():
+            assert self.train_config is not None, (
+                "Config missing training params.")
+            for i, batch in tqdm(enumerate(loader), desc="Batches"):
                 metric = self.train_step(
                     batch,
-                    loader.dataset.keys_for_padding["label_ids"])
-                yield self.gather_metrics(metric)
+                    loader.dataset.keys_for_padding["label_ids"],
+                    perform_opt=(po := check_perform_opt(
+                        self.train_config.gradient_acc, i)))
+                if po:
+                    yield metric
+
+        if self.train_config.use_steps:
+            for e in iterate():
+                yield self.gather_metrics(e)
         else:
-            metrics = [
-                self.train_step(
-                    batch,
-                    loader.dataset.keys_for_padding["label_ids"])
-                for batch in tqdm(loader, desc="Batches")]
-            yield self.gather_metrics(sum_metrics(metrics))
+            yield self.gather_metrics(sum_metrics(list(iterate())))
 
     def _eval(self, loader: DataLoader[IDBatch, D]) -> Metric:
         self.transformerlm.eval()
@@ -1234,3 +1198,8 @@ def get_attention_entropy(logits: torch.Tensor) -> torch.Tensor:
 
 def inverse_sigmoid(x: torch.Tensor) -> torch.Tensor:
     return -torch.log((1-x)/x)
+
+
+def check_perform_opt(gradient_acc: int | None, i_train: int) -> bool:
+    return (gradient_acc is None
+            or (i_train+1) % gradient_acc == 0)
