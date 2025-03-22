@@ -185,7 +185,7 @@ class MIAttention(nn.Module):
                 float('-inf'))
             # unclear why type checker complains
 
-        arc_scores = F.sigmoid(att)
+        att_logits = att
 
         att = F.softmax(att, dim=-1)
         att = einops.rearrange(att, 'b m h s1 s2 -> b (m h) s1 s2')
@@ -199,10 +199,10 @@ class MIAttention(nn.Module):
         out = self.proj(out)
         out = self.resid_dropout(out)
 
-        out_scores = {
-            tag: [arc_scores[:, m, h] for h in range(self.n_head)]
+        out_logits = {
+            tag: [att_logits[:, m, h] for h in range(self.n_head)]
             for tag, m in zip(self.tags, range(self.n_multihead))}
-        return out, out_scores
+        return out, out_logits
 
 
 class MILayer(nn.Module):
@@ -238,11 +238,11 @@ class MILayer(nn.Module):
         with M number of multiheads,
         B batch size, S sequence length"""
 
-        x_attn, out_scores = self.attn(self.ln_1(x), masks)
+        x_attn, out_logits = self.attn(self.ln_1(x), masks)
         x = x + x_attn
         x = x + self.ff(self.ln_2(x))
 
-        return x, out_scores
+        return x, out_logits
 
 
 TransformerDescription = tuple[LayerDescription, ...]
@@ -357,12 +357,12 @@ class MITransformer(nn.Module):
             x = self.lstm_dropout(x)
             x = self.ln(x)
 
-        scores = []
+        att_logits = []
         for layer in self.layers:
-            x, sc = layer(x, masks if self.use_input_mask else None)
-            scores.append(sc)
+            x, al = layer(x, masks if self.use_input_mask else None)
+            att_logits.append(al)
 
-        return x, combine_scores(scores)
+        return x, combine_scores(att_logits)
 
 
 class MITransformerLM(nn.Module):
@@ -405,7 +405,7 @@ class MITransformerLM(nn.Module):
             Output : Shape[B, S, E]
         """
 
-        x, scores = self.mi_transformer(input_ids, masks)
+        x, att_logits = self.mi_transformer(input_ids, masks)
 
         x = self.ln(x)
         logits = self.lm_head(x)
@@ -413,7 +413,7 @@ class MITransformerLM(nn.Module):
         # shape (B,T,C)  B : batch, T : sequence length, C : embedding dim
 
         # logits = x @ self.embds
-        return logits, scores
+        return logits, att_logits
 
     def generate(self, input_ids: torch.Tensor, max_new_tokens: int, **kwargs):
         """ given a context idx, generate max_new_tokens tokens

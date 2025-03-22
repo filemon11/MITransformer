@@ -550,8 +550,8 @@ class LMTrainer():
         assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
         self.batch_to(batch, device=self.config.device)  # type: ignore
-        logits, arc_scores = self.transformerlm(**batch)
-        self.run_hooks(batch, (logits, arc_scores))
+        logits, arc_logits = self.transformerlm(**batch)
+        self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
         lm_loss = self.loss(
             logits, batch["label_ids"],
@@ -561,7 +561,8 @@ class LMTrainer():
 
         if self.train_config.dependency_mode == "supervised":
             score_preds, score_gold = self.prepare_scores(
-                arc_scores, batch["masks"])
+                arc_logits, batch["masks"])
+            score_preds = F.sigmoid(score_preds)
             if score_preds is not None and score_gold is not None:
 
                 to_ignore = self.get_ignore_mask(
@@ -598,8 +599,8 @@ class LMTrainer():
             ignore_index: int) -> Metric:
         self.batch_to(batch, device=self.config.device)  # type: ignore
 
-        logits, arc_scores = self.transformerlm(**batch)
-        self.run_hooks(batch, (logits, arc_scores))
+        logits, arc_logits = self.transformerlm(**batch)
+        self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
 
         labels = batch["label_ids"]
@@ -622,9 +623,11 @@ class LMTrainer():
         arc_loss = None
         att_entropy = None
         if mode == "supervised":
-            score_preds, score_gold = self.prepare_scores(
-                arc_scores, batch["masks"])
-            if score_preds is not None and score_gold is not None:
+            logits_preds, score_gold = self.prepare_scores(
+                arc_logits, batch["masks"])
+
+            if logits_preds is not None and score_gold is not None:
+                score_preds = F.sigmoid(logits_preds)
 
                 to_ignore = self.get_ignore_mask(
                     score_preds,
@@ -682,10 +685,10 @@ class LMTrainer():
 
                 # TODO: make the model output logits and apply sigmoid later
                 head_entropy = get_attention_entropy(
-                    inverse_sigmoid(score_preds[:middle]),
+                    logits_preds[:middle],
                     to_ignore[:middle]).detach().cpu()
                 child_entropy = get_attention_entropy(
-                    inverse_sigmoid(score_preds[middle:]),
+                    logits_preds[middle:],
                     to_ignore[middle:]).detach().cpu()
 
                 att_entropy = pd.DataFrame({"head": head_entropy.tolist(),
@@ -948,18 +951,18 @@ class LMTrainer():
         ignore_index = dataset.keys_for_padding["label_ids"]
 
         unpadded_logits: list[torch.Tensor] = []
-        unpadded_arc_scores: defaultdict[str, list[torch.Tensor]]
-        unpadded_arc_scores = defaultdict(list)
+        unpadded_arc_logits: defaultdict[str, list[torch.Tensor]]
+        unpadded_arc_logits = defaultdict(list)
         self.transformerlm.eval()
         with torch.no_grad():
             # eval loop: no backprop on this data, to avoid storing
             # all intermediate variable
             logits: torch.Tensor
-            arc_scores: dict[str, list[torch.Tensor]]
+            arc_logits: dict[str, list[torch.Tensor]]
             for batch in tqdm(loader, desc="Batches"):
                 self.batch_to(batch, device=self.config.device)  # type: ignore
-                logits, arc_scores = self.transformerlm(**batch)
-                self.run_hooks(batch, (logits, arc_scores))
+                logits, arc_logits = self.transformerlm(**batch)
+                self.run_hooks(batch, (logits, arc_logits))
                 labels = batch["label_ids"]
 
                 if make_prob:
@@ -973,12 +976,12 @@ class LMTrainer():
                 unpadded_logits.extend(
                     unpad(logits, labels, ignore_index))
 
-                for key in arc_scores.keys():
-                    unpadded_arc_scores[key].extend(
+                for key in arc_logits.keys():
+                    unpadded_arc_logits[key].extend(
                         unpad_masks(torch.stack(
-                            arc_scores[key]).swapaxes(0, 1),
+                            arc_logits[key]).swapaxes(0, 1),
                             labels, ignore_index))
-        return unpadded_logits, dict(unpadded_arc_scores)
+        return unpadded_logits, dict(unpadded_arc_logits)
 
     def generate(
             self, token_mapper: data.TokenMapper,

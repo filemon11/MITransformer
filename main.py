@@ -653,7 +653,6 @@ class Objective:
             n_runs=1)
         args.seed = args.seed + trial.number
         args_logic(args)
-        print(args.to_dict())
 
         train_iterator = main_train(
             args, self.n_devices,

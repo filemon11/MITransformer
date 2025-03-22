@@ -1,5 +1,6 @@
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 import seaborn as sns  # type: ignore
 import matplotlib.pyplot as plt
@@ -95,6 +96,9 @@ class AttentionPlotHook(Hook):
                         input["idx"], att_mats, input["masks"][head_type],
                         input["label_ids"], input["input_ids"]):
 
+                    att_p = F.softmax(att_p, dim=-1)
+                    att_g = F.softmax(att_g, dim=-1)
+
                     if self.ignore_idx is not None:
                         att_p = att_p[:, labels != self.ignore_idx][
                             labels != self.ignore_idx, :]
@@ -150,6 +154,8 @@ class TreePlotHook(Hook):
                     torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
         for i, (att_mats_head, att_mats_child) in enumerate(
                 zip(output[1]["head"], output[1]["child"])):
+            att_mats_head = F.sigmoid(att_mats_head)
+            att_mats_child = F.sigmoid(att_mats_child)
             for (
                 idx, att_p_h, att_p_c, att_g_h,
                 att_g_c, labels, input_ids) in zip(

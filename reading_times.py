@@ -179,11 +179,13 @@ def generate_probs(
             dict[str, list[torch.Tensor]]]:
     """WARNING: untested"""
 
-    pred_probs, attention = trainer.predict(
+    pred_probs, attention_logits = trainer.predict(
         dataset,
         make_prob=True,
         only_true=True)
-
+    attention = {
+        key: [torch.sigmoid(m) for m in l]
+        for key, l in attention_logits.items()}
     # Throw away probs of root and eos token
     probs = torch.cat([p[1:-1] for p in pred_probs])
     indices: npt.NDArray[np.int_]
