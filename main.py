@@ -666,7 +666,7 @@ class Objective:
             # Handle pruning based on the intermediate value.
             trial.report(
                 getattr(metrics["eval"], self.args.optimise),
-                args.eval_interval*step)
+                step)
 
             if trial.should_prune():
                 should_prune = True
@@ -1245,12 +1245,13 @@ def parse_args() -> (
         '--n_warmup_steps', type=int,
         default=1,
         help=(
-            "how many epochs to wait before pruning can "
+            "how many evaluations to wait before pruning can "
             "happen within a trial"))
     hyperopt_parser.add_argument(
         '--n_startup_trials', type=int,
         default=5,
-        help="how many trials to run before pruning can happen at all")
+        help=(
+            "how many trials to run before pruning can happen at all. "))
     hyperopt_parser.add_argument(
         '--n_trials', type=int,
         default=25,
@@ -1316,8 +1317,7 @@ def parse_args() -> (
         '--use_steps', type=str_to_bool, default=False,
         help=(
             "Where the unit of evaluation are steps (i.e. batches) "
-            "instead of epochs. If true, --eval_interval "
-            "and n_warmup_steps refer to number of batches processed."))
+            "instead of epochs. If true, --eval_interval refers to batches."))
     hyperopt_fixed_trainer_group.add_argument(
         '--max_steps', type=OptNone(int), default=100_000,
         help=(
