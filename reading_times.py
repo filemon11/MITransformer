@@ -44,6 +44,7 @@ SURPRISAL_COL = "logp"
 WORD_POSITION_COL = "position"
 HEAD_DISTANCE_COL = "headdistance"
 INTEGRATION_COST_COL = "incost"
+DEMBERG_COST_COL = "demberg"
 FDD_COL = "fdd"  # first dependency distance
 FDDC_COL = "fddc"  # first dependency distance correct?
 FDDW_COL = "fddw"  # first dependency distance weight
@@ -63,7 +64,7 @@ if TAGSET is None:
     CONTENT_POS = {
         "FW", "MD", "NN", "NNS", "NNP",
         "NNPS", "VB", "VBD", "VBG", "VBN",
-        "VBP", "VBZ", "JJ", "JJR", "JJS"}
+        "VBP", "VBZ"}
     PUNCTUATION = {"''", "(", "SYM", "POS"}
     MERGE_MAPPING = {
         "JJS": "JJ", "JJR": "JJ",
@@ -306,12 +307,102 @@ def get_content_word_cost(
     # cost for function words is 0
     return cost
 
+
+def get_content_word_cost_Demberg(
+        content_word_mask: npt.NDArray[np.bool],
+        mask_gov: npt.NDArray[np.bool],
+        mask_dep: npt.NDArray[np.bool],
+        only_content_words_left: bool = True,
+        only_content_words_cost: bool = False
+        ) -> npt.NDArray[np.int_]:
+
+    mask = np.logical_or(mask_gov, mask_dep)
+    content_word_mask_left = content_word_mask.copy()
+    if not only_content_words_left:
+        content_word_mask_left[...] = 1
+    # do not take into account connections to function words
+    mask[:, ~content_word_mask_left] = 0
+    mask[0, :] = 0
+    mask[1, :] = 0
+
+    first_connection: npt.NDArray[np.int_] = np.argmax(np.tril(mask), axis=1)
+
+    upper_triang = np.triu(
+        np.ones(
+            (content_word_mask_left.shape[0], content_word_mask_left.shape[0])
+            ), 1)
+    cw_cumul: np.ndarray = content_word_mask_left @ upper_triang
+
+    cw_before_first = cw_cumul[first_connection]  # @ mask_gov.T
+    cw_intermediate = cw_cumul - cw_before_first
+    # assume no crossing arcs
+    # left_cw_child_nums = content_word_mask @ mask_dep.T
+    # cw_intermediate -= left_cw_child_nums
+    # cw_intermediate[first_connection == 0] = 0  # if dummy or root
+
+    # cw_intermediate[mask_gov[:, 0]] = 1  # for dummy set 1
+    # cw_intermediate[mask_gov[:, 1]] = 1  # for root set 1
+
+    # new discourse referents
+    cost = cw_intermediate  # + content_word_mask.astype(int)
+    if only_content_words_cost:
+        cost[~content_word_mask] = 0  # integration and instantiation
+    elif not only_content_words_left:
+        cost[~content_word_mask] -= 1  # integration and instantiation
+    # cost for function words is 0
+    return cost
+
 # TODO: Vera Demberg integration cost
 # referents = nouns & verbs
 # cost: 0 for all non-referents
 # all others: number of referents between first left dependency and token
 # def generate_integration_Gibson(
 # )
+
+
+def generate_integration_Demberg(
+        dataset: CoNLLUDataset,
+        untokenise: bool = False,
+        only_content_words_left: bool = True,
+        only_content_words_cost: bool = False,
+        dummy_used: bool = True) -> npt.NDArray[np.int_]:
+    """WARNING: untested"""
+
+    costs_list: list[npt.NDArray[np.int_]] = []
+    for i in range(len(dataset)):
+        sentence = dataset[i]
+        # assumes that governor and child mask are called head and child
+        # these are already triangulated
+        mask_gov = sentence["masks"]["head"]
+        mask_dep = sentence["masks"]["child"]
+
+        assert mask_gov is not None and mask_dep is not None
+
+        root_idx = 1
+        mask_dep[:, root_idx] = 0
+        mask_dep[:, 0] = 0      # no cost if no children
+        mask_gov[:, root_idx] = 0
+        mask_gov[:, 0] = 0
+
+        costs = get_content_word_cost_Demberg(
+            get_content_word_mask(dataset.tokens[i][:-1], CONTENT_POS),
+            mask_gov, mask_dep,
+            only_content_words_left=only_content_words_left,
+            only_content_words_cost=only_content_words_cost)
+        costs_list.append(costs[2:])
+
+    cost_array = np.concat(costs_list)
+    if untokenise:
+        assert dataset.space_after is not None
+        space_after = np.concat(dataset.space_after)
+
+        cost_array = np.array(
+            list(untokenise_probs(
+                cost_array.tolist(),
+                space_after,
+                mode="add")))
+
+    return cost_array
 
 
 def generate_integration_Gibson(
@@ -359,7 +450,8 @@ def generate_first_dep_distance(
         dataset: CoNLLUDataset,
         pos_tags: list[str],
         untokenise: bool = False,
-        only_content_words: bool = False) -> npt.NDArray[np.int_]:
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False) -> npt.NDArray[np.int_]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
@@ -375,12 +467,12 @@ def generate_first_dep_distance(
         mask_gov = sentence["masks"]["head"].copy()
         mask_dep = sentence["masks"]["child"].copy()
 
-        if only_content_words:
-            content_word_mask = get_content_word_mask_by_POS_tags(
+        content_word_mask = get_content_word_mask_by_POS_tags(
                 pos_tags[
                     elements_in:elements_in+mask_gov.shape[0]-2],
                 CONTENT_POS,
                 dummies_present=False)
+        if only_content_words_left:
 
             mask_gov[:, 2:][:, ~content_word_mask] = False
             mask_dep[:, 2:][:, ~content_word_mask] = False
@@ -409,7 +501,11 @@ def generate_first_dep_distance(
             first_connection]
 
         distances[first_connection == 0] = 0    # if root, then distance 0
-        costs_list.append(distances[2:])
+
+        costs = distances[2:]
+        if only_content_words_cost:
+            costs[~content_word_mask] = 0
+        costs_list.append(costs)
 
         elements_in += distances.shape[0]-2
 
@@ -450,7 +546,7 @@ def generate_fdd_deprel(
         pos_tags: list[str],
         deprels: list[str],
         untokenise: bool = False,
-        only_content_words: bool = False) -> list[str]:
+        only_content_words_left: bool = False) -> list[str]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
@@ -466,7 +562,7 @@ def generate_fdd_deprel(
         mask_gov = sentence["masks"]["head"].copy()
         mask_dep = sentence["masks"]["child"].copy()
 
-        if only_content_words:
+        if only_content_words_left:
             content_word_mask = get_content_word_mask_by_POS_tags(
                 pos_tags[
                     elements_in:elements_in+mask_gov.shape[0]-2],
@@ -549,7 +645,7 @@ def generate_fddc(
         attention_matrices: dict[str, list[torch.Tensor]],
         pos_tags: list[str],
         untokenise: bool = False,
-        only_content_words: bool = False) -> npt.NDArray[np.bool]:
+        only_content_words_left: bool = False) -> npt.NDArray[np.bool]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     # TODO: Discard punctuation
@@ -557,7 +653,7 @@ def generate_fddc(
 
     fdd = generate_first_dep_distance(
         dataset, pos_tags, untokenise=False,
-        only_content_words=only_content_words)
+        only_content_words_left=only_content_words_left)
 
     costs_list: list[npt.NDArray[np.bool]] = []
     elements_in: int = 0
@@ -568,7 +664,7 @@ def generate_fddc(
         mask_gov = attention_matrices["head"][i][0].clone()
         mask_dep = attention_matrices["child"][i][0].clone()
 
-        if only_content_words:
+        if only_content_words_left:
             # disregard connections to non-content words
             content_word_mask = get_content_word_mask_by_POS_tags(
                 pos_tags[elements_in:elements_in+mask_gov.shape[0]-2],
@@ -754,7 +850,8 @@ def generate_ldds(
         dataset: CoNLLUDataset,
         pos_tags: list[str],
         untokenise: bool = False,
-        only_content_words: bool = False) -> npt.NDArray[np.int_]:
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False) -> npt.NDArray[np.int_]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
@@ -776,13 +873,12 @@ def generate_ldds(
         mask_gov[:, root_idx] = 0
         mask_gov[:, 0] = 0
 
-        if only_content_words:
+        content_word_mask = get_content_word_mask_by_POS_tags(
+            pos_tags[elements_in:elements_in+mask_gov.shape[0]-2],
+            CONTENT_POS,
+            dummies_present=False)
+        if only_content_words_left:
             # disregard connections to non-content words
-            content_word_mask = get_content_word_mask_by_POS_tags(
-                pos_tags[elements_in:elements_in+mask_gov.shape[0]-2],
-                CONTENT_POS,
-                dummies_present=False)
-            print(mask_gov.shape, content_word_mask.shape)
             mask_gov[:, 2:][:, ~content_word_mask] = 0
             mask_dep[:, 2:][:, ~content_word_mask] = 0
 
@@ -796,7 +892,11 @@ def generate_ldds(
 
         costs = (mask * indices).sum(1)
 
-        costs_list.append(costs[2:])
+        costs = costs[2:]
+        if only_content_words_cost:
+            costs[~content_word_mask] = 0
+
+        costs_list.append(costs)
         elements_in += mask_gov.shape[0]-2
 
     cost_array = np.concat(costs_list)
@@ -816,7 +916,8 @@ def generate_ldc(
         dataset: CoNLLUDataset,
         pos_tags: list[str],
         untokenise: bool = False,
-        only_content_words: bool = False) -> npt.NDArray[np.int_]:
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False) -> npt.NDArray[np.int_]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
@@ -838,19 +939,23 @@ def generate_ldc(
         mask_gov[:, root_idx] = 0
         mask_gov[:, 0] = 0
 
-        if only_content_words:
+        content_word_mask = get_content_word_mask_by_POS_tags(
+            pos_tags[elements_in:elements_in+mask_gov.shape[0]-2],
+            CONTENT_POS,
+            dummies_present=False)
+        if only_content_words_left:
             # disregard connections to non-content words
-            content_word_mask = get_content_word_mask_by_POS_tags(
-                pos_tags[elements_in:elements_in+mask_gov.shape[0]-2],
-                CONTENT_POS,
-                dummies_present=False)
             mask_gov[:, 2:][:, ~content_word_mask] = 0
             mask_dep[:, 2:][:, ~content_word_mask] = 0
 
         mask = np.tril(np.logical_or(mask_gov, mask_dep))
         costs = mask.sum(1)
 
-        costs_list.append(costs[2:])
+        costs = costs[2:]
+        if only_content_words_cost:
+            costs[~content_word_mask] = 0
+
+        costs_list.append(costs)
         elements_in += mask_gov.shape[0]-2
 
     cost_array = np.concat(costs_list)
@@ -956,11 +1061,13 @@ def generate_integration_costs(
 def generate_head_distance(
         dataset: CoNLLUDataset,
         pos_tags: list[str],
-        untokenise: bool = False
+        untokenise: bool = False,
+        only_content_words_cost: bool = False
         ) -> npt.NDArray[np.int_]:
     """WARNING: untested"""
 
     costs_list: list[npt.NDArray[np.int_]] = []
+    elements_in: int = 0
     for i in range(len(dataset)):
         sentence = dataset[i]
         # assumes that governor and child mask are called head and child
@@ -969,6 +1076,12 @@ def generate_head_distance(
         mask_dep = sentence["masks"]["child"]
 
         assert mask_gov is not None and mask_dep is not None
+
+        content_word_mask = get_content_word_mask_by_POS_tags(
+            pos_tags[
+                elements_in:elements_in+mask_gov.shape[0]-2],
+            CONTENT_POS,
+            dummies_present=False)
 
         mask_gov[:, 0] = 0
         mask_dep[:, 0] = 0      # no cost if no children
@@ -990,7 +1103,13 @@ def generate_head_distance(
         indices = indices.T
 
         costs = (mask * indices).sum(1)
-        costs_list.append(costs[2:])
+
+        costs = costs[2:]
+        if only_content_words_cost:
+            costs[~content_word_mask] = 0
+
+        costs_list.append(costs)
+        elements_in += mask_gov.shape[0]-2
 
     cost_array: npt.NDArray[np.int_] = np.concat(costs_list)
 
@@ -1113,6 +1232,7 @@ def add_surprisal(
         surprisal_col: str = SURPRISAL_COL,
         word_position_col: str = WORD_POSITION_COL,
         integration_cost_col: str = INTEGRATION_COST_COL,
+        demberg_cost_col: str = DEMBERG_COST_COL,
         pos_tag_col: str = POS_TAG_COL,
         deprel_col: str = DEPREL_COL,
         fdd_col: str = FDD_COL,
@@ -1125,7 +1245,8 @@ def add_surprisal(
         batch_size: int = BATCH_SIZE,
         masks_setting: Literal[
             "complete", "current", "next"] = "current",
-        only_content_words: bool = False) -> None:
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False) -> None:
     df = pd.read_csv(input_file)
     words = df[token_col]
     conllu = parse_list_of_words_with_spacy(words, min_len=0)
@@ -1156,14 +1277,16 @@ def add_surprisal(
         pos_tag_list.extend(get_POS_tags(sentence[2:-1]))
 
     integration_costs = generate_head_distance(
-        dataset, pos_tag_list, untokenise=True)
+        dataset, pos_tag_list, untokenise=True,
+        only_content_words_cost=only_content_words_cost)
 
     fdd = generate_first_dep_distance(
         dataset, pos_tag_list, untokenise=True,
-        only_content_words=only_content_words)
+        only_content_words_left=only_content_words_left,
+        only_content_words_cost=only_content_words_cost)
     fddc = generate_fddc(
         dataset, attention, pos_tag_list, untokenise=True,
-        only_content_words=only_content_words).astype(int)
+        only_content_words_left=only_content_words_left).astype(int)
     fddw = generate_fddw(
         dataset, attention, pos_tag_list, untokenise=True)
     deprels = generate_deprels(dataset, pos_tag_list, untokenise=True)
@@ -1171,13 +1294,19 @@ def add_surprisal(
     deprels_raw = generate_deprels(dataset, pos_tag_list, untokenise=False)
     fdd_deprels = generate_fdd_deprel(
         dataset, pos_tag_list, deprels_raw,
-        untokenise=True, only_content_words=only_content_words)
+        untokenise=True, only_content_words_left=only_content_words_left)
     ldds = generate_ldds(
         dataset, pos_tag_list, untokenise=True,
-        only_content_words=only_content_words)
+        only_content_words_left=only_content_words_left,
+        only_content_words_cost=only_content_words_cost)
     ldc = generate_ldc(
         dataset, pos_tag_list, untokenise=True,
-        only_content_words=only_content_words)
+        only_content_words_left=only_content_words_left,
+        only_content_words_cost=only_content_words_cost)
+    demberg = generate_integration_Demberg(
+        dataset, untokenise=True,
+        only_content_words_left=only_content_words_left,
+        only_content_words_cost=only_content_words_cost)
 
     pos_tag_list = generate_POS_tags(
         pos_tag_list, dataset.space_after,
@@ -1186,6 +1315,7 @@ def add_surprisal(
     df[surprisal_col] = surprisal
     df[word_position_col] = indices
     df[integration_cost_col] = integration_costs
+    df[demberg_cost_col] = demberg
     df[fdd_col] = fdd
     df[fddc_col] = fddc
     df[fddw_col] = fddw
@@ -1208,6 +1338,7 @@ def process_tsv(
         surprisal_col: str = SURPRISAL_COL,
         word_position_col: str = WORD_POSITION_COL,
         integration_cost_col: str = INTEGRATION_COST_COL,
+        demberg_cost_col: str = DEMBERG_COST_COL,
         fdd_col: str = FDD_COL,
         fddc_col: str = FDDC_COL,
         fddw_col: str = FDDW_COL,
@@ -1221,7 +1352,9 @@ def process_tsv(
         device: str = DEVICE,
         batch_size: int = BATCH_SIZE,
         masks_setting: Literal[
-            "current", "next", "complete"] = "current"
+            "current", "next", "complete"] = "current",
+        only_content_words_left: bool = True,
+        only_content_words_cost: bool = False
         ) -> None:
     tsv_to_csv(
         input_file, output_file,
@@ -1236,11 +1369,14 @@ def process_tsv(
         output_file, output_file, model_dir,
         token_mapper_dir, token_col,
         surprisal_col, word_position_col,
-        integration_cost_col, pos_tag_col,
+        integration_cost_col, demberg_cost_col,
+        pos_tag_col,
         deprel_col, fdd_col, fddc_col, fddw_col,
         fdd_deprels_col,
         ldds_col, ldc_col,
-        device, batch_size, masks_setting=masks_setting)
+        device, batch_size, masks_setting=masks_setting,
+        only_content_words_left=only_content_words_left,
+        only_content_words_cost=only_content_words_cost)
 
 
 if __name__ == "__main__":
