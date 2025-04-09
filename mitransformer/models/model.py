@@ -15,14 +15,24 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 
-from typing import (TypedDict, NotRequired, Sequence, Literal)
+from typing import (TypedDict, NotRequired, Sequence, Mapping, Literal)
 
 
 def combine_scores(
-        score_dicts: Sequence[dict[str, list[torch.Tensor]]]
+        score_dicts: Sequence[Mapping[str, list[torch.Tensor]]]
         ) -> dict[str, list[torch.Tensor]]:
-    """Currently: collects all scores for each tag
+    """Collects all scores for each tag
     category separately in a list.
+
+    Parameters
+    ----------
+    score_dicts : Sequence[dict[str, list[torch.Tensor]]]
+        Seqence of mappings of attention scores.
+
+    Returns
+    -------
+    dict[str, list[torch.Tensor]]
+        Dictionary of attention scores.
     """
     # Do we need to distinguish different layers (vertical heights) here?
 
@@ -313,10 +323,12 @@ class MITransformer(nn.Module):
 
         self.lstm = None
         if config.use_lstm:
-            self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
-            self.lstm_dropout = nn.Dropout(config.dropout_lstm)
-            self.ln = nn.LayerNorm(n_embd)
-            # TODO separate dropout for LSTM
+            self.lstm = torch.nn.LSTM(
+                n_embd, n_embd, batch_first=True, dropout=config.dropout_lstm)
+            self.ln_1 = nn.LayerNorm(n_embd)
+            self.ln_2 = nn.LayerNorm(n_embd)
+            self.ff = FeedForward(
+                n_embd, config.d_ff_factor, config.dropout_ff, config.bias)
 
     def _init_weights(self, module: nn.Module):
         if isinstance(module, nn.Linear):
@@ -353,9 +365,8 @@ class MITransformer(nn.Module):
         x = self.embd_dropout(tok_emb + pos_emb)
 
         if self.lstm is not None:
-            x = self.lstm(x)[0]
-            x = self.lstm_dropout(x)
-            x = self.ln(x)
+            x = x + self.lstm(self.ln_1(x))[0]
+            x = x + self.ff(self.ln_2(x))
 
         att_logits = []
         for layer in self.layers:
