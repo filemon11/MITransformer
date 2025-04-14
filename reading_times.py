@@ -176,7 +176,8 @@ def generate_probs(
         trainer: LMTrainer,
         dataset: CoNLLUDataset,
         untokenise: bool = False,
-        surprisal: bool = False) -> tuple[
+        surprisal: bool = False,
+        shift: int = 0) -> tuple[
             torch.Tensor, npt.NDArray[np.int_],
             dict[str, list[torch.Tensor]]]:
     """WARNING: untested"""
@@ -186,7 +187,12 @@ def generate_probs(
         make_prob=True,
         only_true=True)
     # Throw away probs of root and eos token
-    probs = torch.cat([p[1:-1] for p in pred_probs])
+    if shift == -1:
+        probs = torch.cat([p[2:] for p in pred_probs])
+    elif shift == 1:
+        probs = torch.cat([p[0:-2] for p in pred_probs])
+    else:
+        probs = torch.cat([p[1:-1] for p in pred_probs])
     indices: npt.NDArray[np.int_]
 
     if untokenise:
@@ -313,7 +319,7 @@ def get_content_word_cost_Demberg(
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
         with_search: bool = False,
-        with_non_referent_establishment_cost: bool = True,
+        with_non_referent_establishment_cost: bool = True
         ) -> npt.NDArray[np.int_]:
     mask = np.logical_or(mask_gov, mask_dep)
     content_word_mask_left = content_word_mask.copy()
@@ -385,7 +391,8 @@ def generate_integration_Demberg(
         only_content_words_cost: bool = False,
         with_search: bool = False,
         with_non_referent_establishment_cost: bool = True,
-        dummy_used: bool = True) -> npt.NDArray[np.int_]:
+        dummy_used: bool = True,
+        shift: int = 0) -> npt.NDArray[np.int_]:
     """WARNING: untested"""
 
     costs_list: list[npt.NDArray[np.int_]] = []
@@ -421,7 +428,12 @@ def generate_integration_Demberg(
             with_search=with_search,
             with_non_referent_establishment_cost=(
                 with_non_referent_establishment_cost))
-        costs_list.append(costs[2:])
+        if shift == -1:
+            costs_list.append(np.concat((costs[3:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(costs[1:-1])
+        else:
+            costs_list.append(costs[2:])
 
     cost_array = np.concat(costs_list)
     heads_array = np.concat(heads_list)
@@ -518,7 +530,8 @@ def generate_first_dep_distance(
         pos_tags: list[str],
         untokenise: bool = False,
         only_content_words_left: bool = False,
-        only_content_words_cost: bool = False) -> npt.NDArray[np.int_]:
+        only_content_words_cost: bool = False,
+        shift: int = 0) -> npt.NDArray[np.int_]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
@@ -572,7 +585,13 @@ def generate_first_dep_distance(
         costs = distances[2:]
         if only_content_words_cost:
             costs[~content_word_mask] = 0
-        costs_list.append(costs)
+
+        if shift == -1:
+            costs_list.append(np.concat((costs[1:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(np.concat((np.array([0]), costs[:-1])))
+        else:
+            costs_list.append(costs)
 
         elements_in += distances.shape[0]-2
 
@@ -613,7 +632,8 @@ def generate_fdd_deprel(
         pos_tags: list[str],
         deprels: list[str],
         untokenise: bool = False,
-        only_content_words_left: bool = False) -> list[str]:
+        only_content_words_left: bool = False,
+        shift: int = 0) -> list[str]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
@@ -671,7 +691,12 @@ def generate_fdd_deprel(
                 else:
                     fdd_deprels.append(deprels_sen[i])
 
-        costs_list.append(fdd_deprels[2:])
+        if shift == -1:
+            costs_list.append(fdd_deprels[3:] + ["EOS"])
+        elif shift == 1:
+            costs_list.append(fdd_deprels[1:-1])
+        else:
+            costs_list.append(fdd_deprels[2:])
 
         elements_in += len(fdd_deprels)-2
 
@@ -712,7 +737,8 @@ def generate_fddc(
         attention_matrices: dict[str, list[torch.Tensor]],
         pos_tags: list[str],
         untokenise: bool = False,
-        only_content_words_left: bool = False) -> npt.NDArray[np.bool]:
+        only_content_words_left: bool = False,
+        shift: int = 0) -> npt.NDArray[np.bool]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     # TODO: Discard punctuation
@@ -781,7 +807,12 @@ def generate_fddc(
         fdd_sen[fdd_sen > 0] = 0
         fddc = fdd_sen == distances
 
-        costs_list.append(fddc)
+        if shift == -1:
+            costs_list.append(np.concat((fddc[1:], np.array([True]))))
+        elif shift == 1:
+            costs_list.append(np.concat((np.array([True]), fddc[:-1])))
+        else:
+            costs_list.append(fddc)
         elements_in += distances.shape[0]
 
     cost_array = np.concat(costs_list)
@@ -821,7 +852,8 @@ def generate_attention_cost(
         attention_matrices: dict[str, list[torch.Tensor]],
         pos_tags: list[str],
         untokenise: bool = False,
-        only_content_words_left: bool = True) -> npt.NDArray:
+        only_content_words_left: bool = True,
+        shift: int = 0) -> npt.NDArray:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     # TODO: Discard punctuation
@@ -856,7 +888,12 @@ def generate_attention_cost(
 
         cost = (dist_mat*(mask_gov + mask_dep)).sum(-1)
 
-        costs_list.append(cost[2:].numpy())
+        if shift == -1:
+            costs_list.append(np.concat((cost[3:].numpy(), np.array([0]))))
+        elif shift == 1:
+            costs_list.append(cost[1:-1].numpy())
+        else:
+            costs_list.append(cost[2:].numpy())
         elements_in += len(cost)-2
 
     cost_array = np.concat(costs_list)
@@ -905,7 +942,7 @@ def generate_kl_div(
         attention_matrices: dict[str, list[torch.Tensor]],
         pos_tags: list[str],
         untokenise: bool = False,
-        masks_setting: str = "next") -> npt.NDArray:
+        shift: int = 0) -> npt.NDArray:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     # TODO: Discard punctuation
@@ -932,17 +969,17 @@ def generate_kl_div(
         mask_gov_gold /= mask_gov_gold.sum(-1)
         mask_dep_gold /= mask_dep_gold.sum(-1)
 
-        if masks_setting == "next":
-            zeros = np.full((
-                1, mask_gov_gold.shape[1]), False)
-            mask_gov = np.concatenate(
-                (zeros, mask_gov[:-1]), axis=0)
-            mask_dep = np.concatenate(
-                (zeros, mask_dep[:-1]), axis=0)
-            mask_gov_gold = np.concatenate(
-                (zeros, mask_gov_gold[:-1]), axis=0)
-            mask_dep_gold = np.concatenate(
-                (zeros, mask_dep_gold[:-1]), axis=0)
+        # if masks_setting == "next":
+        #     zeros = np.full((
+        #         1, mask_gov_gold.shape[1]), False)
+        #     mask_gov = np.concatenate(
+        #         (zeros, mask_gov[:-1]), axis=0)
+        #     mask_dep = np.concatenate(
+        #         (zeros, mask_dep[:-1]), axis=0)
+        #     mask_gov_gold = np.concatenate(
+        #         (zeros, mask_gov_gold[:-1]), axis=0)
+        #     mask_dep_gold = np.concatenate(
+        #         (zeros, mask_dep_gold[:-1]), axis=0)
 
         kl_gov = (mask_gov_gold*np.log(mask_gov_gold / mask_gov))
         kl_dep = (mask_dep_gold*np.log(mask_dep_gold / mask_dep))
@@ -951,7 +988,12 @@ def generate_kl_div(
         kl_dep[np.isnan(kl_dep)] = 0
         cost = (kl_dep + kl_gov).sum(-1)
 
-        costs_list.append(cost[2:])
+        if shift == -1:
+            costs_list.append(np.concat((cost[3:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(cost[1:-1])
+        else:
+            costs_list.append(cost[2:])
         elements_in += len(cost)-2
 
     cost_array = np.concat(costs_list)
@@ -990,7 +1032,8 @@ def generate_fddw(
         dataset: CoNLLUDataset,
         attention_matrices: dict[str, list[torch.Tensor]],
         pos_tags: list[str],
-        untokenise: bool = False) -> npt.NDArray[np.bool]:
+        untokenise: bool = False,
+        shift: int = 0) -> npt.NDArray[np.bool]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
@@ -1051,7 +1094,14 @@ def generate_fddw(
                 torch.ones(
                     (1,), device=first_connection.device)))
         # right weight
-        costs_list.append(weights[2:].detach().numpy())
+
+        if shift == -1:
+            costs_list.append(
+                np.concat((weights[3:].detach().numpy(), np.array([0]))))
+        elif shift == 1:
+            costs_list.append(weights[1:-1].detach().numpy())
+        else:
+            costs_list.append(weights[2:].detach().numpy())
 
     cost_array = np.concat(costs_list)
 
@@ -1090,7 +1140,8 @@ def generate_ldds(
         pos_tags: list[str],
         untokenise: bool = False,
         only_content_words_left: bool = False,
-        only_content_words_cost: bool = False) -> npt.NDArray[np.int_]:
+        only_content_words_cost: bool = False,
+        shift: int = 0) -> npt.NDArray[np.int_]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
@@ -1135,7 +1186,12 @@ def generate_ldds(
         if only_content_words_cost:
             costs[~content_word_mask] = 0
 
-        costs_list.append(costs)
+        if shift == -1:
+            costs_list.append(np.concat((costs[1:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(np.concat((np.array([0]), costs[:-1])))
+        else:
+            costs_list.append(costs)
         elements_in += mask_gov.shape[0]-2
 
     cost_array = np.concat(costs_list)
@@ -1156,7 +1212,8 @@ def generate_ldc(
         pos_tags: list[str],
         untokenise: bool = False,
         only_content_words_left: bool = False,
-        only_content_words_cost: bool = False) -> npt.NDArray[np.int_]:
+        only_content_words_cost: bool = False,
+        shift: int = 0) -> npt.NDArray[np.int_]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
@@ -1194,7 +1251,12 @@ def generate_ldc(
         if only_content_words_cost:
             costs[~content_word_mask] = 0
 
-        costs_list.append(costs)
+        if shift == -1:
+            costs_list.append(np.concat((costs[1:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(np.concat((np.array([0]), costs[:-1])))
+        else:
+            costs_list.append(costs)
         elements_in += mask_gov.shape[0]-2
 
     cost_array = np.concat(costs_list)
@@ -1212,7 +1274,8 @@ def generate_ldc(
 
 def generate_integration_costs(
         dataset: CoNLLUDataset,
-        untokenise: bool = False) -> npt.NDArray[np.int_]:
+        untokenise: bool = False,
+        shift: int = 0) -> npt.NDArray[np.int_]:
     """WARNING: untested"""
 
     costs_list: list[npt.NDArray[np.int_]] = []
@@ -1275,7 +1338,13 @@ def generate_integration_costs(
         # # extra_cost += mask_dep[:, 2:].sum(1)
         #
         costs = (mask * indices).sum(1) + (mask_gov + mask_dep).sum(-1)
-        costs_list.append(costs[2:])
+
+        if shift == -1:
+            costs_list.append(np.concat((costs[3:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(costs[1:-1])
+        else:
+            costs_list.append(costs[2:])
 
     cost_array = np.concat(costs_list)
     if untokenise:
@@ -1301,7 +1370,8 @@ def generate_head_distance(
         dataset: CoNLLUDataset,
         pos_tags: list[str],
         untokenise: bool = False,
-        only_content_words_cost: bool = False
+        only_content_words_cost: bool = False,
+        shift: int = 0,
         ) -> npt.NDArray[np.int_]:
     """WARNING: untested"""
 
@@ -1347,7 +1417,12 @@ def generate_head_distance(
         if only_content_words_cost:
             costs[~content_word_mask] = 0
 
-        costs_list.append(costs)
+        if shift == -1:
+            costs_list.append(np.concat((costs[1:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(np.concat((np.array([0]), costs[:-1])))
+        else:
+            costs_list.append(costs)
         elements_in += mask_gov.shape[0]-2
 
     cost_array: npt.NDArray[np.int_] = np.concat(costs_list)
@@ -1367,14 +1442,20 @@ def generate_head_distance(
 def generate_deprels(
         dataset: CoNLLUDataset,
         pos_tags: list[str],
-        untokenise: bool = False
+        untokenise: bool = False,
+        shift: int = 0
         ) -> list[str]:
     """WARNING: untested"""
 
     deprels: list[str] = []
     for deprels_sen in dataset.deprels:
         deprels_sen = [deprel_merge(deprel) for deprel in deprels_sen]
-        deprels.extend(deprels_sen[2:-1])
+        if shift == -1:
+            deprels.extend(deprels_sen[3:])
+        elif shift == 1:
+            deprels.extend(deprels_sen[1:-2])
+        else:
+            deprels.extend(deprels_sen[2:-1])
 
     if untokenise:
         assert dataset.space_after is not None
@@ -1394,7 +1475,7 @@ T = TypeVar("T")
 def untokenise_by_POS(
         items: Iterable[T],
         space_after: list[bool] | npt.NDArray[np.bool_],
-        pos_tags: list[str]
+        pos_tags: list[str],
         ) -> list[T]:
     new_list: list[T] = []
     current_item: T | None = None
@@ -1485,7 +1566,8 @@ def add_surprisal(
         masks_setting: Literal[
             "complete", "current", "next"] = "current",
         only_content_words_left: bool = False,
-        only_content_words_cost: bool = False) -> None:
+        only_content_words_cost: bool = False,
+        shift: int = 0) -> None:
     df = pd.read_csv(input_file)
     words = df[token_col]
     conllu = parse_list_of_words_with_spacy(words, min_len=0)
@@ -1509,10 +1591,11 @@ def add_surprisal(
         world_size=1)
     surprisal, indices, attention = generate_probs(
         trainer, dataset,
-        untokenise=True, surprisal=True)
+        untokenise=True, surprisal=True,
+        shift=shift)
 
     dataset = CoNLLUDataset.from_str(
-        conllu, transform, max_len=None, masks_setting="next")
+        conllu, transform, max_len=None, masks_setting="current")
 
     token_mapper = TokenMapper.load(token_mapper_dir)
     dataset.map_to_ids(token_mapper)
@@ -1523,40 +1606,52 @@ def add_surprisal(
 
     integration_costs = generate_head_distance(
         dataset, pos_tag_list, untokenise=True,
-        only_content_words_cost=only_content_words_cost)
+        only_content_words_cost=only_content_words_cost,
+        shift=shift)
 
     fdd = generate_first_dep_distance(
         dataset, pos_tag_list, untokenise=True,
         only_content_words_left=only_content_words_left,
-        only_content_words_cost=only_content_words_cost)
+        only_content_words_cost=only_content_words_cost,
+        shift=shift)
     fddc = generate_fddc(
         dataset, attention, pos_tag_list, untokenise=True,
-        only_content_words_left=only_content_words_left).astype(int)
+        only_content_words_left=only_content_words_left,
+        shift=shift).astype(int)
     fddw = generate_fddw(
         dataset, attention, pos_tag_list, untokenise=True)
-    deprels = generate_deprels(dataset, pos_tag_list, untokenise=True)
+    deprels = generate_deprels(
+        dataset, pos_tag_list, untokenise=True,
+        shift=shift)
 
-    deprels_raw = generate_deprels(dataset, pos_tag_list, untokenise=False)
+    deprels_raw = generate_deprels(
+        dataset, pos_tag_list, untokenise=False, shift=shift)
     fdd_deprels = generate_fdd_deprel(
         dataset, pos_tag_list, deprels_raw,
-        untokenise=True, only_content_words_left=only_content_words_left)
+        untokenise=True, only_content_words_left=only_content_words_left,
+        shift=shift)
     ldds = generate_ldds(
         dataset, pos_tag_list, untokenise=True,
         only_content_words_left=only_content_words_left,
-        only_content_words_cost=only_content_words_cost)
+        only_content_words_cost=only_content_words_cost,
+        shift=shift)
     ldc = generate_ldc(
         dataset, pos_tag_list, untokenise=True,
         only_content_words_left=only_content_words_left,
-        only_content_words_cost=only_content_words_cost)
+        only_content_words_cost=only_content_words_cost,
+        shift=shift)
     attention_cost = generate_attention_cost(
         dataset, attention, pos_tag_list, untokenise=True,
-        only_content_words_left=only_content_words_left)
+        only_content_words_left=only_content_words_left,
+        shift=shift)
     kl_div = generate_kl_div(
-        dataset, attention, pos_tag_list, untokenise=True)
+        dataset, attention, pos_tag_list, untokenise=True,
+        shift=shift)
     demberg = generate_integration_Demberg(
         dataset, pos_tag_list, untokenise=True,
         only_content_words_left=only_content_words_left,
-        only_content_words_cost=only_content_words_cost)
+        only_content_words_cost=only_content_words_cost,
+        shift=shift)
 
     options = ((True, False),)*4
     for o in itertools.product(*options):
@@ -1566,8 +1661,12 @@ def add_surprisal(
                 only_content_words_left=o[0],
                 only_content_words_cost=o[1],
                 with_search=o[2],
-                with_non_referent_establishment_cost=o[3]))
+                with_non_referent_establishment_cost=o[3],
+                shift=shift))
 
+    pos_tag_list = []
+    for sentence in dataset.tokens:
+        pos_tag_list.extend(get_POS_tags(sentence[3:]))
     pos_tag_list = generate_POS_tags(
         pos_tag_list, dataset.space_after,
         untokenise=True)
@@ -1616,7 +1715,8 @@ def process_tsv(
         masks_setting: Literal[
             "current", "next", "complete"] = "current",
         only_content_words_left: bool = False,
-        only_content_words_cost: bool = False
+        only_content_words_cost: bool = False,
+        shift: int = -1
         ) -> None:
     tsv_to_csv(
         input_file, output_file,
@@ -1638,7 +1738,8 @@ def process_tsv(
         ldds_col, ldc_col,
         device, batch_size, masks_setting=masks_setting,
         only_content_words_left=only_content_words_left,
-        only_content_words_cost=only_content_words_cost)
+        only_content_words_cost=only_content_words_cost,
+        shift=shift)
 
 
 if __name__ == "__main__":
