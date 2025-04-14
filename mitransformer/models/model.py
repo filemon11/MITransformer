@@ -1,4 +1,6 @@
 """
+Custom GPT models
+
 Snippets taken from
 https://github.com/karpathy/nanoGPT/blob/master/model.py"""
 
@@ -15,7 +17,7 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 
-from typing import (TypedDict, NotRequired, Sequence, Mapping, Literal)
+from typing import (Sequence, Mapping, Literal)
 
 
 def combine_scores(
@@ -49,16 +51,27 @@ def combine_scores(
     return combined_dicts
 
 
-class BatchInput(TypedDict):
-    input_ids: torch.Tensor
-    masks: NotRequired[dict[str, torch.Tensor | None]]
-
-
 class FeedForward(nn.Module):
+    """Feed forward network with two
+    linear networks and GELU activation function.
+    """
     def __init__(
             self, n_embd: int,
             d_ff_factor: int, dropout: float,
             bias: bool = True):
+        """Initialise feed forward network.
+        Parameters
+        ----------
+        n_embd : int
+            Input and output dimensionality.
+        d_ff_factor : int
+            Factor for inner dimensionality.
+            Size is `n_embd*d_ff_factor`.
+        dropout : float
+            Dropout to apply after feed forward network.
+        bias : bool, default=True
+            Include bias in linear networks.
+        """
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, d_ff_factor*n_embd, bias=bias),
@@ -67,37 +80,79 @@ class FeedForward(nn.Module):
             nn.Dropout(dropout)
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply the feed forward network
+        to an input.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input.
+
+        Returns
+        -------
+        torch.Tensor
+            Feed forward network output.
+        """
         return self.net(x)
 
 
 class DualFixedLinear(nn.Module):
+    """Dual fixed layer for fixing
+    governor head Q and dependent K
+    as well as governor head K and dependent Q.
+    """
     def __init__(self, in_dim: int, out_dim: int, bias: bool = False):
+        """Initialise dual fixed layer.
+
+        Parameters
+        ----------
+        in_dim : int
+            Input dimensionality.
+        out_dim : int
+            Output dimensionality.
+        bias : bool, default=False
+            Whether to include bias in linear layer.
+        """
         super().__init__()
         # TODO: make possible to use when having other keys
-        # => then head, child must be first pair
         # in addition to head and child
+        # => then head, child must be first pair
         # num_keys; saves 1/3 keys * proportion
         # dim: out_dim - (out_dim/3)*(2/num_keys)
         self.w_qkv = nn.Linear(in_dim, 2 * out_dim // 3, bias=bias)
         # -> 2*(M * H/2 * (E/3)*2)
 
-    def forward(self, x: torch.Tensor):
-        # x : [B, S, E]
-        # -> B x (M/2 * H * E/3)
-        qk, v = self.w_qkv(x).chunk(2, dim=-1)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply dual fixed linear module.
+
+        Parameters
+        ----------
+        x : torch.Tensor, shape[B, S, in_dim]
+            Input.
+
+        Returns
+        -------
+        torch.Tensor, shape[B, S, out_dim]
+            Output.
+        """
+        out: torch.Tensor = self.w_qkv(x)
+        qk, v = out.chunk(2, dim=-1)
         # take v from end
         # take q, k and chunk rest into two
-        # cat q, k, r1, k, q, r2, v
         q, k = qk.chunk(2, dim=-1)
         m = torch.cat((q, k, k, q, v), dim=-1)
         return m
 
 
-LayerDescription = tuple[tuple[str, ...], int]  # tag : num_heads
+LayerDescription = tuple[tuple[str, ...], int]
+"""Description for transformer layer:
+tuple of head names and a dimensionality."""
 
 
 class MIAttention(nn.Module):
+    """Mask-informed attention module.
+    """
     # NOTE: This layer design only works for descriptions with
     # multihead-attention modules of the same size
     def __init__(
@@ -105,6 +160,28 @@ class MIAttention(nn.Module):
             block_size: int, attn_dropout: float,
             resid_dropout: float, overlay_causal: bool = False,
             use_dual_fixed: bool = False, bias: bool = False):
+        """Initialise mask-informed attention module.
+
+        Parameters
+        ----------
+        n_embd : int
+            Module layer width.
+        layer_description : LayerDescription
+            Layer description.
+        block_size : int
+            Maximum sequence length.
+        attn_dropout : float
+            Dropout for attention weights.
+        resid_dropout : float
+            Dropout for residual connection.
+        overlay_causal : bool, default=False
+            Apply causal mask, i.e. make model incremental.
+        use_dual_fixed : bool, default=False
+            Cross-fix query and key vectors in dual-head
+            transformer.
+        bias : bool, default=False
+            Include bias in linear layers.
+        """
         # n_embd: embedding dimensionType[DependencyMultiHeadAttention]
         # n_heads : the number of heads we'd like to use
         super().__init__()
@@ -126,7 +203,7 @@ class MIAttention(nn.Module):
 
         self.proj = nn.Linear(n_embd, n_embd, bias=bias)
 
-        self.attn_dropout = nn.Dropout(attn_dropout)
+        self.attn_dropout = attn_dropout
         self.resid_dropout = nn.Dropout(resid_dropout)
 
         self.overlay_causal: bool = overlay_causal
@@ -194,6 +271,11 @@ class MIAttention(nn.Module):
                 masks_stacked.logical_not(),  # type: ignore
                 float('-inf'))
             # unclear why type checker complains
+
+        if self.attn_dropout > 0 and self.training:
+            att[..., 2:][torch.rand(
+                att.shape, device=att.device)[..., 2:]
+                < self.attn_dropout] = float('-inf')
 
         att_logits = att
 
@@ -324,7 +406,8 @@ class MITransformer(nn.Module):
         self.lstm = None
         if config.use_lstm:
             self.lstm = torch.nn.LSTM(
-                n_embd, n_embd, batch_first=True, dropout=config.dropout_lstm)
+                n_embd, n_embd, batch_first=True)
+            self.lstm_dropout = nn.Dropout(config.dropout_lstm)
             self.ln_1 = nn.LayerNorm(n_embd)
             self.ln_2 = nn.LayerNorm(n_embd)
             self.ff = FeedForward(
@@ -365,7 +448,8 @@ class MITransformer(nn.Module):
         x = self.embd_dropout(tok_emb + pos_emb)
 
         if self.lstm is not None:
-            x = x + self.lstm(self.ln_1(x))[0]
+            # x = self.lstm(x)[0]
+            x = x + self.lstm_dropout(self.lstm(self.ln_1(x))[0])
             x = x + self.ff(self.ln_2(x))
 
         att_logits = []

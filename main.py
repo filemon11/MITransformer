@@ -1183,7 +1183,7 @@ def parse_args() -> (
     model_group.add_argument(
         '--dropout_attn', type=OptNone(float), default=-1,
         help=(
-            "DEPREPCATED; dropout for the attention module; "
+            "dropout for the attention module; "
             "overridden by --dropout if set to -1"))
     model_group.add_argument(
         '--dropout_resid', type=OptNone(float), default=-1,

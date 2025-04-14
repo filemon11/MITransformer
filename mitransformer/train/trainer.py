@@ -371,7 +371,7 @@ class LMTrainer():
             # assumes lens are the same for each M
             lens = (~to_ignore_mask).select(
                 seq2_dim, 0).select(masks_dim, 0).float().sum(seq1_dim-1)
-            # TODO: make it possbile to give lens as parameter
+            # TODO: make it possible to give lens as parameter
             # since we compute them already in normal loss calculation
             # and compute the to_ignore_mask here using broadcasting...
 
@@ -416,7 +416,7 @@ class LMTrainer():
         if reduction == "mean":
             loss /= num_scores
         else:
-            loss /= num_scores/total_len  # = factor
+            pass  # loss /= num_scores/total_len  # = factor
             # Each position can be attended to S+1 times
         return loss
 
@@ -482,19 +482,22 @@ class LMTrainer():
             ignore_id: int) -> torch.BoolTensor:
         """TODO:  Shouldn't this return a triangle?"""
 
-        not_to_ignore: torch.BoolTensor
-        not_to_ignore = (label_ids == ignore_id)  # type: ignore
+        nums = (label_ids != ignore_id).sum(1)
+        # [B]
 
-        not_to_ignore = not_to_ignore.logical_not()  # type: ignore
-        not_to_ignore = not_to_ignore.unsqueeze(0).expand(  # type: ignore
-            scores.shape[0], -1, -1)
-        not_to_ignore_sq1 = not_to_ignore.unsqueeze(3).expand(  # type: ignore
-            -1, -1, -1, scores.shape[2])
+        inds = torch.arange(label_ids.shape[1], device=nums.device)
+        # [S]
 
-        not_to_ignore_sq2 = not_to_ignore_sq1.permute(0, 1, 3, 2)
-        not_to_ignore = torch.logical_and(  # type: ignore
-            not_to_ignore_sq1,
-            not_to_ignore_sq2)
+        inds_mat = (inds.unsqueeze(0) + inds.unsqueeze(1)).unsqueeze(0)
+        # [1, S, S]
+
+        not_to_ignore = inds_mat < nums.unsqueeze(1).unsqueeze(2)
+        # [B, S, S]
+
+        not_to_ignore = not_to_ignore.unsqueeze(0).expand(
+            scores.shape[0], -1, -1, -1)
+        # [M, B, S, S]
+
         return ~not_to_ignore  # type: ignore
 
     @classmethod
