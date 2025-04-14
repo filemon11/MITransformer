@@ -4,8 +4,8 @@ import torch.distributed as dist
 from mitransformer import (
     DataProvider, DataConfig, Metric,
     Result, LMTrainer, TrainConfig)
-from mitransformer.data.dataloader import (
-    get_loader)
+from mitransformer.data import (
+    get_loader, MasksSetting)
 from mitransformer.train.metrics import (
     MetricWriter, metric_writer, sum_and_std_metrics, minimise)
 from mitransformer.models.model import (
@@ -863,7 +863,7 @@ class ParserArgs(Params):
     first_k_eval_test: int | None
     connect_with_dummy: bool
     connect_with_self: bool
-    masks_setting: Literal["complete", "current", "next"]
+    masks_setting: MasksSetting
     seed: int
 
 
@@ -1061,7 +1061,8 @@ def parse_args() -> (
             'Establish a recursive arc to the token itself when there '
             'is not parent/child among the precedents?'))
     data_group.add_argument(
-        '--masks_setting', type=str, choices=("complete", "current", "next"),
+        '--masks_setting', type=str, choices=(
+            "complete", "current", "next", "both"),
         default="current",
         help=('What dependencies to assign to the current token.'))
 
@@ -1516,7 +1517,8 @@ def parse_args() -> (
             'Establish a recursive arc to the token itself when there '
             'is not parent/child among the precedents?'))
     data_group.add_argument(
-        '--masks_setting', type=str, choices=("complete", "current", "next"),
+        '--masks_setting', type=str, choices=(
+            "complete", "current", "next", "both"),
         default="current",
         help=('What dependencies to assign to the current token.'))
 
@@ -1561,7 +1563,8 @@ def parse_args() -> (
             'Establish a recursive arc to the token itself when there '
             'is not parent/child among the precedents?'))
     data_group.add_argument(
-        '--masks_setting', type=str, choices=("complete", "current", "next"),
+        '--masks_setting', type=str, choices=(
+            "complete", "current", "next", "both"),
         default=Undefined,
         help=('What dependencies to assign to the current token.'))
 

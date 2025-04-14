@@ -1,16 +1,20 @@
 from .. import models, data, utils
 from . import hooks
 from ..data.dataloader import (
-    DataLoader, get_loader, IDBatch,
-    CoNLLUTokenisedBatch, EssentialBatch, D)
+    IDBatch, D)
 from ..data.dataset import (
-    DepDataset, TransformMaskHeadChild, CoNLLUDataset, IDSen)
-from ..train.metrics import (
+    IDSen, TransformMaskHeadChild)
+from .metrics import (
     sum_metrics, SupervisedEvalMetric,
     SupervisedMetric, Metric, EvalMetric,
     MetricWriter, M, N)
 
-from ..data.tokeniser import DUMMY, ROOT, EOS
+from ..data import (
+    DataLoader, get_loader,
+    CoNLLUTokenisedBatch, EssentialBatch,
+    DepDataset, CoNLLUDataset,
+    DUMMY, ROOT, EOS)
+
 from ..utils.dependencies import (
     mst, merge_head_child_scores,
     dummy_mask_removal, mask_to_headlist, uas_absolute)
@@ -68,7 +72,7 @@ class GeneralConfig(utils.Params):
     early_stop_metric: str = "loss"
     use_ddp: bool = False
     discriminative: bool = False
-    masks_setting: Literal["next", "current", "complete"] = "current"
+    masks_setting: data.MasksSetting = "current"
 
 
 @dataclass
@@ -648,6 +652,10 @@ class LMTrainer():
                 # in case of multiple heads of the same type
                 # scores get averaged
                 # TODO: save these in dictionary
+
+                # TODO allow to manage current and next dep
+                # => two UAS metrics
+
                 middle = score_preds.shape[0]//2
                 preds_head = score_preds[
                     :middle].mean(0).detach().cpu().numpy()
@@ -686,7 +694,6 @@ class LMTrainer():
                 uas_abs = sum(map(get_uas_abs, zip(
                     preds_arcs, golds_arcs, not_padding)))
 
-                # TODO: make the model output logits and apply sigmoid later
                 head_entropy = get_attention_entropy(
                     logits_preds[:middle],
                     to_ignore[:middle]).detach().cpu()

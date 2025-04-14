@@ -160,8 +160,7 @@ def load_dataset(
         triangulate: int | None = 0,
         connect_with_dummy: bool = True,
         connect_with_self: bool = False,
-        masks_setting: Literal[
-            "complete", "current", "next"] = "current",
+        masks_setting: dataset.MasksSetting = "current",
         *args, **kwargs
         ) -> DatasetDict:
     ...
@@ -178,8 +177,7 @@ def load_dataset(
         triangulate: int | None = 0,
         connect_with_dummy: bool = True,
         connect_with_self: bool = False,
-        masks_setting: Literal[
-            "complete", "current", "next"] = "current",
+        masks_setting: dataset.MasksSetting = "current",
         *args, **kwargs
         ) -> DatasetDict:
     ...
@@ -195,8 +193,7 @@ def load_dataset(
         triangulate: int | None = 0,
         connect_with_dummy: bool = True,
         connect_with_self: bool = False,
-        masks_setting: Literal[
-            "complete", "current", "next"] = "current",
+        masks_setting: dataset.MasksSetting = "current",
         *args, **kwargs) -> DatasetDict:
     # TODO: implement option to read raw string data and parse,
     # to accept raw string as input and to save parsed data
@@ -335,8 +332,7 @@ class DataConfig(utils.Params):
     triangulate: int | None = 0
     connect_with_dummy: bool = True
     connect_with_self: bool = False
-    masks_setting: Literal[
-        "complete", "current", "next"] = "current"
+    masks_setting: dataset.MasksSetting = "current"
 
 
 class DataProvider():

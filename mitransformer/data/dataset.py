@@ -42,6 +42,9 @@ ROOT_DEPREL = "!root"
 EOS_DEPREL = "eos"
 
 
+MasksSetting = Literal["complete", "both", "next", "current"]
+
+
 TransformFunc = Callable[
     [npt.NDArray[np.bool_]],
     Mapping[str, npt.NDArray[np.bool_]]]
@@ -253,7 +256,7 @@ class DepDataset(Dataset, ABC, Generic[Sen]):
                 Mapping[
                     str,
                     npt.NDArray[np.bool_]]] | None,
-            masks_setting: Literal['complete', 'current', 'next'],
+            masks_setting: MasksSetting,
             max_len: int | None,
             first_k: int | None):
         ...
@@ -271,7 +274,7 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
     def __init__(
             self, data: CoNLLUDict,
             transform_mask: TransformFunc | None,
-            masks_setting: Literal['complete', 'current', 'next'] = "current"):
+            masks_setting: MasksSetting = "current"):
         self.mapped: bool = False
 
         self.tokens: list[list[str]] = data["tokens"]
@@ -290,7 +293,7 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
         #         for k, v in d.items():
         #             self.masks[k] = self.masks.get(k, []) + [v]
 
-        self.masks_setting: Literal['complete', 'current', 'next']
+        self.masks_setting: MasksSetting
         self.masks_setting = masks_setting
 
         self.tokenised: list[npt.NDArray[np.uint32]] | None = None
@@ -321,7 +324,7 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
                 Mapping[
                     str,
                     npt.NDArray[np.bool_]]] | None = None,
-            masks_setting: Literal['complete', 'current', 'next'] = "current",
+            masks_setting: MasksSetting = "current",
             max_len: int | None = 40,
             first_k: int | None = None):
 
@@ -338,7 +341,7 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
                 Mapping[
                     str,
                     npt.NDArray[np.bool_]]] | None = None,
-            masks_setting: Literal['complete', 'current', 'next'] = "current",
+            masks_setting: MasksSetting = "current",
             max_len: int | None = 40):
 
         tokenlists = load_conllu_from_str(conllu_str, max_len)
@@ -362,16 +365,8 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
                 self.transform_mask(
                     head_list_to_adjacency_matrix(heads)).items())
 
-        match self.masks_setting:
-            case "current":
-                masks = {
-                    key: None if masks is None else masks[:-1, :-1]
-                    for key, masks in masks.items()}
+        masks = shift_masks(self.masks_setting, masks)
 
-            case "next":
-                masks = {
-                    key: None if masks is None else masks[1:, :-1]
-                    for key, masks in masks.items()}
         keys = dict(
             idx=np.array(idx),
             tokens=sentence,
@@ -405,11 +400,12 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
 
 
 class MemMapDataset(DepDataset[EssentialSentence]):
+
     def __init__(
             self,
             transform_mask: TransformFunc | None,
             file: str | None = None,
-            masks_setting: Literal['complete', 'current', 'next'] = "current",
+            masks_setting: MasksSetting = "current",
             id_hl: RaggedMmap | None = None,
             max_len: int | None = 40,
             first_k: int | None = None):
@@ -423,7 +419,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
 
         self.max_len: int | None = max_len
 
-        self.masks_setting: Literal['complete', 'current', 'next']
+        self.masks_setting: MasksSetting
         self.masks_setting = masks_setting
 
         self.id_hl: RaggedMmap | None = id_hl
@@ -475,7 +471,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
                 Mapping[
                     str,
                     npt.NDArray[np.bool_]]] | None = None,
-            masks_setting: Literal['complete', 'current', 'next'] = "current",
+            masks_setting: MasksSetting = "current",
             max_len: int | None = 40,
             first_k: int | None = None):
 
@@ -491,7 +487,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
                 Mapping[
                     str,
                     npt.NDArray[np.bool_]]] | None = None,
-            masks_setting: Literal['complete', 'current', 'next'] = "current",
+            masks_setting: MasksSetting = "current",
             pad_id: int = 0,
             max_len: int | None = 40,
             first_k: int | None = None):
@@ -527,16 +523,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
             masks.update(
                 self.transform_mask(head_list_to_adjacency_matrix(heads)))
 
-        match self.masks_setting:
-            case "current":
-                masks = {
-                    key: None if masks is None else masks[:-1, :-1]
-                    for key, masks in masks.items()}
-
-            case "next":
-                masks = {
-                    key: None if masks is None else masks[1:, :-1]
-                    for key, masks in masks.items()}
+        masks = shift_masks(self.masks_setting, masks)
         # print(masks)
 
         return EssentialSentence(
@@ -576,7 +563,7 @@ class MemMapWindowDataset(MemMapDataset):
             self,
             transform_mask: TransformFunc | None,
             file: str | None = None,
-            masks_setting: Literal['complete', 'current', 'next'] = "current",
+            masks_setting: MasksSetting = "current",
             memdir: str | None = None,
             max_len: int = 40,
             first_k: int | None = None):
@@ -590,7 +577,7 @@ class MemMapWindowDataset(MemMapDataset):
 
         self.max_len: int = max_len
 
-        self.masks_setting: Literal['complete', 'current', 'next']
+        self.masks_setting: MasksSetting
         self.masks_setting = masks_setting
 
         self.memdir: str | None = memdir
@@ -613,7 +600,7 @@ class MemMapWindowDataset(MemMapDataset):
                 Mapping[
                     str,
                     npt.NDArray[np.bool_]]] | None = None,
-            masks_setting: Literal['complete', 'current', 'next'] = "current",
+            masks_setting: MasksSetting = "current",
             max_len: int | None = 40,
             first_k: int | None = None):
         assert max_len is not None
@@ -629,7 +616,7 @@ class MemMapWindowDataset(MemMapDataset):
                 Mapping[
                     str,
                     npt.NDArray[np.bool_]]] | None = None,
-            masks_setting: Literal['complete', 'current', 'next'] = "current",
+            masks_setting: MasksSetting = "current",
             pad_id: int = 0,
             max_len: int | None = 40,
             first_k: int | None = None):
@@ -687,16 +674,7 @@ class MemMapWindowDataset(MemMapDataset):
                         heads,
                         correct_underflow_overflow=True)))  # type: ignore
 
-        match self.masks_setting:
-            case "current":
-                masks = {
-                    key: None if masks is None else masks[:-1, :-1]
-                    for key, masks in masks.items()}
-
-            case "next":
-                masks = {
-                    key: None if masks is None else masks[1:, :-1]
-                    for key, masks in masks.items()}
+        masks = shift_masks(self.masks_setting, masks)
 
         return EssentialSentence(
             idx=np.array(idx),
@@ -871,3 +849,26 @@ def load_conllu(
             loaded_num += 1
         if first_k is not None and loaded_num >= first_k:
             break
+
+
+def shift_masks(
+        masks_setting: MasksSetting,
+        masks: dict[str, npt.NDArray[np.bool_] | None]
+        ) -> dict[str, npt.NDArray[np.bool_] | None]:
+    mode_to_slice = dict(
+        current=(slice(None, -1), slice(None, -1)),
+        next=(slice(1, None), slice(None, -1))
+    )
+
+    try:
+        masks = {
+            key: None if masks is None else masks[
+                *mode_to_slice[masks_setting]]
+            for key, masks in masks.items()}
+    except KeyError:
+        if masks_setting == "both":
+            masks = {
+                f"{key}_{m}": None if masks is None else masks[*s]
+                for key, masks in masks.items()
+                for m, s in mode_to_slice.items()}
+    return masks

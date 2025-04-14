@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 from .. import data
 from . import trainer
 
-from typing import Sequence, Literal
+from typing import Sequence
 
 
 def get_attention_fig(
@@ -140,8 +140,7 @@ class TreePlotHook(Hook):
             self, directory: str, ignore_idx: int | None = None,
             token_mapper: data.TokenMapper | None = None,
             note: str | None = None,
-            masks_setting: Literal[
-                "next", "current", "complete"] = "current") -> None:
+            masks_setting: data.MasksSetting = "current") -> None:
         super().__init__(note)
         self.directory: str = directory
         self.ignore_idx: int | None = ignore_idx
