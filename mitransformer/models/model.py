@@ -457,6 +457,7 @@ class MITransformer(nn.Module):
             x, al = layer(x, masks if self.use_input_mask else None)
             att_logits.append(al)
 
+        # TODO: stack the masks in the mask lists
         return x, combine_scores(att_logits)
 
 
@@ -494,7 +495,7 @@ class MITransformerLM(nn.Module):
             x : [B, S, E]
             masks : dictionary mapping from tags to masks
             mask shape: [B, S, S]
-            masksshould be a boolean mask with True being the elements not
+            masks should be a boolean mask with True being the elements not
             to mask and False being the entries to mask.
 
             Output : Shape[B, S, E]

@@ -13,13 +13,13 @@ from mitransformer.train.trainer import inverse_sigmoid
 from mitransformer.data import (
     CoNLLUDataset,
     parse_list_of_words_with_spacy,
-    load_natural_stories,
+    load_natural_stories, load_zuco,
     TokenMapper)
 
 import torch
 import numpy as np
 
-from typing import Iterable, Literal, Callable, TypeVar
+from typing import Iterable, Literal, Callable, TypeVar, cast
 import numpy.typing as npt
 
 import math
@@ -154,7 +154,7 @@ def add_word_length(input_file, output_file,
     df.to_csv(output_file, index=False)
 
 
-def tsv_to_csv(
+def natural_stories_to_csv(
         input_file: str, output_file: str,
         token_col: str = TOKEN_COL,
         text_id_col: str = TEXT_ID_COL,
@@ -165,9 +165,29 @@ def tsv_to_csv(
         input_file, token_mapper_dir=token_mapper_dir)
     # making lowercase makes no difference
 
-    df = pd.DataFrame({token_col: tokens,
-                       text_id_col: text_ids,
-                       wnum_col: wnums})
+    df = pd.DataFrame({
+        token_col: tokens,
+        text_id_col: text_ids,
+        wnum_col: wnums})
+
+    df.to_csv(output_file, index=False)
+
+
+def zuco_stories_to_csv(
+        input_file: str, output_file: str,
+        token_col: str = TOKEN_COL,
+        text_id_col: str = TEXT_ID_COL,
+        wnum_col: str = WNUM_COL,
+        token_mapper_dir: str | None = None
+        ) -> None:
+    tokens, text_ids, wnums = load_zuco(
+        input_file, token_mapper_dir=token_mapper_dir)
+    # making lowercase makes no difference
+
+    df = pd.DataFrame({
+        token_col: tokens,
+        text_id_col: text_ids,
+        wnum_col: wnums})
 
     df.to_csv(output_file, index=False)
 
@@ -853,7 +873,8 @@ def generate_attention_cost(
         pos_tags: list[str],
         untokenise: bool = False,
         only_content_words_left: bool = True,
-        shift: int = 0) -> npt.NDArray:
+        shift: int = 0,
+        mask_setting: Literal["current", "next"] = "current") -> npt.NDArray:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     # TODO: Discard punctuation
@@ -885,6 +906,9 @@ def generate_attention_cost(
         s = mask_gov.shape[0]
         r = torch.arange(1, s+1)
         dist_mat = torch.tril(-1 * (r.repeat(s, 1) - r.reshape(-1, 1)))
+
+        if mask_setting == "next":
+            dist_mat += 1
 
         cost = (dist_mat*(mask_gov + mask_dep)).sum(-1)
 
@@ -1564,7 +1588,7 @@ def add_surprisal(
         device: str = DEVICE,
         batch_size: int = BATCH_SIZE,
         masks_setting: Literal[
-            "complete", "current", "next"] = "current",
+            "current", "next"] = "current",
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
         shift: int = 0) -> None:
@@ -1592,7 +1616,7 @@ def add_surprisal(
     surprisal, indices, attention = generate_probs(
         trainer, dataset,
         untokenise=True, surprisal=True,
-        shift=shift)
+        shift=0)
 
     dataset = CoNLLUDataset.from_str(
         conllu, transform, max_len=None, masks_setting="current")
@@ -1643,7 +1667,7 @@ def add_surprisal(
     attention_cost = generate_attention_cost(
         dataset, attention, pos_tag_list, untokenise=True,
         only_content_words_left=only_content_words_left,
-        shift=shift)
+        shift=shift, mask_setting=masks_setting)
     kl_div = generate_kl_div(
         dataset, attention, pos_tag_list, untokenise=True,
         shift=shift)
@@ -1713,12 +1737,18 @@ def process_tsv(
         device: str = DEVICE,
         batch_size: int = BATCH_SIZE,
         masks_setting: Literal[
-            "current", "next", "complete"] = "current",
+            "current", "next"] = "current",
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
-        shift: int = -1
+        shift: int = 0,
+        corpus: Literal["naturalstories", "zuco"] = "naturalstories"
         ) -> None:
-    tsv_to_csv(
+
+    load_func = (
+        natural_stories_to_csv if corpus == "naturalstories"
+        else zuco_stories_to_csv)
+
+    load_func(
         input_file, output_file,
         token_col, text_id_col,
         wnum_col, None if raw else token_mapper_dir)
@@ -1746,8 +1776,16 @@ if __name__ == "__main__":
     # Compute probabilities for natural stories corpus
     # based on a model trianed on Wikitext_processed
     model_name = sys.argv[1]
-    in_file = "naturalstories-master/words.tsv"
+    corpus = sys.argv[2]
+    assert corpus == "naturalstories" or corpus == "zuco"
+    corpus = cast(Literal["naturalstories", "zuco"], corpus)
+
+    if corpus == "naturalstories":
+        in_file = "naturalstories-master/words.tsv"
+    else:
+        in_file = "zuco/trial_data.csv"
+
     out_file = f"RT/data/words_processed_{model_name}.csv"
     mapper = "processed/Wikitext_processed/mapper"  # TODO set to processed
     process_tsv(in_file, out_file, model_name, mapper,
-                raw=True)
+                raw=True, corpus=corpus)
