@@ -352,6 +352,7 @@ class TokenMapper():
             where the object will be saved using pickle.dump.
 
         '''
+        # TODO: find method to save without pickle
         with open(filename, 'wb') as handle:
             pickle.dump(self, handle, protocol=pickle.HIGHEST_PROTOCOL)
 

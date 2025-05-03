@@ -8,6 +8,7 @@ from spacy.symbols import ORTH  # type: ignore
 import en_core_web_trf  # type: ignore
 
 import conllu
+from conllu.models import TokenList
 import os
 
 from typing import Iterator, Iterable, overload  # noqa: E402
@@ -89,7 +90,7 @@ def save_doc_as_conllu(
         return return_str
 
 
-def load_conllu(file: str) -> Iterator[conllu.TokenList]:
+def load_conllu(file: str) -> Iterator[TokenList]:
     data_file = open(file, "r", encoding=ENCODING)
     for tokenlist in conllu.parse_incr(data_file):
         yield tokenlist

@@ -2,10 +2,8 @@
 import os
 from pathlib import Path
 
-from . import dataset
-from . import tokeniser
-from ..utils.params import Params
-
+from . import dataset, tokeniser
+from .. import utils
 
 from dataclasses import dataclass
 from typing import (TypedDict, Literal, Any,
@@ -162,8 +160,7 @@ def load_dataset(
         triangulate: int | None = 0,
         connect_with_dummy: bool = True,
         connect_with_self: bool = False,
-        masks_setting: Literal[
-            "complete", "current", "next"] = "current",
+        masks_setting: dataset.MasksSetting = "current",
         *args, **kwargs
         ) -> DatasetDict:
     ...
@@ -180,8 +177,7 @@ def load_dataset(
         triangulate: int | None = 0,
         connect_with_dummy: bool = True,
         connect_with_self: bool = False,
-        masks_setting: Literal[
-            "complete", "current", "next"] = "current",
+        masks_setting: dataset.MasksSetting = "current",
         *args, **kwargs
         ) -> DatasetDict:
     ...
@@ -197,8 +193,7 @@ def load_dataset(
         triangulate: int | None = 0,
         connect_with_dummy: bool = True,
         connect_with_self: bool = False,
-        masks_setting: Literal[
-            "complete", "current", "next"] = "current",
+        masks_setting: dataset.MasksSetting = "current",
         *args, **kwargs) -> DatasetDict:
     # TODO: implement option to read raw string data and parse,
     # to accept raw string as input and to save parsed data
@@ -293,6 +288,9 @@ def load_dataset(
     else:
         token_mapper = tokeniser.TokenMapper.load(
             os.path.join(tokmap_dir, "mapper"))
+        info(
+            None, logger,
+            f"Loaded tokenmapper with vocab size {token_mapper.vocab_size}.")
 
     for split, split_name in zip(sets, splits):
         if split is not None and not split.mapped:
@@ -325,7 +323,7 @@ def load_dataset(
 
 
 @dataclass
-class DataConfig(Params):
+class DataConfig(utils.Params):
     dataset_name: str
     include_test: bool
     memmapped: bool
@@ -337,8 +335,7 @@ class DataConfig(Params):
     triangulate: int | None = 0
     connect_with_dummy: bool = True
     connect_with_self: bool = False
-    masks_setting: Literal[
-        "complete", "current", "next"] = "current"
+    masks_setting: dataset.MasksSetting = "current"
 
 
 class DataProvider():

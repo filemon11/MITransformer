@@ -1,7 +1,8 @@
 
 import torch
+import torch.nn.functional as F
 import numpy as np
-import seaborn as sns
+import seaborn as sns  # type: ignore
 import matplotlib.pyplot as plt
 
 from spacy.vocab import Vocab
@@ -13,13 +14,10 @@ import os
 
 from abc import ABC, abstractmethod
 
-from ..data import (
-    CoNLLUTokenisedBatch, EssentialBatch, DataLoader,
-    TokenMapper)
-from ..train.trainer import (
-    dummy_mask_removal, merge_head_child_scores, mst, mask_to_headlist)
+from .. import data
+from . import trainer
 
-from typing import Sequence, Literal
+from typing import Sequence
 
 
 def get_attention_fig(
@@ -66,14 +64,14 @@ class Hook(ABC):
 
     @abstractmethod
     def __call__(
-            self, input: CoNLLUTokenisedBatch | EssentialBatch,
+            self, input: data.CoNLLUTokenisedBatch | data.EssentialBatch,
             output: tuple[
-                torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
+                torch.Tensor, dict[str, torch.Tensor]]) -> None:
         ...
 
     def init(
-            self, dataloader: DataLoader | None = None,
-            token_mapper: TokenMapper | None = None,
+            self, dataloader: data.DataLoader | None = None,
+            token_mapper: data.TokenMapper | None = None,
             note: str | None = None) -> None:
         self.note = note
 
@@ -81,22 +79,25 @@ class Hook(ABC):
 class AttentionPlotHook(Hook):
     def __init__(
             self, directory: str, ignore_idx: int | None = None,
-            token_mapper: TokenMapper | None = None,
+            token_mapper: data.TokenMapper | None = None,
             note: str | None = None) -> None:
         super().__init__(note)
         self.directory: str = directory
         self.ignore_idx: int | None = ignore_idx
-        self.token_mapper: TokenMapper | None = token_mapper
+        self.token_mapper: data.TokenMapper | None = token_mapper
 
     def __call__(
-            self, input: CoNLLUTokenisedBatch | EssentialBatch,
+            self, input: data.CoNLLUTokenisedBatch | data.EssentialBatch,
             output: tuple[
-                torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
+                torch.Tensor, dict[str, torch.Tensor]]) -> None:
         for head_type, att_preds in output[1].items():
             for i, att_mats in enumerate(att_preds):
                 for idx, att_p, att_g, labels, input_ids in zip(
                         input["idx"], att_mats, input["masks"][head_type],
                         input["label_ids"], input["input_ids"]):
+
+                    att_p = F.softmax(att_p, dim=-1)
+                    att_g = F.softmax(att_g, dim=-1)
 
                     if self.ignore_idx is not None:
                         att_p = att_p[:, labels != self.ignore_idx][
@@ -124,8 +125,8 @@ class AttentionPlotHook(Hook):
                     plt.close()
 
     def init(
-            self, dataloader: DataLoader | None = None,
-            token_mapper: TokenMapper | None = None,
+            self, dataloader: data.DataLoader | None = None,
+            token_mapper: data.TokenMapper | None = None,
             note: str | None = None) -> None:
         super().init(dataloader, token_mapper, note)
         if dataloader is not None:
@@ -137,94 +138,125 @@ class AttentionPlotHook(Hook):
 class TreePlotHook(Hook):
     def __init__(
             self, directory: str, ignore_idx: int | None = None,
-            token_mapper: TokenMapper | None = None,
+            token_mapper: data.TokenMapper | None = None,
             note: str | None = None,
-            masks_setting: Literal[
-                "next", "current", "complete"] = "current") -> None:
+            masks_setting: data.MasksSetting = "current") -> None:
         super().__init__(note)
         self.directory: str = directory
         self.ignore_idx: int | None = ignore_idx
-        self.token_mapper: TokenMapper | None = token_mapper
+        self.token_mapper: data.TokenMapper | None = token_mapper
         self.masks_setting = masks_setting
 
     def __call__(
-            self, input: CoNLLUTokenisedBatch | EssentialBatch,
+            self, input: data.CoNLLUTokenisedBatch | data.EssentialBatch,
             output: tuple[
-                    torch.Tensor, dict[str, list[torch.Tensor]]]) -> None:
-        for i, (att_mats_head, att_mats_child) in enumerate(
-                zip(output[1]["head"], output[1]["child"])):
-            for (
-                idx, att_p_h, att_p_c, att_g_h,
-                att_g_c, labels, input_ids) in zip(
-                    input["idx"], att_mats_head, att_mats_child,
-                    input["masks"]["head"],
-                    input["masks"]["child"],
-                    input["label_ids"],
-                    input["input_ids"]):
-                labels = labels[1:].cpu()
-                if self.masks_setting == "next":
-                    zeros = torch.zeros((
-                        1, att_p_h.shape[1]),
-                        device=att_p_h.device)
-                    att_p_h = torch.concatenate(
-                        (zeros, att_p_h[:-1]), dim=0)
-                    att_p_c = torch.concatenate(
-                        (zeros, att_p_c[:-1]), dim=0)
-                    att_g_h = torch.concatenate(
-                        (zeros, att_g_h[:-1]), dim=0)
-                    att_g_c = torch.concatenate(
-                        (zeros, att_g_c[:-1]), dim=0)
+                    torch.Tensor, dict[str, torch.Tensor]]) -> None:
+        mode = []
+        if self.masks_setting in ("current", "both"):
+            mode.append("current")
+        if self.masks_setting in ("next", "both"):
+            mode.append("next")
+        for m in mode:
+            gov_key = f"head_{m}"
+            dep_key = f"child_{m}"
+            for i, (att_mats_head, att_mats_child) in enumerate(
+                    zip(output[1][gov_key], output[1][dep_key])):
+                att_mats_head = F.sigmoid(att_mats_head)
+                att_mats_child = F.sigmoid(att_mats_child)
+                for (
+                    idx, att_p_h, att_p_c, att_g_h,
+                    att_g_c, labels, input_ids) in zip(
+                        input["idx"], att_mats_head, att_mats_child,
+                        input["masks"][gov_key],
+                        input["masks"][dep_key],
+                        input["label_ids"],
+                        input["input_ids"]):
+                    labels = labels[1:].cpu()
 
-                pred_arcs = dummy_mask_removal(
-                    merge_head_child_scores(att_p_h.cpu(), att_p_c.cpu()))
-                gold_arcs = dummy_mask_removal(
-                    merge_head_child_scores(att_g_h.cpu(), att_g_c.cpu()))
+                    if m == "next":
+                        zeros = torch.zeros((
+                            1, att_p_h.shape[1]),
+                            device=att_p_h.device)
 
-                pred_arcs = pred_arcs[:, labels != self.ignore_idx][
-                        labels != self.ignore_idx, :]
-                gold_arcs = gold_arcs[:, labels != self.ignore_idx][
-                        labels != self.ignore_idx, :]
-                pred_headlist = mst(pred_arcs)
-                gold_headlist = mask_to_headlist(gold_arcs)
-                pred_headlist[0] = 0
-                gold_headlist[0] = 0
+                        def prepend(tensor: torch.Tensor) -> torch.Tensor:
+                            return torch.concatenate(
+                                (zeros, tensor[:-1]), dim=0)
 
-                if self.token_mapper is not None:
-                    input_ids = input_ids[1:][labels != self.ignore_idx]
-                    tokens = self.token_mapper.decode(
-                        [input_ids.cpu().tolist()])[0]
-                else:
-                    tokens = [str(i) for i in range(len(labels))]
+                        self.draw(
+                            i,
+                            prepend(att_p_h),
+                            prepend(att_p_c),
+                            prepend(att_g_h),
+                            prepend(att_g_c),
+                            labels=labels, idx=idx, input_ids=input_ids,
+                            note2="next" if self.masks_setting == "both"
+                            else "")
 
-                pred_doc = spacy.tokens.Doc(Vocab(), tokens,
-                                            heads=pred_headlist.tolist(),
-                                            deps=["dep"]*len(tokens))
-                gold_doc = spacy.tokens.Doc(Vocab(), tokens,
-                                            heads=gold_headlist.tolist(),
-                                            deps=["dep"]*len(tokens))
+                    else:
+                        self.draw(
+                            i,
+                            att_p_h, att_p_c, att_g_h, att_g_c,
+                            labels, idx, input_ids,
+                            "current" if self.masks_setting == "both" else "")
 
-                base_name = tuple() if self.note is None else (self.note,)
-                Path(self.directory).mkdir(parents=True, exist_ok=True)
-                path_pred = os.path.join(
-                    self.directory,
-                    "tree_pred_" + "_".join(
-                        base_name + (str(idx), str(i))) + ".svg")
-                path_gold = os.path.join(
-                    self.directory,
-                    "tree_gold_" + "_".join(
-                        base_name + (str(idx), str(i))) + ".svg")
+    def draw(
+            self, i: int, att_p_h: torch.Tensor, att_p_c: torch.Tensor,
+            att_g_h: torch.Tensor, att_g_c: torch.Tensor,
+            labels: torch.Tensor, idx: int, input_ids,
+            note2: str = ""):
+        pred_arcs = trainer.dummy_mask_removal(
+            trainer.merge_head_child_scores(
+                att_p_h.cpu(), att_p_c.cpu()))
+        gold_arcs = trainer.dummy_mask_removal(
+            trainer.merge_head_child_scores(
+                att_g_h.cpu(), att_g_c.cpu()))
 
-                pdf_pred = displacy.render(pred_doc, style='dep')
-                with Path(path_pred).open("w", encoding="utf-8") as fh:
-                    fh.write(pdf_pred)
+        pred_arcs = pred_arcs[:, labels != self.ignore_idx][
+                labels != self.ignore_idx, :]
+        gold_arcs = gold_arcs[:, labels != self.ignore_idx][
+                labels != self.ignore_idx, :]
+        pred_headlist = trainer.mst(pred_arcs)
+        gold_headlist = trainer.mask_to_headlist(gold_arcs)
+        pred_headlist[0] = 0
+        gold_headlist[0] = 0
 
-                pdf_gold = displacy.render(gold_doc, style='dep')
-                with Path(path_gold).open("w", encoding="utf-8") as fh:
-                    fh.write(pdf_gold)
+        if self.token_mapper is not None:
+            input_ids = input_ids[1:][labels != self.ignore_idx]
+            tokens = self.token_mapper.decode(
+                [input_ids.cpu().tolist()])[0]
+        else:
+            tokens = [str(i) for i in range(len(labels))]
+
+        pred_doc = spacy.tokens.Doc(Vocab(), tokens,
+                                    heads=pred_headlist.tolist(),
+                                    deps=["dep"]*len(tokens))
+        gold_doc = spacy.tokens.Doc(Vocab(), tokens,
+                                    heads=gold_headlist.tolist(),
+                                    deps=["dep"]*len(tokens))
+
+        base_name = (
+            tuple(note2) if self.note is None else (f"{self.note}_{note2}",))
+        Path(self.directory).mkdir(parents=True, exist_ok=True)
+        path_pred = os.path.join(
+            self.directory,
+            "tree_pred_" + "_".join(
+                base_name + (str(idx), str(i))) + ".svg")
+        path_gold = os.path.join(
+            self.directory,
+            "tree_gold_" + "_".join(
+                base_name + (str(idx), str(i))) + ".svg")
+
+        pdf_pred = displacy.render(pred_doc, style='dep')
+        with Path(path_pred).open("w", encoding="utf-8") as fh:
+            fh.write(pdf_pred)
+
+        pdf_gold = displacy.render(gold_doc, style='dep')
+        with Path(path_gold).open("w", encoding="utf-8") as fh:
+            fh.write(pdf_gold)
 
     def init(
-            self, dataloader: DataLoader | None = None,
-            token_mapper: TokenMapper | None = None,
+            self, dataloader: data.DataLoader | None = None,
+            token_mapper: data.TokenMapper | None = None,
             note: str | None = None) -> None:
         super().init(dataloader, token_mapper, note)
         if dataloader is not None:

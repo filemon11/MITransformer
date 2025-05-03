@@ -1,21 +1,23 @@
-from ..models import MITransformer, MITransformerLM, MITransformerConfig
+from .. import models, data, utils
+from . import hooks
 from ..data.dataloader import (
-    DataLoader, get_loader, IDBatch,
-    CoNLLUTokenisedBatch, EssentialBatch, D)
+    IDBatch, D)
 from ..data.dataset import (
-    DepDataset, TransformMaskHeadChild, CoNLLUDataset, IDSen)
-from ..train.metrics import (
+    IDSen, TransformMaskHeadChild)
+from .metrics import (
     sum_metrics, SupervisedEvalMetric,
     SupervisedMetric, Metric, EvalMetric,
     MetricWriter, M, N)
 
-from ..data.tokeniser import DUMMY, ROOT, EOS
-from ..data import parse_list_of_words_with_spacy, TokenMapper
+from ..data import (
+    DataLoader, get_loader,
+    CoNLLUTokenisedBatch, EssentialBatch,
+    DepDataset, CoNLLUDataset,
+    DUMMY, ROOT, EOS)
+
 from ..utils.dependencies import (
     mst, merge_head_child_scores,
     dummy_mask_removal, mask_to_headlist, uas_absolute)
-from ..train.hooks import Hook
-from ..utils.params import Params
 
 from tqdm import tqdm
 import pandas as pd
@@ -39,7 +41,7 @@ from typing import (Self, Literal, cast,
                     Container, Iterable, Mapping,
                     Any, Generator, TypedDict, NotRequired)
 
-from ..utils.logmaker import getLogger, info, get_timestr
+from ..utils.logmaker import getLogger, info, get_timestr, warning
 
 logger = getLogger(__name__)
 
@@ -57,7 +59,7 @@ Mode = Literal["standard", "input", "supervised"]
 
 
 @dataclass
-class GeneralConfig(Params):
+class GeneralConfig(utils.Params):
     batch_size: int = 16
     dependency_mode: Mode = "supervised"
     loss_alpha: float | None = 0.5
@@ -70,7 +72,7 @@ class GeneralConfig(Params):
     early_stop_metric: str = "loss"
     use_ddp: bool = False
     discriminative: bool = False
-    masks_setting: Literal["next", "current", "complete"] = "current"
+    masks_setting: data.MasksSetting = "current"
 
 
 @dataclass
@@ -81,20 +83,22 @@ class TrainConfig(GeneralConfig):
     early_stop_after: int | None = 1
     use_steps: bool = False
     max_steps: int | None = None
+    gradient_acc: int | None = None
 
 
 class LMTrainer():
     model_dir: str = "./models/"
 
     def __init__(
-            self, transformerlm: MITransformerLM,
-            transformer_config: MITransformerConfig,
+            self, transformerlm: models.MITransformerLM,
+            transformer_config: models.MITransformerConfig,
             config: GeneralConfig):
         self.writer = MetricWriter(
             log_dir=os.path.join("./runs", config.model_name))
-        self.transformerlm: MITransformerLM | DDP = transformerlm
+        self.transformerlm: models.MITransformerLM | DDP = transformerlm
         self.transformerlm.to(config.device)
-        self.transformer_config: MITransformerConfig = transformer_config
+        self.transformer_config: models.MITransformerConfig
+        self.transformer_config = transformer_config
 
         self.optimiser: Optimizer | None
         self.__config: GeneralConfig
@@ -112,7 +116,7 @@ class LMTrainer():
                 output_device=device,
                 find_unused_parameters=False)
 
-        self.hooks: list[Hook] = []
+        self.hooks: list[hooks.Hook] = []
 
     @property
     def config(self) -> GeneralConfig:
@@ -139,7 +143,8 @@ class LMTrainer():
     def load_model(
                 cls, model_name: str, device: str = "cpu",
                 legacy_support: bool = True
-                ) -> tuple[MITransformerLM, MITransformerConfig]:
+                ) -> tuple[
+                    models.MITransformerLM, models.MITransformerConfig]:
         if (legacy_support
                 and "config" in (loaded_dict := torch.load(
                 os.path.join(cls.model_dir, model_name, "model"),
@@ -149,15 +154,16 @@ class LMTrainer():
             state_dict, transformer_config = loaded_dict.values()
 
         else:
-            transformer_config = MITransformerConfig.load(os.path.join(
+            transformer_config = models.MITransformerConfig.load(os.path.join(
                 cls.model_dir, model_name, "transformer_config.json"
             ))
             state_dict = torch.load(
                     os.path.join(cls.model_dir, model_name, "model"),
                     weights_only=True)
-        transformer_config = cast(MITransformerConfig, transformer_config)
-        model: MITransformerLM = MITransformerLM(
-            MITransformer(transformer_config))
+        transformer_config = cast(
+            models.MITransformerConfig, transformer_config)
+        model: models.MITransformerLM = models.MITransformerLM(
+            models.MITransformer(transformer_config))
         model.load_state_dict(state_dict)
         return model, transformer_config
 
@@ -189,19 +195,19 @@ class LMTrainer():
         return cls(model, transformer_config, config)
 
     @classmethod
-    def new(cls, transformer_config: MITransformerConfig,
+    def new(cls, transformer_config: models.MITransformerConfig,
             config: GeneralConfig) -> Self:
 
-        model: MITransformerLM = MITransformerLM(
-            MITransformer(transformer_config))
+        model: models.MITransformerLM = models.MITransformerLM(
+            models.MITransformer(transformer_config))
 
         cls.model_info(model, transformer_config, config)
         return cls(model, transformer_config, config)
 
     @classmethod
     def model_info(
-            cls, model: MITransformerLM,
-            transformer_config: MITransformerConfig,
+            cls, model: models.MITransformerLM,
+            transformer_config: models.MITransformerConfig,
             config: GeneralConfig) -> None:
         info(
             config.rank, logger,
@@ -227,7 +233,8 @@ class LMTrainer():
         if not self.use_ddp or self.config.rank == 0:
             model = self.transformerlm
             if self.use_ddp:
-                assert isinstance(self.transformerlm.module, MITransformerLM)
+                assert isinstance(
+                    self.transformerlm.module, models.MITransformerLM)
                 model = self.transformerlm.module
             dir = os.path.join(self.model_dir, self.train_config.model_name)
             Path(dir).mkdir(parents=True, exist_ok=True)
@@ -248,13 +255,25 @@ class LMTrainer():
             self.train_config.save(os.path.join(dir, "config.json"))
 
     def load_state(
-            self, model_name: str | None = None) -> None:
+            self, model_name: str | None = None,
+            legacy_support: bool = True) -> None:
         if model_name is None:
             model_name = self.config.model_name
-        state_dict, _ = torch.load(
-            os.path.join(self.model_dir, model_name, "model"),
-            weights_only=False).values()
+        if (legacy_support
+                and "config" in (loaded_dict := torch.load(
+                os.path.join(self.model_dir, model_name, "model"),
+                map_location=str(self.config.device),
+                weights_only=False,
+                pickle_module=pickle)).keys()):
+            state_dict, _ = loaded_dict.values()
+
+        else:
+            state_dict = torch.load(
+                    os.path.join(self.model_dir, model_name, "model"),
+                    weights_only=True)
         if self.use_ddp:
+            assert isinstance(
+                self.transformerlm.module, models.MITransformerLM)
             self.transformerlm.module.load_state_dict(state_dict)
         else:
             self.transformerlm.load_state_dict(state_dict)
@@ -262,13 +281,13 @@ class LMTrainer():
 
     def add_hook(
             self,
-            hook: Hook
+            hook: hooks.Hook
             ) -> None:
         self.hooks.append(hook)
 
     def run_hooks(
             self, input: CoNLLUTokenisedBatch | EssentialBatch,
-            output: tuple[torch.Tensor, dict[str, list[torch.Tensor]]]
+            output: tuple[torch.Tensor, dict[str, torch.Tensor]]
             ) -> None:
         for hook in self.hooks:
             hook(input, output)
@@ -276,7 +295,7 @@ class LMTrainer():
     def init_hooks(
             self, dataloader: DataLoader, dataset_name: str,
             epoch: int | None = None,
-            token_mapper: TokenMapper | None = None) -> None:
+            token_mapper: data.TokenMapper | None = None) -> None:
         for hook in self.hooks:
             if epoch is None:
                 hook.init(dataloader, token_mapper, dataset_name)
@@ -342,21 +361,21 @@ class LMTrainer():
         seq1_dim = 2
         seq2_dim = 3
         shape = score_preds.shape
-
         M = shape[masks_dim]
         B = shape[batch_dim]
         S = shape[seq1_dim]
 
         # Calculation if unpadded (no ignore mask)
+        # assumes that all sentences have same length
         total_len = B * S
-        factor = int((S+1) / 2 * M)
+        factor = int((S + 1) / 2 * M)
         num_scores = total_len * factor
 
         if to_ignore_mask is not None:
             # assumes lens are the same for each M
             lens = (~to_ignore_mask).select(
-                seq2_dim, 0).select(masks_dim, 0).sum(seq1_dim-1).float()
-            # TODO: make it possbile to give lens as parameter
+                seq2_dim, 0).select(masks_dim, 0).float().sum(seq1_dim-1)
+            # TODO: make it possible to give lens as parameter
             # since we compute them already in normal loss calculation
             # and compute the to_ignore_mask here using broadcasting...
 
@@ -364,7 +383,7 @@ class LMTrainer():
             # divide through M since each head mask contributes 1x total_len
 
             num_scores = (
-                torch.dot((lens+1), lens) / 2 * M).item()  # type: ignore
+                torch.dot((lens+1), lens) * M / 2).item()  # type: ignore
             # divide score/factor by number of tokens to get average
             # per-token loss
             # score_gold = cast(torch.BoolTensor,
@@ -391,64 +410,69 @@ class LMTrainer():
             weights[~score_gold] = f_false
             loss *= weights
 
+        if to_ignore_mask is not None:
+            loss = (~to_ignore_mask)*loss
+        else:
+            loss = torch.tril(loss)
+
         loss = torch.sum(loss)
+
         if reduction == "mean":
             loss /= num_scores
         else:
-            loss /= num_scores/total_len  # = factor
+            pass  # loss /= num_scores/total_len  # = factor
             # Each position can be attended to S+1 times
         return loss
 
     @staticmethod
     def filter_arc_scores(
-            arc_scores: Mapping[str, list[torch.Tensor]],
+            arc_scores: Mapping[str, torch.Tensor],
             keep_keys: Container[str] | Iterable[str]
-            ) -> dict[str, list[torch.Tensor]]:
+            ) -> dict[str, torch.Tensor]:
         return {key: arc_scores[key]
                 for key in arc_scores.keys() if key in keep_keys}
 
     @staticmethod
     def stack_pred_scores(
-            arc_scores: Mapping[str, list[torch.Tensor]]
-            ) -> torch.Tensor | None:
+            arc_scores: Mapping[str, torch.Tensor]
+            ) -> dict[str, torch.Tensor] | None:
         if len(arc_scores) == 0:
             return None
-        return torch.concat(
-            [
-                torch.stack(sc_list)
-                for sc_list in arc_scores.values()])
+        return dict(arc_scores)
 
     @staticmethod
     def expand_gold_scores(
             masks: Mapping[str, torch.BoolTensor],
-            arc_scores: Mapping[str, list[torch.Tensor]]
-            ) -> torch.BoolTensor | None:
-        expanded = [gold.unsqueeze(0).expand(len(arc_scores), -1, -1, -1)
-                    for gold, arc_scores in zip(
-                        masks.values(),
-                        arc_scores.values())]
+            arc_scores: Mapping[str, torch.Tensor]
+            ) -> dict[str, torch.BoolTensor] | None:
+        expanded = {key: gold.unsqueeze(0).expand(len(arc_scores), -1, -1, -1)
+                    for (key, gold), arc_scores in zip(
+                        masks.items(),
+                        arc_scores.values())}
         if len(expanded) == 0:
             return None
-        return cast(torch.BoolTensor, torch.concat(expanded))
+        return cast(dict[str, torch.BoolTensor], expanded)
 
     @classmethod
     def align_scores(
             cls,
-            arc_scores: Mapping[str, list[torch.Tensor]],
+            arc_scores: Mapping[str, torch.Tensor],
             masks: Mapping[str, torch.BoolTensor]
-            ) -> tuple[torch.Tensor, torch.BoolTensor] | tuple[None, None]:
+            ) -> tuple[
+                dict[str, torch.Tensor], dict[str, torch.BoolTensor]] | None:
         score_preds = cls.stack_pred_scores(arc_scores)
         score_gold = cls.expand_gold_scores(masks, arc_scores)
         if score_preds is None or score_gold is None:
-            return None, None
+            return None
         else:
             return score_preds, score_gold
 
     @classmethod
     def prepare_scores(
-            cls, arc_scores: Mapping[str, list[torch.Tensor]],
+            cls, arc_scores: Mapping[str, torch.Tensor],
             masks: Mapping[str, torch.BoolTensor]
-            ) -> tuple[torch.Tensor, torch.BoolTensor] | tuple[None, None]:
+            ) -> tuple[
+                dict[str, torch.Tensor], dict[str, torch.BoolTensor]] | None:
         arc_scores = cls.filter_arc_scores(
             arc_scores,
             set(masks.keys()))
@@ -461,19 +485,22 @@ class LMTrainer():
             ignore_id: int) -> torch.BoolTensor:
         """TODO:  Shouldn't this return a triangle?"""
 
-        not_to_ignore: torch.BoolTensor
-        not_to_ignore = (label_ids == ignore_id)  # type: ignore
+        nums = (label_ids != ignore_id).sum(1)
+        # [B]
 
-        not_to_ignore = not_to_ignore.logical_not()  # type: ignore
-        not_to_ignore = not_to_ignore.unsqueeze(0).expand(  # type: ignore
-            scores.shape[0], -1, -1)
-        not_to_ignore_sq1 = not_to_ignore.unsqueeze(3).expand(  # type: ignore
-            -1, -1, -1, scores.shape[2])
+        inds = torch.arange(label_ids.shape[1], device=nums.device)
+        # [S]
 
-        not_to_ignore_sq2 = not_to_ignore_sq1.permute(0, 1, 3, 2)
-        not_to_ignore = torch.logical_and(  # type: ignore
-            not_to_ignore_sq1,
-            not_to_ignore_sq2)
+        inds_mat = (inds.unsqueeze(0) + inds.unsqueeze(1)).unsqueeze(0)
+        # [1, S, S]
+
+        not_to_ignore = inds_mat < nums.unsqueeze(1).unsqueeze(2)
+        # [B, S, S]
+
+        not_to_ignore = not_to_ignore.unsqueeze(0).expand(
+            scores.shape[0], -1, -1, -1)
+        # [M, B, S, S]
+
         return ~not_to_ignore  # type: ignore
 
     @classmethod
@@ -490,7 +517,7 @@ class LMTrainer():
             lm_loss: torch.Tensor,
             arc_loss: torch.Tensor | None = None,
             perplexity: float | None = None,
-            uas: float | None = None,
+            uas: float | pd.DataFrame | None = None,
             att_entropy: pd.DataFrame | None = None) -> Metric:
         if perplexity is not None:
             if arc_loss is not None:
@@ -503,33 +530,34 @@ class LMTrainer():
                     alpha=self.config.loss_alpha,
                     _uas=uas,
                     _att_entropy=att_entropy,
-                    main_metric=self.config.early_stop_metric
+                    _main_metric=self.config.early_stop_metric
                     )
             else:
                 return EvalMetric(
                     num_instances, _lm_loss=lm_loss,
                     _perplexity=perplexity,
-                    main_metric=self.config.early_stop_metric)
+                    _main_metric=self.config.early_stop_metric)
 
         if arc_loss is None:
             return Metric(
                 num_instances, _lm_loss=lm_loss,
-                main_metric=self.config.early_stop_metric)
+                _main_metric=self.config.early_stop_metric)
         else:
             return SupervisedMetric(
                 num_instances, _lm_loss=lm_loss, _arc_loss=arc_loss,
                 alpha=self.config.loss_alpha,
-                main_metric=self.config.early_stop_metric)
+                _main_metric=self.config.early_stop_metric)
 
     def train_step(
             self,
             batch: CoNLLUTokenisedBatch | EssentialBatch,
-            ignore_index: int) -> Metric:
+            ignore_index: int,
+            perform_opt: bool = True) -> Metric:
         assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
         self.batch_to(batch, device=self.config.device)  # type: ignore
-        logits, arc_scores = self.transformerlm(**batch)
-        self.run_hooks(batch, (logits, arc_scores))
+        logits, arc_logits = self.transformerlm(**batch)
+        self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
         lm_loss = self.loss(
             logits, batch["label_ids"],
@@ -538,20 +566,30 @@ class LMTrainer():
         arc_loss: torch.Tensor | None = None
 
         if self.train_config.dependency_mode == "supervised":
-            score_preds, score_gold = self.prepare_scores(
-                arc_scores, batch["masks"])
-            if score_preds is not None and score_gold is not None:
+            score_pair = self.prepare_scores(
+                arc_logits, batch["masks"])
 
+            if score_pair is not None:
+                score_preds, score_golds = score_pair
+                score_preds = {
+                    key: F.sigmoid(pred) for key, pred in score_preds.items()}
+
+                preds_concat = torch.concat(list(score_preds.values()))
+                golds_concat = torch.concat(list(score_golds.values()))
                 to_ignore = self.get_ignore_mask(
-                    score_preds,
-                    batch["label_ids"],
-                    ignore_index)
+                        preds_concat,
+                        batch["label_ids"],
+                        ignore_index)
 
                 arc_loss = self.arc_loss(
-                    score_preds,
-                    score_gold,
+                    preds_concat,
+                    cast(torch.BoolTensor, golds_concat),
                     to_ignore,
                     reduction="sum")
+            else:
+                warning(
+                    self.config.rank, logger,
+                    "Scores did not align. Check keys.")
 
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
 
@@ -561,8 +599,9 @@ class LMTrainer():
             arc_loss=arc_loss)
 
         metric.loss.backward()   # backward pass
-        self.optimiser.step()   # update parameters
-        self.optimiser.zero_grad(set_to_none=True)
+        if perform_opt:
+            self.optimiser.step()   # update parameters
+            self.optimiser.zero_grad(set_to_none=True)
 
         metric.detach()
         metric.to_("cpu")
@@ -575,8 +614,8 @@ class LMTrainer():
             ignore_index: int) -> Metric:
         self.batch_to(batch, device=self.config.device)  # type: ignore
 
-        logits, arc_scores = self.transformerlm(**batch)
-        self.run_hooks(batch, (logits, arc_scores))
+        logits, arc_logits = self.transformerlm(**batch)
+        self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
 
         labels = batch["label_ids"]
@@ -595,76 +634,67 @@ class LMTrainer():
                 softmax=not self.config.discriminative),
             labels, ignore_index).sum().detach().cpu().item()
 
-        uas_abs = None
+        uas_abs: None | pd.DataFrame | float = None
         arc_loss = None
         att_entropy = None
         if mode == "supervised":
-            score_preds, score_gold = self.prepare_scores(
-                arc_scores, batch["masks"])
-            if score_preds is not None and score_gold is not None:
+            score_pair = self.prepare_scores(
+                arc_logits, batch["masks"])
 
-                to_ignore = self.get_ignore_mask(
-                    score_preds,
-                    batch["label_ids"],
-                    ignore_index)
+            if score_pair is not None:
+                score_preds, score_golds = score_pair
+                score_logits = score_preds
+                score_preds = {
+                    key: F.sigmoid(pred) for key, pred in score_preds.items()}
+
+                preds_concat = torch.concat(list(score_preds.values()))
+                golds_concat = torch.concat(list(score_golds.values()))
+
+                to_ignore_dict = {
+                    key: self.get_ignore_mask(
+                        preds,
+                        batch["label_ids"],
+                        ignore_index)
+                    for key, preds in score_preds.items()}
+                to_ignore = cast(
+                    torch.BoolTensor, torch.concat(
+                        list(to_ignore_dict.values())))
 
                 arc_loss = self.arc_loss(
-                    score_preds,
-                    score_gold,
+                    preds_concat,
+                    cast(torch.BoolTensor, golds_concat),
                     to_ignore,
                     reduction="sum")
 
-                # clean this up a bit
+                # TODO allow to manage current and next dep
+                # => two UAS metrics
 
-                # in case of multiple heads of the same type
-                # scores get averaged
-                # TODO: save these in dictionary
-                middle = score_preds.shape[0]//2
-                preds_head = score_preds[
-                    :middle].mean(0).detach().cpu().numpy()
-                golds_head = score_gold[
-                    :middle].float().mean(0).detach().cpu().numpy()
-                preds_child = score_preds[
-                    middle:].mean(0).detach().cpu().numpy()
-                golds_child = score_gold[
-                    middle:].float().mean(0).detach().cpu().numpy()
-                # print("golds_head", golds_head.astype(float))
-                # print("golds_child", golds_child.astype(float))
-                if self.config.masks_setting == "next":
-                    zeros = np.zeros((
-                        preds_head.shape[0],
-                        1, preds_head.shape[2]))
-                    preds_head = np.concatenate(
-                        (zeros, preds_head[:, :-1]), axis=1)
-                    preds_child = np.concatenate(
-                        (zeros, preds_child[:, :-1]), axis=1)
-                    golds_head = np.concatenate(
-                        (zeros, golds_head[:, :-1]), axis=1)
-                    golds_child = np.concatenate(
-                        (zeros, golds_child[:, :-1]), axis=1)
+                uas = []
+                if self.config.masks_setting in ("current", "both"):
+                    uas.append(uas_composition(
+                        score_preds, score_golds, batch["label_ids"],
+                        ignore_index, "current",
+                        "head_current", "child_current"))
+                if self.config.masks_setting in ("next", "both"):
+                    uas.append(uas_composition(
+                        score_preds, score_golds, batch["label_ids"],
+                        ignore_index, "next", "head_next", "child_next"))
+                if len(uas) == 1:
+                    uas_abs = uas[0]
+                elif len(uas) > 1:
+                    uas_abs = pd.DataFrame({
+                        "current": [uas[0]],
+                        "next": [uas[1]]})
+                else:
+                    raise Exception(
+                        "masks_setting should not be "
+                        + self.config.masks_setting)
 
-                preds_arcs = dummy_mask_removal(
-                    merge_head_child_scores(preds_head, preds_child))
-                golds_arcs = dummy_mask_removal(
-                    merge_head_child_scores(golds_head, golds_child))
-
-                # print(preds_arcs.round(2))
-                # print(golds_arcs.astype(float))
-                not_padding = (
-                    batch["label_ids"]
-                    != ignore_index).cpu().numpy()[:, 1:]
-
-                uas_abs = sum(map(get_uas_abs, zip(
-                    preds_arcs, golds_arcs, not_padding)))
-
-                # TODO: make the model output logits and apply sigmoid later
-                head_entropy = get_attention_entropy(
-                    inverse_sigmoid(score_preds[:middle])).detach().cpu()
-                child_entropy = get_attention_entropy(
-                    inverse_sigmoid(score_preds[middle:])).detach().cpu()
-
-                att_entropy = pd.DataFrame({"head": head_entropy.tolist(),
-                                            "child": child_entropy.tolist()})
+                att_entropy = pd.DataFrame({
+                    key: get_attention_entropy(
+                        logits_preds,
+                        to_ignore_dict[key]).detach().cpu()
+                    for key, logits_preds in score_logits.items()})
                 # can make separate list of heads
 
         metric = self.get_metric(
@@ -699,7 +729,7 @@ class LMTrainer():
             self,
             train: DepDataset[IDSen] | DataLoader,
             eval: DepDataset[IDSen] | DataLoader,
-            token_mapper: TokenMapper | None = None,
+            token_mapper: data.TokenMapper | None = None,
             **kwargs) -> Generator[
                 Result,
                 None,
@@ -747,6 +777,7 @@ class LMTrainer():
             # Steps
             for train_metric in self._train(train):
                 total_steps += 1  # equal epochs in case of not use_steps
+
                 if pbar_steps is not None:
                     pbar_steps.update(1)
 
@@ -847,68 +878,30 @@ class LMTrainer():
             train=train,  # type: ignore
             eval=eval,
             test=test)
-        # if score_preds is not None and score_gold is not None:
-        #    token_mapper: TokenMapper = TokenMapper.load("./tokmap.pickle")
-        #    for i in range(10):
-        #        pred_head = score_preds[0][i].detach().cpu().numpy()
-        #        gold_head = score_gold[0][i].detach().cpu().numpy()
-        #        pred_child = score_preds[1][i].detach().cpu().numpy()
-        #        gold_child = score_gold[1][i].detach().cpu().numpy()
-        #        fig, ax = plt.subplots(2, 2)
-        #        sns.heatmap(
-        #            pred_head, ax=ax[0][0])
-        #        sns.heatmap(
-        #            gold_head, ax=ax[0][1])
-        #        sns.heatmap(
-        #            pred_child, ax=ax[1][0])
-        #        sns.heatmap(
-        #            gold_child, ax=ax[1][1])
-        #        fig.savefig(f"plot_{i}.png")
-        #
-        #        not_padding = (batch["input_ids"][i]
-        #                       != token_mapper.pad_id).cpu().numpy()
-        #
-        #        # TODO: use heuristic of leaving out root node
-        #        # and then calculating MST
-        #        pred_scores = merge_head_child_scores(
-        #            pred_head, pred_child)[not_padding][:, not_padding]
-        #        pred_scores = dummy_mask_removal(pred_scores)
-        #        gold_scores = merge_head_child_scores(
-        #            gold_head, gold_child)[not_padding][:, not_padding]
-        #        gold_scores = dummy_mask_removal(gold_scores)
-        #
-        #        pred_headlist = mst(pred_scores)
-        #        gold_headlist = mask_to_headlist(gold_scores)
-        #
-        #        ids = batch["input_ids"].detach().cpu().numpy()[
-        #            i, not_padding][1:]
-        #        labels = token_mapper.decode([ids.tolist()])[0]
-        #        plot_tree(f"dep_plot_pred_{i}.png",
-        #                  pred_headlist.tolist(),
-        #                  labels)
-        #
-        #        plot_tree(f"dep_plot_gold_{i}.png",
-        #                  gold_headlist.tolist(),
-        #                  labels)
 
     def _train(self, loader: DataLoader[IDBatch, D]) -> Iterable[Metric]:
         assert self.train_config is not None, "Config missing training params."
         self.transformerlm.train()
 
-        metrics: list[Metric]
+        def iterate():
+            assert self.train_config is not None, (
+                "Config missing training params.")
+            metrics: list[Metric] = list()
+            for i, batch in tqdm(enumerate(loader), desc="Batches"):
+                metrics.append(self.train_step(
+                    batch,
+                    loader.dataset.keys_for_padding["label_ids"],
+                    perform_opt=(po := check_perform_opt(
+                        self.train_config.gradient_acc, i))))
+                if po:
+                    yield sum_metrics(metrics)
+                    metrics = list()
+
         if self.train_config.use_steps:
-            for batch in tqdm(loader, desc="Batches"):
-                metric = self.train_step(
-                    batch,
-                    loader.dataset.keys_for_padding["label_ids"])
-                yield self.gather_metrics(metric)
+            for e in iterate():
+                yield self.gather_metrics(e)
         else:
-            metrics = [
-                self.train_step(
-                    batch,
-                    loader.dataset.keys_for_padding["label_ids"])
-                for batch in tqdm(loader, desc="Batches")]
-            yield self.gather_metrics(sum_metrics(metrics))
+            yield self.gather_metrics(sum_metrics(list(iterate())))
 
     def _eval(self, loader: DataLoader[IDBatch, D]) -> Metric:
         self.transformerlm.eval()
@@ -924,7 +917,7 @@ class LMTrainer():
         return self.gather_metrics(sum_metrics(metrics))
 
     def test(
-            self, token_mapper: TokenMapper | None = None,
+            self, token_mapper: data.TokenMapper | None = None,
             **datasets: DepDataset | DataLoader | Any
             ) -> dict[str, Metric]:
         metrics: dict[str, Metric] = {}
@@ -943,7 +936,7 @@ class LMTrainer():
             make_prob: bool = False,
             only_true: bool = False,
             dataset_name: str | None = None,
-            token_mapper: TokenMapper | None = None
+            token_mapper: data.TokenMapper | None = None
             ) -> tuple[list[torch.Tensor], dict[str, list[torch.Tensor]]]:
         """Returns logits and arc scores"""
         # TODO: Does this work with ddp? Batches are distributed but not
@@ -960,18 +953,18 @@ class LMTrainer():
         ignore_index = dataset.keys_for_padding["label_ids"]
 
         unpadded_logits: list[torch.Tensor] = []
-        unpadded_arc_scores: defaultdict[str, list[torch.Tensor]]
-        unpadded_arc_scores = defaultdict(list)
+        unpadded_arc_logits: defaultdict[str, list[torch.Tensor]]
+        unpadded_arc_logits = defaultdict(list)
         self.transformerlm.eval()
         with torch.no_grad():
             # eval loop: no backprop on this data, to avoid storing
-            # all intermediatte variable
+            # all intermediate variable
             logits: torch.Tensor
-            arc_scores: dict[str, list[torch.Tensor]]
+            arc_logits: dict[str, torch.Tensor]
             for batch in tqdm(loader, desc="Batches"):
                 self.batch_to(batch, device=self.config.device)  # type: ignore
-                logits, arc_scores = self.transformerlm(**batch)
-                self.run_hooks(batch, (logits, arc_scores))
+                logits, arc_logits = self.transformerlm(**batch)
+                self.run_hooks(batch, (logits, arc_logits))
                 labels = batch["label_ids"]
 
                 if make_prob:
@@ -985,15 +978,15 @@ class LMTrainer():
                 unpadded_logits.extend(
                     unpad(logits, labels, ignore_index))
 
-                for key in arc_scores.keys():
-                    unpadded_arc_scores[key].extend(
-                        unpad_masks(torch.stack(
-                            arc_scores[key]).swapaxes(0, 1),
+                for key in arc_logits.keys():
+                    unpadded_arc_logits[key].extend(
+                        unpad_masks(
+                            arc_logits[key].swapaxes(0, 1),
                             labels, ignore_index))
-        return unpadded_logits, dict(unpadded_arc_scores)
+        return unpadded_logits, dict(unpadded_arc_logits)
 
     def generate(
-            self, token_mapper: TokenMapper,
+            self, token_mapper: data.TokenMapper,
             start: str | None = None, max_len: int = 40) -> str:
 
         g: list[int]
@@ -1002,6 +995,8 @@ class LMTrainer():
             model = self.transformerlm.module
         else:
             model = self.transformerlm
+
+        assert isinstance(model, models.MITransformerLM)
 
         if start is None:
             idx = torch.zeros(
@@ -1014,7 +1009,8 @@ class LMTrainer():
                 idx, max_new_tokens=max_len).tolist()[0]
             # support an initial mask here
         else:
-            conllu = parse_list_of_words_with_spacy(start.split(), min_len=0)
+            conllu = data.parse_list_of_words_with_spacy(
+                start.split(), min_len=0)
 
             transform = TransformMaskHeadChild(
                 keys_for_head={"head"},
@@ -1204,12 +1200,17 @@ def get_uas_abs(inp: tuple[np.ndarray, np.ndarray, int]) -> int:
     return uas_s
 
 
-def get_attention_entropy(logits: torch.Tensor) -> torch.Tensor:
+def get_attention_entropy(
+        logits: torch.Tensor,
+        to_ignore: torch.Tensor | None = None) -> torch.Tensor:
     """input shape [H, B, S, S]
     with H: heads, B: batch size, S: sequence length.
     output shape: [H]"""
     probs = F.softmax(logits, dim=-1)
     entropy = -(probs*torch.log(probs))
+
+    if to_ignore is not None:
+        entropy[to_ignore] = torch.nan
     entropy[entropy.isnan()] = 0
     entropy = entropy.flatten(1).sum(-1)
     return entropy
@@ -1217,3 +1218,42 @@ def get_attention_entropy(logits: torch.Tensor) -> torch.Tensor:
 
 def inverse_sigmoid(x: torch.Tensor) -> torch.Tensor:
     return -torch.log((1-x)/x)
+
+
+def check_perform_opt(gradient_acc: int | None, i_train: int) -> bool:
+    return (gradient_acc is None
+            or (i_train+1) % gradient_acc == 0)
+
+
+def uas_composition(
+        score_preds: dict[str, torch.Tensor],
+        score_golds: dict[str, torch.BoolTensor],
+        label_ids: torch.Tensor,
+        ignore_index: int,
+        masks_setting: Literal["current", "next"] = "current",
+        gov_key: str = "head", dep_key: str = "child") -> int:
+    values = torch.stack((
+        score_preds[gov_key], score_golds[gov_key].float(),
+        score_preds[dep_key], score_golds[dep_key].float()))
+    values_np = values.mean(1).detach().cpu().numpy()
+
+    if masks_setting == "next":
+        zeros = np.zeros((
+            values_np.shape[0],
+            values_np.shape[1],
+            1, values_np.shape[3]))
+
+        values_np = np.concatenate(
+                (zeros, values_np[:, :, :-1]), axis=2)
+
+    preds_arcs = dummy_mask_removal(
+        merge_head_child_scores(values_np[0], values_np[1]))
+    golds_arcs = dummy_mask_removal(
+        merge_head_child_scores(values_np[2], values_np[3]))
+
+    not_padding = (
+        label_ids
+        != ignore_index).cpu().numpy()[:, 1:]
+
+    return sum(map(get_uas_abs, zip(
+        preds_arcs, golds_arcs, not_padding)))

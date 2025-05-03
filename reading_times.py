@@ -3,20 +3,23 @@ https://github.com/weijiexu-charlie/
 Linearity-of-surprisal-on-RT/blob/main/Preparing%20Corpora/get_frequency.py"""
 
 
+import itertools
 import pandas as pd
 import wordfreq     # type: ignore
 import nltk  # type: ignore
 from mitransformer import LMTrainer
-from mitransformer.data.dataset import CoNLLUDataset, TransformMaskHeadChild
+from mitransformer.data.dataset import TransformMaskHeadChild
 from mitransformer.train.trainer import inverse_sigmoid
 from mitransformer.data import (
-    parse_list_of_words_with_spacy, load_natural_stories,
+    CoNLLUDataset,
+    parse_list_of_words_with_spacy,
+    load_natural_stories, load_zuco,
     TokenMapper)
 
 import torch
 import numpy as np
 
-from typing import Iterable, Literal, Callable, TypeVar
+from typing import Iterable, Literal, Callable, TypeVar, cast
 import numpy.typing as npt
 
 import math
@@ -42,6 +45,7 @@ SURPRISAL_COL = "logp"
 WORD_POSITION_COL = "position"
 HEAD_DISTANCE_COL = "headdistance"
 INTEGRATION_COST_COL = "incost"
+DEMBERG_COST_COL = "demberg"
 FDD_COL = "fdd"  # first dependency distance
 FDDC_COL = "fddc"  # first dependency distance correct?
 FDDW_COL = "fddw"  # first dependency distance weight
@@ -58,21 +62,23 @@ BATCH_SIZE = 8
 TAGSET = None  # "universal"  # None
 
 if TAGSET is None:
-    CONTENT_POS = {"FW", "MD", "NN", "NNS", "NNP",
-                   "NNPS", "VB", "VBD", "VBG", "VBN",
-                   "VBP", "VBZ", "JJ", "JJR", "JJS"}
+    CONTENT_POS = {
+        "FW", "MD", "NN", "NNS", "NNP",
+        "NNPS", "VB", "VBD", "VBG", "VBN",
+        "VBP", "VBZ"}
     PUNCTUATION = {"''", "(", "SYM", "POS"}
-    MERGE_MAPPING = {"JJS": "JJ", "JJR": "JJ",
-                     "PRP$": "PRP",
-                     "WP$": "PRP", "WP": "PRP", "WRB": "RB", "WDT": "DT",
-                     "VBD": "VB", "VBG": "VB", "VBN": "VB",
-                     "VBP": "VB", "VBZ": "VB",
-                     "PDT": "DT",
-                     "RBR": "RB", "RBS": "RB",
-                     "NNS": "NN", "NNPS": "NN", "NNP": "NN",
-                     "PRP$": "PRP",
-                     "UH": "RP",
-                     "SYM": "NN"}
+    MERGE_MAPPING = {
+        "JJS": "JJ", "JJR": "JJ",
+        "PRP$": "PRP",
+        "WP$": "PRP", "WP": "PRP", "WRB": "RB", "WDT": "DT",
+        "VBD": "VB", "VBG": "VB", "VBN": "VB",
+        "VBP": "VB", "VBZ": "VB",
+        "PDT": "DT",
+        "RBR": "RB", "RBS": "RB",
+        "NNS": "NN", "NNPS": "NN", "NNP": "NN",
+        "PRP$": "PRP",
+        "UH": "RP",
+        "SYM": "NN"}
     # in natural stories SYM is assigned e.g. to thirty-two in 1632
 
 else:
@@ -95,7 +101,8 @@ DEPREL_MERGE_MAPPING = {
     "advmod": "npreddep", "npadvmod": "npreddep",
     "agent": "npreddep", "relcl": "npreddep", "neg": "npreddep",
     "vocative": "spcldep", "discourse": "spcldep", "expl": "spcldep",
-    "aux": "spcldep", "auxpass": "spcldep", "cop": "spcldep", "punct": "spcldep",
+    "aux": "spcldep", "auxpass": "spcldep", "cop": "spcldep",
+    "punct": "spcldep",
     "mark": "spcldep",
     "prt": "spcldep",
     "compound": "comp", "name": "comp",
@@ -107,7 +114,6 @@ DEPREL_MERGE_MAPPING = {
     "list": "loose", "dislocated": "loose", "parataxis": "loose",
     "remnant": "loose", "reparandum": "loose",
     "root": "other", "dep": "other", "intj": "other", "quantmod": "other"
-    
 }
 
 
@@ -129,9 +135,10 @@ def get_frequency(token, language: str = LANG):
     return wordfreq.zipf_frequency(token, language)
 
 
-def add_frequency(input_file, output_file, language: str = LANG,
-                  token_col: str = TOKEN_COL,
-                  logfreq_col: str = LOGFREQ_COL) -> None:
+def add_frequency(
+        input_file, output_file, language: str = LANG,
+        token_col: str = TOKEN_COL,
+        logfreq_col: str = LOGFREQ_COL) -> None:
     df = pd.read_csv(input_file)
     df[logfreq_col] = df.apply(
             lambda df: get_frequency(df[token_col], language), axis=1)
@@ -147,19 +154,40 @@ def add_word_length(input_file, output_file,
     df.to_csv(output_file, index=False)
 
 
-def tsv_to_csv(input_file: str, output_file: str,
-               token_col: str = TOKEN_COL,
-               text_id_col: str = TEXT_ID_COL,
-               wnum_col: str = WNUM_COL,
-               token_mapper_dir: str | None = None
-               ) -> None:
+def natural_stories_to_csv(
+        input_file: str, output_file: str,
+        token_col: str = TOKEN_COL,
+        text_id_col: str = TEXT_ID_COL,
+        wnum_col: str = WNUM_COL,
+        token_mapper_dir: str | None = None
+        ) -> None:
     tokens, text_ids, wnums = load_natural_stories(
         input_file, token_mapper_dir=token_mapper_dir)
     # making lowercase makes no difference
 
-    df = pd.DataFrame({token_col: tokens,
-                       text_id_col: text_ids,
-                       wnum_col: wnums})
+    df = pd.DataFrame({
+        token_col: tokens,
+        text_id_col: text_ids,
+        wnum_col: wnums})
+
+    df.to_csv(output_file, index=False)
+
+
+def zuco_stories_to_csv(
+        input_file: str, output_file: str,
+        token_col: str = TOKEN_COL,
+        text_id_col: str = TEXT_ID_COL,
+        wnum_col: str = WNUM_COL,
+        token_mapper_dir: str | None = None
+        ) -> None:
+    tokens, text_ids, wnums = load_zuco(
+        input_file, token_mapper_dir=token_mapper_dir)
+    # making lowercase makes no difference
+
+    df = pd.DataFrame({
+        token_col: tokens,
+        text_id_col: text_ids,
+        wnum_col: wnums})
 
     df.to_csv(output_file, index=False)
 
@@ -168,17 +196,23 @@ def generate_probs(
         trainer: LMTrainer,
         dataset: CoNLLUDataset,
         untokenise: bool = False,
-        surprisal: bool = False) -> tuple[torch.Tensor, npt.NDArray[np.int_],
-                                          dict[str, list[torch.Tensor]]]:
+        surprisal: bool = False,
+        shift: int = 0) -> tuple[
+            torch.Tensor, npt.NDArray[np.int_],
+            dict[str, list[torch.Tensor]]]:
     """WARNING: untested"""
 
-    pred_probs, attention = trainer.predict(
+    pred_probs, attention_logits = trainer.predict(
         dataset,
         make_prob=True,
         only_true=True)
-
     # Throw away probs of root and eos token
-    probs = torch.cat([p[1:-1] for p in pred_probs])
+    if shift == -1:
+        probs = torch.cat([p[2:] for p in pred_probs])
+    elif shift == 1:
+        probs = torch.cat([p[0:-2] for p in pred_probs])
+    else:
+        probs = torch.cat([p[1:-1] for p in pred_probs])
     indices: npt.NDArray[np.int_]
 
     if untokenise:
@@ -202,7 +236,7 @@ def generate_probs(
     if surprisal:
         probs = -torch.log(probs)
 
-    return probs, indices, attention
+    return probs, indices, attention_logits
 
 
 def get_POS_tags(sentence: list[str]) -> list[str]:
@@ -290,9 +324,184 @@ def get_content_word_cost(
 
     # cw_intermediate[mask_gov[:, 0]] = 1  # for dummy set 1
     # cw_intermediate[mask_gov[:, 1]] = 1  # for root set 1
-    cost = cw_intermediate + content_word_mask.astype(int)  # new discourse referents
-    cost[~content_word_mask] = 0  # integration and instantiation cost for function words is 0
+
+    # new discourse referents
+    cost = cw_intermediate + content_word_mask.astype(int)
+    cost[~content_word_mask] = 0  # integration and instantiation
+    # cost for function words is 0
     return cost
+
+
+def get_content_word_cost_Demberg(
+        content_word_mask: npt.NDArray[np.bool],
+        mask_gov: npt.NDArray[np.bool],
+        mask_dep: npt.NDArray[np.bool],
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False,
+        with_search: bool = False,
+        with_non_referent_establishment_cost: bool = True
+        ) -> npt.NDArray[np.int_]:
+    mask = np.logical_or(mask_gov, mask_dep)
+    content_word_mask_left = content_word_mask.copy()
+    if not only_content_words_left:
+        content_word_mask_left[...] = 1
+    # do not take into account connections to function words
+    else:
+        mask[:, ~content_word_mask_left] = 0
+    mask[0, :] = 0
+    mask[1, :] = 0
+    mask[:, 0] = 0
+    mask[:, 1] = 0
+
+    first_connection: npt.NDArray[np.int_] = np.argmax(np.tril(mask), axis=1)
+
+    upper_triang = np.triu(
+        np.ones(
+            (content_word_mask_left.shape[0], content_word_mask_left.shape[0])
+            ))
+    cw_cumul: np.ndarray = content_word_mask_left @ upper_triang
+    # print(first_connection)
+    # print(cw_cumul)
+    cw_before_first = cw_cumul[first_connection]  # @ mask_gov.T
+    # print(cw_before_first)
+    cw_intermediate = cw_cumul - cw_before_first
+    # print(cw_intermediate)
+    # assume no crossing arcs
+    # left_cw_child_nums =voc content_word_mask @ mask_dep.T
+    # cw_intermediate -= left_cw_child_nums
+
+    cw_intermediate[content_word_mask_left] -= 1
+    if not with_search:
+        cw_intermediate[first_connection == 0] = 0  # if dummy or root
+    # print(np.sum(cw_intermediate == -1))
+
+    # cw_intermediate[mask_gov[:, 0]] = 1  # for dummy set 1
+    # cw_intermediate[mask_gov[:, 1]] = 1  # for root set 1
+
+    # new discourse referents
+    if only_content_words_cost:
+        # if with_non_referent_establishment_cost:
+        #     cost[~content_word_mask] = 1  # integration and instantiation
+        # else:
+        cw_intermediate[~content_word_mask] = 0
+    # elif not with_non_referent_establishment_cost:
+    #     cost[~content_word_mask] -= 1  # integration and instantiation
+
+    if with_non_referent_establishment_cost:
+        cw_intermediate[...] += 1
+    else:
+        cw_intermediate[content_word_mask] += 1
+    # cost for function words is 0
+    # raise Exception
+    return cw_intermediate
+
+# TODO: Vera Demberg integration cost
+# referents = nouns & verbs
+# cost: 0 for all non-referents
+# all others: number of referents between first left dependency and token
+# def generate_integration_Gibson(
+# )
+
+
+def generate_integration_Demberg(
+        dataset: CoNLLUDataset,
+        pos_tags: list[str],
+        untokenise: bool = False,
+        only_content_words_left: bool = True,
+        only_content_words_cost: bool = False,
+        with_search: bool = False,
+        with_non_referent_establishment_cost: bool = True,
+        dummy_used: bool = True,
+        shift: int = 0) -> npt.NDArray[np.int_]:
+    """WARNING: untested"""
+
+    costs_list: list[npt.NDArray[np.int_]] = []
+    heads_list: list[npt.NDArray[np.int_]] = []
+    indices_list: list[npt.NDArray[np.int_]] = []
+    content_word_list: list[npt.NDArray[np.bool_]] = []
+    for i in range(len(dataset)):
+        sentence = dataset[i]
+        # assumes that governor and child mask are called head and child
+        # these are already triangulated
+        mask_gov = sentence["masks"]["head_current"]
+        mask_dep = sentence["masks"]["child_current"]
+
+        assert mask_gov is not None and mask_dep is not None
+
+        root_idx = 1
+        mask_dep[:, root_idx] = 0
+        mask_dep[:, 0] = 0      # no cost if no children
+        mask_gov[:, root_idx] = 0
+        mask_gov[:, 0] = 0
+
+        mask = np.logical_or(mask_gov, mask_dep.T)
+        heads_list.append(mask.argmax(-1))
+        indices_list.append(np.arange(len(mask)))
+
+        cw = get_content_word_mask(dataset.tokens[i][:-1], CONTENT_POS)
+        content_word_list.append(cw)
+        costs = get_content_word_cost_Demberg(
+            cw,
+            mask_gov, mask_dep,
+            only_content_words_left=only_content_words_left,
+            only_content_words_cost=only_content_words_cost,
+            with_search=with_search,
+            with_non_referent_establishment_cost=(
+                with_non_referent_establishment_cost))
+        if shift == -1:
+            costs_list.append(np.concat((costs[3:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(costs[1:-1])
+        else:
+            costs_list.append(costs[2:])
+
+    cost_array = np.concat(costs_list)
+    heads_array = np.concat(heads_list)
+    indices_array = np.concat(indices_list)
+    content_word_array = np.concat(content_word_list)
+    if untokenise:
+        assert dataset.space_after is not None
+        space_after = np.concat(dataset.space_after)
+
+        # take the first distance to disregard punctuation
+        # which may connect over long distances
+        cost_list: list[int] = cost_array.tolist()
+        new_cost_list: list[int] = []
+        current_costs: Literal[True] | None = None
+        is_sub: list[bool] = []
+        for i, (j, space_after_tok, pos, new_cost, head, cw_t) in (
+                enumerate(zip(
+                    indices_array, space_after,
+                    pos_tags, cost_list, heads_array,
+                    content_word_array))):
+            if current_costs is None:
+                current_costs = True
+                min_arc_i = head
+                min_arc_i_cost = new_cost
+                # if head < j and (with_search or head != 0):
+                #     min_arc_i_cost -= sum(is_sub[i-(j-head)+1:i])
+            if pos not in PUNCTUATION:
+                if min_arc_i > head:
+                    min_arc_i = head
+                    min_arc_i_cost = new_cost
+                    # if head < j and (with_search or head != 0):
+                    #     min_arc_i_cost -= sum(is_sub[i-(j-head)+1:i])
+            if space_after_tok:
+                new_cost_list.append(min_arc_i_cost)
+                current_costs = None
+                is_sub.append(False)
+            elif cw_t or not only_content_words_cost:
+                is_sub.append(True)
+            else:
+                is_sub.append(False)
+
+        if current_costs is not None:
+            new_cost_list.append(min_arc_i_cost)
+            is_sub.append(False)
+
+        cost_array = np.array(new_cost_list)
+
+    return cost_array
 
 
 def generate_integration_Gibson(
@@ -306,8 +515,8 @@ def generate_integration_Gibson(
         sentence = dataset[i]
         # assumes that governor and child mask are called head and child
         # these are already triangulated
-        mask_gov = sentence["masks"]["head"]
-        mask_dep = sentence["masks"]["child"]
+        mask_gov = sentence["masks"]["head_current"]
+        mask_dep = sentence["masks"]["child_current"]
 
         assert mask_gov is not None and mask_dep is not None
 
@@ -340,7 +549,9 @@ def generate_first_dep_distance(
         dataset: CoNLLUDataset,
         pos_tags: list[str],
         untokenise: bool = False,
-        only_content_words: bool = False) -> npt.NDArray[np.int_]:
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False,
+        shift: int = 0) -> npt.NDArray[np.int_]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
@@ -351,20 +562,22 @@ def generate_first_dep_distance(
         sentence = dataset[i]
         # assumes that governor and child mask are called head and child
         # these are already triangulated
-        mask_gov = sentence["masks"]["head"].copy()
-        mask_dep = sentence["masks"]["child"].copy()
+        assert sentence["masks"]["head_current"] is not None
+        assert sentence["masks"]["child_current"] is not None
+        mask_gov = sentence["masks"]["head_current"].copy()
+        mask_dep = sentence["masks"]["child_current"].copy()
 
-        # if only_content_words:
-        #     content_word_mask = get_content_word_mask_by_POS_tags(
-        #         pos_tags[
-        #             elements_in:elements_in+mask_gov.shape[0]-2],
-        #         CONTENT_POS,
-        #         dummies_present=False)
-        # 
-        #     mask_gov[:, 2:][:, ~content_word_mask] = False
-        #     mask_dep[:, 2:][:, ~content_word_mask] = False
-        # 
-        # assert mask_gov is not None and mask_dep is not None
+        content_word_mask = get_content_word_mask_by_POS_tags(
+                pos_tags[
+                    elements_in:elements_in+mask_gov.shape[0]-2],
+                CONTENT_POS,
+                dummies_present=False)
+        if only_content_words_left:
+
+            mask_gov[:, 2:][:, ~content_word_mask] = False
+            mask_dep[:, 2:][:, ~content_word_mask] = False
+
+        assert mask_gov is not None and mask_dep is not None
 
         mask_dep[:, 1] = 0
         mask_dep[:, 0] = 0      # no cost if no children
@@ -388,7 +601,17 @@ def generate_first_dep_distance(
             first_connection]
 
         distances[first_connection == 0] = 0    # if root, then distance 0
-        costs_list.append(distances[2:])
+
+        costs = distances[2:]
+        if only_content_words_cost:
+            costs[~content_word_mask] = 0
+
+        if shift == -1:
+            costs_list.append(np.concat((costs[1:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(np.concat((np.array([0]), costs[:-1])))
+        else:
+            costs_list.append(costs)
 
         elements_in += distances.shape[0]-2
 
@@ -402,7 +625,7 @@ def generate_first_dep_distance(
         # which may connect over long distances
         cost_list: list[int] = cost_array.tolist()
         new_cost_list: list[int] = []
-        current_cost: float | None = None
+        current_cost: int | None = None
         found_non_punct: bool = False
         for space_after_tok, pos, new_cost in zip(
                 space_after, pos_tags, cost_list):
@@ -429,7 +652,8 @@ def generate_fdd_deprel(
         pos_tags: list[str],
         deprels: list[str],
         untokenise: bool = False,
-        only_content_words: bool = False) -> list[str]:
+        only_content_words_left: bool = False,
+        shift: int = 0) -> list[str]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
@@ -440,18 +664,20 @@ def generate_fdd_deprel(
         sentence = dataset[i]
         # assumes that governor and child mask are called head and child
         # these are already triangulated
-        mask_gov = sentence["masks"]["head"].copy()
-        mask_dep = sentence["masks"]["child"].copy()
+        assert sentence["masks"]["head_current"] is not None
+        assert sentence["masks"]["child_current"] is not None
+        mask_gov = sentence["masks"]["head_current"].copy()
+        mask_dep = sentence["masks"]["child_current"].copy()
 
-        #if only_content_words:
-        #    content_word_mask = get_content_word_mask_by_POS_tags(
-        #        pos_tags[
-        #            elements_in:elements_in+mask_gov.shape[0]-2],
-        #        CONTENT_POS,
-        #        dummies_present=False)
-        #
-        #    mask_gov[:, 2:][:, ~content_word_mask] = False
-        #    mask_dep[:, 2:][:, ~content_word_mask] = False
+        if only_content_words_left:
+            content_word_mask = get_content_word_mask_by_POS_tags(
+                pos_tags[
+                    elements_in:elements_in+mask_gov.shape[0]-2],
+                CONTENT_POS,
+                dummies_present=False)
+
+            mask_gov[:, 2:][:, ~content_word_mask] = False
+            mask_dep[:, 2:][:, ~content_word_mask] = False
 
         assert mask_gov is not None and mask_dep is not None
 
@@ -485,7 +711,12 @@ def generate_fdd_deprel(
                 else:
                     fdd_deprels.append(deprels_sen[i])
 
-        costs_list.append(fdd_deprels[2:])
+        if shift == -1:
+            costs_list.append(fdd_deprels[3:] + ["EOS"])
+        elif shift == 1:
+            costs_list.append(fdd_deprels[1:-1])
+        else:
+            costs_list.append(fdd_deprels[2:])
 
         elements_in += len(fdd_deprels)-2
 
@@ -526,7 +757,8 @@ def generate_fddc(
         attention_matrices: dict[str, list[torch.Tensor]],
         pos_tags: list[str],
         untokenise: bool = False,
-        only_content_words: bool = True) -> npt.NDArray[np.bool]:
+        only_content_words_left: bool = False,
+        shift: int = 0) -> npt.NDArray[np.bool]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     # TODO: Discard punctuation
@@ -534,7 +766,7 @@ def generate_fddc(
 
     fdd = generate_first_dep_distance(
         dataset, pos_tags, untokenise=False,
-        only_content_words=only_content_words)
+        only_content_words_left=only_content_words_left)
 
     costs_list: list[npt.NDArray[np.bool]] = []
     elements_in: int = 0
@@ -542,10 +774,10 @@ def generate_fddc(
             attention_matrices[next(iter(attention_matrices.keys()))])):
         # assumes that governor and child mask are called head and child
         # these are already triangulated
-        mask_gov = attention_matrices["head"][i][0].clone()
-        mask_dep = attention_matrices["child"][i][0].clone()
+        mask_gov = torch.sigmoid(attention_matrices["head_current"][i][0].clone())
+        mask_dep = torch.sigmoid(attention_matrices["child_current"][i][0].clone())
 
-        if only_content_words:
+        if only_content_words_left:
             # disregard connections to non-content words
             content_word_mask = get_content_word_mask_by_POS_tags(
                 pos_tags[elements_in:elements_in+mask_gov.shape[0]-2],
@@ -595,7 +827,12 @@ def generate_fddc(
         fdd_sen[fdd_sen > 0] = 0
         fddc = fdd_sen == distances
 
-        costs_list.append(fddc)
+        if shift == -1:
+            costs_list.append(np.concat((fddc[1:], np.array([True]))))
+        elif shift == 1:
+            costs_list.append(np.concat((np.array([True]), fddc[:-1])))
+        else:
+            costs_list.append(fddc)
         elements_in += distances.shape[0]
 
     cost_array = np.concat(costs_list)
@@ -630,11 +867,197 @@ def generate_fddc(
     return cost_array
 
 
+def generate_attention_cost(
+        dataset: CoNLLUDataset,
+        attention_matrices: dict[str, list[torch.Tensor]],
+        pos_tags: list[str],
+        untokenise: bool = False,
+        only_content_words_left: bool = True,
+        shift: int = 0,
+        mask_setting: Literal["current", "next"] = "current") -> npt.NDArray:
+    # TODO: all left ones distance sum
+    # TODO: all left ones number
+    # TODO: Discard punctuation
+    """WARNING: untested"""
+
+    costs_list: list[npt.NDArray] = []
+    elements_in: int = 0
+    for i in range(len(
+            attention_matrices[next(iter(attention_matrices.keys()))])):
+        # assumes that governor and child mask are called head and child
+        # these are already triangulated
+        mask_gov = attention_matrices["head_current"][i][0].clone().softmax(-1)
+        mask_dep = attention_matrices["child_current"][i][0].clone().softmax(-1)
+
+        mask_gov[:, 0] = 0
+        mask_gov[:, 1] = 0
+        mask_dep[:, 0] = 0
+        mask_dep[:, 1] = 0
+
+        if only_content_words_left:
+            # disregard connections to non-content words
+            content_word_mask = get_content_word_mask_by_POS_tags(
+                pos_tags[elements_in:elements_in+mask_gov.shape[0]-2],
+                CONTENT_POS,
+                dummies_present=False)
+            mask_gov[:, 2:][:, ~content_word_mask] = 0
+            mask_dep[:, 2:][:, ~content_word_mask] = 0
+
+        s = mask_gov.shape[0]
+        r = torch.arange(1, s+1)
+        dist_mat = torch.tril(-1 * (r.repeat(s, 1) - r.reshape(-1, 1)))
+
+        if mask_setting == "next":
+            dist_mat += 1
+
+        cost = (dist_mat*(mask_gov + mask_dep)).sum(-1)
+
+        if shift == -1:
+            costs_list.append(np.concat((cost[3:].numpy(), np.array([0]))))
+        elif shift == 1:
+            costs_list.append(cost[1:-1].numpy())
+        else:
+            costs_list.append(cost[2:].numpy())
+        elements_in += len(cost)-2
+
+    cost_array = np.concat(costs_list)
+
+    if untokenise:
+        assert dataset.space_after is not None
+        space_after = np.concat(dataset.space_after)
+
+        # take the first distance to disregard punctuation
+        # which may connect over long distances
+        cost_list: list[float] = cost_array.tolist()
+        new_cost_list: list[float] = []
+        current_cost: float | None = None
+        found_non_punct: bool = False
+        for space_after_tok, pos, new_cost in zip(
+                space_after, pos_tags, cost_list):
+            if current_cost is None:
+                current_cost = new_cost
+            if not found_non_punct and pos not in PUNCTUATION:
+                current_cost += new_cost
+                found_non_punct = True
+            if space_after_tok:
+                new_cost_list.append(current_cost)
+                found_non_punct = False
+                current_cost = None
+
+        if current_cost is not None:
+            new_cost_list.append(current_cost)
+
+        cost_array = np.array(new_cost_list)
+
+    return cost_array
+
+
+def softmax(x: np.ndarray):
+    """Compute softmax values for each sets of scores in x."""
+    print(x)
+    e_x = np.exp(x)
+    out = e_x / e_x.sum(axis=-1)  # only difference
+    print(out)
+    return out
+
+
+def generate_kl_div(
+        dataset: CoNLLUDataset,
+        attention_matrices: dict[str, list[torch.Tensor]],
+        pos_tags: list[str],
+        untokenise: bool = False,
+        shift: int = 0) -> npt.NDArray:
+    # TODO: all left ones distance sum
+    # TODO: all left ones number
+    # TODO: Discard punctuation
+    """WARNING: untested"""
+
+    costs_list: list[npt.NDArray] = []
+    elements_in: int = 0
+    for i in range(len(
+            attention_matrices[next(iter(attention_matrices.keys()))])):
+        # assumes that governor and child mask are called head and child
+        # these are already triangulated
+        mask_gov = attention_matrices[
+            "head_current"][i][0].clone().softmax(-1).numpy()
+        mask_dep = attention_matrices[
+            "child_current"][i][0].clone().softmax(-1).numpy()
+
+        sentence = dataset[i]
+        # assumes that governor and child mask are called head and child
+        # these are already triangulated
+        assert sentence["masks"]["head_current"] is not None
+        assert sentence["masks"]["child_current"] is not None
+        mask_gov_gold = sentence["masks"]["head_current"].copy().astype(float)
+        mask_dep_gold = sentence["masks"]["child_current"].copy().astype(float)
+        mask_gov_gold /= mask_gov_gold.sum(-1)
+        mask_dep_gold /= mask_dep_gold.sum(-1)
+
+        # if masks_setting == "next":
+        #     zeros = np.full((
+        #         1, mask_gov_gold.shape[1]), False)
+        #     mask_gov = np.concatenate(
+        #         (zeros, mask_gov[:-1]), axis=0)
+        #     mask_dep = np.concatenate(
+        #         (zeros, mask_dep[:-1]), axis=0)
+        #     mask_gov_gold = np.concatenate(
+        #         (zeros, mask_gov_gold[:-1]), axis=0)
+        #     mask_dep_gold = np.concatenate(
+        #         (zeros, mask_dep_gold[:-1]), axis=0)
+
+        kl_gov = (mask_gov_gold*np.log(mask_gov_gold / mask_gov))
+        kl_dep = (mask_dep_gold*np.log(mask_dep_gold / mask_dep))
+
+        kl_gov[np.isnan(kl_gov)] = 0
+        kl_dep[np.isnan(kl_dep)] = 0
+        cost = (kl_dep + kl_gov).sum(-1)
+
+        if shift == -1:
+            costs_list.append(np.concat((cost[3:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(cost[1:-1])
+        else:
+            costs_list.append(cost[2:])
+        elements_in += len(cost)-2
+
+    cost_array = np.concat(costs_list)
+
+    if untokenise:
+        assert dataset.space_after is not None
+        space_after = np.concat(dataset.space_after)
+
+        # take the first distance to disregard punctuation
+        # which may connect over long distances
+        cost_list: list[float] = cost_array.tolist()
+        new_cost_list: list[float] = []
+        current_cost: float | None = None
+        found_non_punct: bool = False
+        for space_after_tok, pos, new_cost in zip(
+                space_after, pos_tags, cost_list):
+            if current_cost is None:
+                current_cost = new_cost
+            if not found_non_punct and pos not in PUNCTUATION:
+                current_cost += new_cost
+                found_non_punct = True
+            if space_after_tok:
+                new_cost_list.append(current_cost)
+                found_non_punct = False
+                current_cost = None
+
+        if current_cost is not None:
+            new_cost_list.append(current_cost)
+
+        cost_array = np.array(new_cost_list)
+
+    return cost_array
+
+
 def generate_fddw(
         dataset: CoNLLUDataset,
         attention_matrices: dict[str, list[torch.Tensor]],
         pos_tags: list[str],
-        untokenise: bool = False) -> npt.NDArray[np.bool]:
+        untokenise: bool = False,
+        shift: int = 0) -> npt.NDArray[np.bool]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
@@ -645,10 +1068,10 @@ def generate_fddw(
         sentence = dataset[i]
         # assumes that governor and child mask are called head and child
         # these are already triangulated
-        assert sentence["masks"]["head"] is not None
-        assert sentence["masks"]["child"] is not None
-        mask_gov = sentence["masks"]["head"].copy()
-        mask_dep = sentence["masks"]["child"].copy()
+        assert sentence["masks"]["head_current"] is not None
+        assert sentence["masks"]["child_current"] is not None
+        mask_gov = sentence["masks"]["head_current"].copy()
+        mask_dep = sentence["masks"]["child_current"].copy()
 
         assert mask_gov is not None and mask_dep is not None
 
@@ -668,8 +1091,10 @@ def generate_fddw(
 
         # assumes that governor and child mask are called head and child
         # these are already triangulated
-        mask_gov_pred = attention_matrices["head"][i][0].clone()
-        mask_dep_pred = attention_matrices["child"][i][0].clone()
+        mask_gov_pred = torch.sigmoid(
+            attention_matrices["head_current"][i][0].clone())
+        mask_dep_pred = torch.sigmoid(
+            attention_matrices["child_current"][i][0].clone())
 
         # TODO to softmax
         mask_gov_pred = inverse_sigmoid(mask_gov_pred)
@@ -693,7 +1118,14 @@ def generate_fddw(
                 torch.ones(
                     (1,), device=first_connection.device)))
         # right weight
-        costs_list.append(weights[2:].detach().numpy())
+
+        if shift == -1:
+            costs_list.append(
+                np.concat((weights[3:].detach().numpy(), np.array([0]))))
+        elif shift == 1:
+            costs_list.append(weights[1:-1].detach().numpy())
+        else:
+            costs_list.append(weights[2:].detach().numpy())
 
     cost_array = np.concat(costs_list)
 
@@ -730,18 +1162,22 @@ def generate_fddw(
 def generate_ldds(
         dataset: CoNLLUDataset,
         pos_tags: list[str],
-        untokenise: bool = False) -> npt.NDArray[np.int_]:
+        untokenise: bool = False,
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False,
+        shift: int = 0) -> npt.NDArray[np.int_]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
 
     costs_list: list[npt.NDArray[np.int_]] = []
+    elements_in: int = 0
     for i in range(len(dataset)):
         sentence = dataset[i]
         # assumes that governor and child mask are called head and child
         # these are already triangulated
-        mask_gov = sentence["masks"]["head"]
-        mask_dep = sentence["masks"]["child"]
+        mask_gov = sentence["masks"]["head_current"]
+        mask_dep = sentence["masks"]["child_current"]
 
         assert mask_gov is not None and mask_dep is not None
 
@@ -750,6 +1186,15 @@ def generate_ldds(
         mask_dep[:, 0] = 0          # no cost if no children
         mask_gov[:, root_idx] = 0
         mask_gov[:, 0] = 0
+
+        content_word_mask = get_content_word_mask_by_POS_tags(
+            pos_tags[elements_in:elements_in+mask_gov.shape[0]-2],
+            CONTENT_POS,
+            dummies_present=False)
+        if only_content_words_left:
+            # disregard connections to non-content words
+            mask_gov[:, 2:][:, ~content_word_mask] = 0
+            mask_dep[:, 2:][:, ~content_word_mask] = 0
 
         mask = np.tril(np.logical_or(mask_gov, mask_dep))
 
@@ -761,7 +1206,17 @@ def generate_ldds(
 
         costs = (mask * indices).sum(1)
 
-        costs_list.append(costs[2:])
+        costs = costs[2:]
+        if only_content_words_cost:
+            costs[~content_word_mask] = 0
+
+        if shift == -1:
+            costs_list.append(np.concat((costs[1:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(np.concat((np.array([0]), costs[:-1])))
+        else:
+            costs_list.append(costs)
+        elements_in += mask_gov.shape[0]-2
 
     cost_array = np.concat(costs_list)
 
@@ -779,18 +1234,22 @@ def generate_ldds(
 def generate_ldc(
         dataset: CoNLLUDataset,
         pos_tags: list[str],
-        untokenise: bool = False) -> npt.NDArray[np.int_]:
+        untokenise: bool = False,
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False,
+        shift: int = 0) -> npt.NDArray[np.int_]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     """WARNING: untested"""
 
     costs_list: list[npt.NDArray[np.int_]] = []
+    elements_in: int = 0
     for i in range(len(dataset)):
         sentence = dataset[i]
         # assumes that governor and child mask are called head and child
         # these are already triangulated
-        mask_gov = sentence["masks"]["head"]
-        mask_dep = sentence["masks"]["child"]
+        mask_gov = sentence["masks"]["head_current"]
+        mask_dep = sentence["masks"]["child_current"]
 
         assert mask_gov is not None and mask_dep is not None
 
@@ -800,10 +1259,29 @@ def generate_ldc(
         mask_gov[:, root_idx] = 0
         mask_gov[:, 0] = 0
 
+        content_word_mask = get_content_word_mask_by_POS_tags(
+            pos_tags[elements_in:elements_in+mask_gov.shape[0]-2],
+            CONTENT_POS,
+            dummies_present=False)
+        if only_content_words_left:
+            # disregard connections to non-content words
+            mask_gov[:, 2:][:, ~content_word_mask] = 0
+            mask_dep[:, 2:][:, ~content_word_mask] = 0
+
         mask = np.tril(np.logical_or(mask_gov, mask_dep))
         costs = mask.sum(1)
 
-        costs_list.append(costs[2:])
+        costs = costs[2:]
+        if only_content_words_cost:
+            costs[~content_word_mask] = 0
+
+        if shift == -1:
+            costs_list.append(np.concat((costs[1:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(np.concat((np.array([0]), costs[:-1])))
+        else:
+            costs_list.append(costs)
+        elements_in += mask_gov.shape[0]-2
 
     cost_array = np.concat(costs_list)
     if untokenise:
@@ -820,7 +1298,8 @@ def generate_ldc(
 
 def generate_integration_costs(
         dataset: CoNLLUDataset,
-        untokenise: bool = False) -> npt.NDArray[np.int_]:
+        untokenise: bool = False,
+        shift: int = 0) -> npt.NDArray[np.int_]:
     """WARNING: untested"""
 
     costs_list: list[npt.NDArray[np.int_]] = []
@@ -828,8 +1307,8 @@ def generate_integration_costs(
         sentence = dataset[i]
         # assumes that governor and child mask are called head and child
         # these are already triangulated
-        mask_gov = sentence["masks"]["head"]
-        mask_dep = sentence["masks"]["child"]
+        mask_gov = sentence["masks"]["head_current"]
+        mask_dep = sentence["masks"]["child_current"]
 
         assert mask_gov is not None and mask_dep is not None
 
@@ -867,7 +1346,8 @@ def generate_integration_costs(
         #         if delete:
         #             indices[j, 0] = 1
         #         else:
-        #             indices[j, 0] = 5  # -= 1  # skip over root node for distance
+        #             indices[j, 0] = 5  # -= 1
+        #             # skip over root node for distance
         #
         # # add cost dependent on intermediate nodes without left governor
         # extra_cost = np.array([0]*len(heads))
@@ -882,7 +1362,13 @@ def generate_integration_costs(
         # # extra_cost += mask_dep[:, 2:].sum(1)
         #
         costs = (mask * indices).sum(1) + (mask_gov + mask_dep).sum(-1)
-        costs_list.append(costs[2:])
+
+        if shift == -1:
+            costs_list.append(np.concat((costs[3:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(costs[1:-1])
+        else:
+            costs_list.append(costs[2:])
 
     cost_array = np.concat(costs_list)
     if untokenise:
@@ -907,25 +1393,35 @@ def generate_integration_costs(
 def generate_head_distance(
         dataset: CoNLLUDataset,
         pos_tags: list[str],
-        untokenise: bool = False
+        untokenise: bool = False,
+        only_content_words_cost: bool = False,
+        shift: int = 0,
         ) -> npt.NDArray[np.int_]:
     """WARNING: untested"""
 
     costs_list: list[npt.NDArray[np.int_]] = []
+    elements_in: int = 0
     for i in range(len(dataset)):
         sentence = dataset[i]
         # assumes that governor and child mask are called head and child
         # these are already triangulated
-        mask_gov = sentence["masks"]["head"]
-        mask_dep = sentence["masks"]["child"]
+        mask_gov = sentence["masks"]["head_current"]
+        mask_dep = sentence["masks"]["child_current"]
 
         assert mask_gov is not None and mask_dep is not None
+
+        content_word_mask = get_content_word_mask_by_POS_tags(
+            pos_tags[
+                elements_in:elements_in+mask_gov.shape[0]-2],
+            CONTENT_POS,
+            dummies_present=False)
 
         mask_gov[:, 0] = 0
         mask_dep[:, 0] = 0      # no cost if no children
         mask = mask_gov + mask_dep.T
-        mask[np.arange(mask.shape[0]),
-             np.arange(mask.shape[0])] = mask_gov[:, 1]
+        mask[
+            np.arange(mask.shape[0]),
+            np.arange(mask.shape[0])] = mask_gov[:, 1]
         mask[:, 1] = 0
 
         # restrict this to new content words OR IDEA: do not add if
@@ -940,7 +1436,18 @@ def generate_head_distance(
         indices = indices.T
 
         costs = (mask * indices).sum(1)
-        costs_list.append(costs[2:])
+
+        costs = costs[2:]
+        if only_content_words_cost:
+            costs[~content_word_mask] = 0
+
+        if shift == -1:
+            costs_list.append(np.concat((costs[1:], np.array([0]))))
+        elif shift == 1:
+            costs_list.append(np.concat((np.array([0]), costs[:-1])))
+        else:
+            costs_list.append(costs)
+        elements_in += mask_gov.shape[0]-2
 
     cost_array: npt.NDArray[np.int_] = np.concat(costs_list)
 
@@ -959,14 +1466,20 @@ def generate_head_distance(
 def generate_deprels(
         dataset: CoNLLUDataset,
         pos_tags: list[str],
-        untokenise: bool = False
+        untokenise: bool = False,
+        shift: int = 0
         ) -> list[str]:
     """WARNING: untested"""
 
     deprels: list[str] = []
     for deprels_sen in dataset.deprels:
         deprels_sen = [deprel_merge(deprel) for deprel in deprels_sen]
-        deprels.extend(deprels_sen[2:-1])
+        if shift == -1:
+            deprels.extend(deprels_sen[3:])
+        elif shift == 1:
+            deprels.extend(deprels_sen[1:-2])
+        else:
+            deprels.extend(deprels_sen[2:-1])
 
     if untokenise:
         assert dataset.space_after is not None
@@ -986,7 +1499,7 @@ T = TypeVar("T")
 def untokenise_by_POS(
         items: Iterable[T],
         space_after: list[bool] | npt.NDArray[np.bool_],
-        pos_tags: list[str]
+        pos_tags: list[str],
         ) -> list[T]:
     new_list: list[T] = []
     current_item: T | None = None
@@ -1056,24 +1569,29 @@ def prob_to_surprisal(
         yield -math.log(prob)
 
 
-def add_surprisal(input_file: str, output_file: str,
-                  model_dir: str, token_mapper_dir: str,
-                  token_col: str = TOKEN_COL,
-                  surprisal_col: str = SURPRISAL_COL,
-                  word_position_col: str = WORD_POSITION_COL,
-                  integration_cost_col: str = INTEGRATION_COST_COL,
-                  pos_tag_col: str = POS_TAG_COL,
-                  deprel_col: str = DEPREL_COL,
-                  fdd_col: str = FDD_COL,
-                  fddc_col: str = FDDC_COL,
-                  fddw_col: str = FDDW_COL,
-                  fdd_deprels_col: str = FDD_DEPRELS_COL,
-                  ldds_col: str = LDDS_COL,
-                  ldc_col: str = LDC_COL,
-                  device: str = DEVICE,
-                  batch_size: int = BATCH_SIZE,
-                  masks_setting: Literal[
-                      "complete", "current", "next"] = "current") -> None:
+def add_surprisal(
+        input_file: str, output_file: str,
+        model_dir: str, token_mapper_dir: str,
+        token_col: str = TOKEN_COL,
+        surprisal_col: str = SURPRISAL_COL,
+        word_position_col: str = WORD_POSITION_COL,
+        integration_cost_col: str = INTEGRATION_COST_COL,
+        demberg_cost_col: str = DEMBERG_COST_COL,
+        pos_tag_col: str = POS_TAG_COL,
+        deprel_col: str = DEPREL_COL,
+        fdd_col: str = FDD_COL,
+        fddc_col: str = FDDC_COL,
+        fddw_col: str = FDDW_COL,
+        fdd_deprels_col: str = FDD_DEPRELS_COL,
+        ldds_col: str = LDDS_COL,
+        ldc_col: str = LDC_COL,
+        device: str = DEVICE,
+        batch_size: int = BATCH_SIZE,
+        masks_setting: Literal[
+            "current", "next"] = "current",
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False,
+        shift: int = 0) -> None:
     df = pd.read_csv(input_file)
     words = df[token_col]
     conllu = parse_list_of_words_with_spacy(words, min_len=0)
@@ -1089,37 +1607,90 @@ def add_surprisal(input_file: str, output_file: str,
     token_mapper: TokenMapper = TokenMapper.load(token_mapper_dir)
     dataset.map_to_ids(token_mapper)
 
-    trainer = LMTrainer.load(model_dir,
-                             batch_size=batch_size,
-                             device=device,
-                             use_ddp=False,
-                             world_size=1)
+    trainer = LMTrainer.load(
+        model_dir,
+        batch_size=batch_size,
+        device=device,
+        use_ddp=False,
+        world_size=1)
     surprisal, indices, attention = generate_probs(
         trainer, dataset,
-        untokenise=True, surprisal=True)
+        untokenise=True, surprisal=True,
+        shift=0)
+
+    dataset = CoNLLUDataset.from_str(
+        conllu, transform, max_len=None, masks_setting="current")
+
+    token_mapper = TokenMapper.load(token_mapper_dir)
+    dataset.map_to_ids(token_mapper)
 
     pos_tag_list: list[str] = []
     for sentence in dataset.tokens:
         pos_tag_list.extend(get_POS_tags(sentence[2:-1]))
 
     integration_costs = generate_head_distance(
-        dataset, pos_tag_list, untokenise=True)
+        dataset, pos_tag_list, untokenise=True,
+        only_content_words_cost=only_content_words_cost,
+        shift=shift)
 
-    fdd = generate_first_dep_distance(dataset, pos_tag_list, untokenise=True,
-                                      only_content_words=True)
+    fdd = generate_first_dep_distance(
+        dataset, pos_tag_list, untokenise=True,
+        only_content_words_left=only_content_words_left,
+        only_content_words_cost=only_content_words_cost,
+        shift=shift)
     fddc = generate_fddc(
-        dataset, attention, pos_tag_list, untokenise=True).astype(int)
+        dataset, attention, pos_tag_list, untokenise=True,
+        only_content_words_left=only_content_words_left,
+        shift=shift).astype(int)
     fddw = generate_fddw(
         dataset, attention, pos_tag_list, untokenise=True)
-    deprels = generate_deprels(dataset, pos_tag_list, untokenise=True)
-    
-    deprels_raw = generate_deprels(dataset, pos_tag_list, untokenise=False)
+    deprels = generate_deprels(
+        dataset, pos_tag_list, untokenise=True,
+        shift=shift)
+
+    deprels_raw = generate_deprels(
+        dataset, pos_tag_list, untokenise=False, shift=shift)
     fdd_deprels = generate_fdd_deprel(
         dataset, pos_tag_list, deprels_raw,
-        untokenise=True, only_content_words=True)
-    ldds = generate_ldds(dataset, pos_tag_list, untokenise=True)
-    ldc = generate_ldc(dataset, pos_tag_list, untokenise=True)
+        untokenise=True, only_content_words_left=only_content_words_left,
+        shift=shift)
+    ldds = generate_ldds(
+        dataset, pos_tag_list, untokenise=True,
+        only_content_words_left=only_content_words_left,
+        only_content_words_cost=only_content_words_cost,
+        shift=shift)
+    ldc = generate_ldc(
+        dataset, pos_tag_list, untokenise=True,
+        only_content_words_left=only_content_words_left,
+        only_content_words_cost=only_content_words_cost,
+        shift=shift)
+    attention_cost = generate_attention_cost(
+        dataset, attention, pos_tag_list, untokenise=True,
+        only_content_words_left=only_content_words_left,
+        shift=shift, mask_setting=masks_setting)
+    kl_div = generate_kl_div(
+        dataset, attention, pos_tag_list, untokenise=True,
+        shift=shift)
+    demberg = generate_integration_Demberg(
+        dataset, pos_tag_list, untokenise=True,
+        only_content_words_left=only_content_words_left,
+        only_content_words_cost=only_content_words_cost,
+        shift=shift)
 
+    options = ((True, False),)*4
+    for o in itertools.product(*options):
+        df["demberg_l:{}_c:{}_s:{}_e:{}".format(*o)] = (
+            generate_integration_Demberg(
+                dataset, pos_tag_list, untokenise=True,
+                only_content_words_left=o[0],
+                only_content_words_cost=o[1],
+                with_search=o[2],
+                with_non_referent_establishment_cost=o[3],
+                shift=shift))
+
+    pos_tag_list = []
+    for sentence in dataset.tokens:
+        pos_tag_list.extend(get_POS_tags(sentence[3:]))
     pos_tag_list = generate_POS_tags(
         pos_tag_list, dataset.space_after,
         untokenise=True)
@@ -1127,6 +1698,7 @@ def add_surprisal(input_file: str, output_file: str,
     df[surprisal_col] = surprisal
     df[word_position_col] = indices
     df[integration_cost_col] = integration_costs
+    df[demberg_cost_col] = demberg
     df[fdd_col] = fdd
     df[fddc_col] = fddc
     df[fddw_col] = fddw
@@ -1135,6 +1707,8 @@ def add_surprisal(input_file: str, output_file: str,
     df[ldc_col] = ldc
     df[pos_tag_col] = pos_tag_list
     df[deprel_col] = deprels
+    df["attention_cost"] = attention_cost
+    df["kl_div"] = kl_div
     df.to_csv(output_file, index=False)
 
 
@@ -1149,6 +1723,7 @@ def process_tsv(
         surprisal_col: str = SURPRISAL_COL,
         word_position_col: str = WORD_POSITION_COL,
         integration_cost_col: str = INTEGRATION_COST_COL,
+        demberg_cost_col: str = DEMBERG_COST_COL,
         fdd_col: str = FDD_COL,
         fddc_col: str = FDDC_COL,
         fddw_col: str = FDDW_COL,
@@ -1162,31 +1737,55 @@ def process_tsv(
         device: str = DEVICE,
         batch_size: int = BATCH_SIZE,
         masks_setting: Literal[
-            "current", "next", "complete"] = "current"
+            "current", "next"] = "current",
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False,
+        shift: int = 1,
+        corpus: Literal["naturalstories", "zuco"] = "naturalstories"
         ) -> None:
-    tsv_to_csv(input_file, output_file,
-               token_col, text_id_col,
-               wnum_col, None if raw else token_mapper_dir)
-    add_frequency(output_file, output_file,
-                  language, token_col, logfreq_col)
+
+    load_func = (
+        natural_stories_to_csv if corpus == "naturalstories"
+        else zuco_stories_to_csv)
+
+    load_func(
+        input_file, output_file,
+        token_col, text_id_col,
+        wnum_col, None if raw else token_mapper_dir)
+    add_frequency(
+        output_file, output_file,
+        language, token_col, logfreq_col)
     add_word_length(output_file, output_file,
                     token_col, wlen_col)
-    add_surprisal(output_file, output_file, model_dir,
-                  token_mapper_dir, token_col,
-                  surprisal_col, word_position_col,
-                  integration_cost_col, pos_tag_col,
-                  deprel_col, fdd_col, fddc_col, fddw_col,
-                  fdd_deprels_col,
-                  ldds_col, ldc_col,
-                  device, batch_size, masks_setting=masks_setting)
+    add_surprisal(
+        output_file, output_file, model_dir,
+        token_mapper_dir, token_col,
+        surprisal_col, word_position_col,
+        integration_cost_col, demberg_cost_col,
+        pos_tag_col,
+        deprel_col, fdd_col, fddc_col, fddw_col,
+        fdd_deprels_col,
+        ldds_col, ldc_col,
+        device, batch_size, masks_setting=masks_setting,
+        only_content_words_left=only_content_words_left,
+        only_content_words_cost=only_content_words_cost,
+        shift=shift)
 
 
 if __name__ == "__main__":
     # Compute probabilities for natural stories corpus
     # based on a model trianed on Wikitext_processed
     model_name = sys.argv[1]
-    in_file = "naturalstories-master/words.tsv"
+    corpus = sys.argv[2]
+    assert corpus == "naturalstories" or corpus == "zuco"
+    corpus = cast(Literal["naturalstories", "zuco"], corpus)
+
+    if corpus == "naturalstories":
+        in_file = "naturalstories-master/words.tsv"
+    else:
+        in_file = "zuco/trial_data.csv"
+
     out_file = f"RT/data/words_processed_{model_name}.csv"
     mapper = "processed/Wikitext_processed/mapper"  # TODO set to processed
     process_tsv(in_file, out_file, model_name, mapper,
-                raw=True)
+                raw=True, corpus=corpus)

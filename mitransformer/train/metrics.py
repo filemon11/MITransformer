@@ -25,11 +25,11 @@ from typing import (Self, Literal, cast,
                     ClassVar, TypeVar, Callable,
                     Any)
 
-from ..utils.params import Params
-from ..utils.logmaker import getLogger, warning
+from ..utils import logmaker
+from ..utils import params
 
 
-logger = getLogger(__name__)
+logger = logmaker.getLogger(__name__)
 
 
 M = TypeVar("M", bound="Metric")
@@ -90,10 +90,11 @@ def sum_and_std_metrics(
     out_dict: dict[str, tuple[float, float]] = dict()
     means: dict[str, float] = sum_metrics(ms).to_dict()
     for key, mean_value in means.items():
-        xs = [getattr(m, key) for m in ms]
-        out_dict[key] = (
-            mean_value,
-            math.sqrt(sum([(x-mean_value)**2 for x in xs]) / n))
+        if check_numeral(mean_value):
+            xs = [getattr(m, key) for m in ms]
+            out_dict[key] = (
+                mean_value,
+                math.sqrt(sum([(x-mean_value)**2 for x in xs]) / n))
     return out_dict
 
 
@@ -110,7 +111,7 @@ minimise = {"lm_loss": True,
 
 @total_ordering
 @dataclass
-class Metric(Params):
+class Metric(params.Params):
     '''This Python class defines a Metric object with various properties
     and methods for calculating
     and manipulating metrics in a machine learning context.
@@ -122,9 +123,10 @@ class Metric(Params):
         accumulated.
     _lm_loss : torch.Tensor
         Language modelling loss.
-    main_metric : str
+    _main_metric : str
         Main metric. Useful to directly perform backpropagation
-        on.
+        on. If the main metric is a `pd.DataFrame` you can refer
+        to a specific entry by specifying `_main_metric=<metric>:<col>:<row>`.
 
     Returns
     -------
@@ -144,7 +146,7 @@ class Metric(Params):
 
     _convert: ClassVar[dict[str, Callable[[N], N]]] = {}    # type: ignore
 
-    main_metric: str = "loss"
+    _main_metric: str = "loss"
 
     # Whether optimisation means minimising (if False: maximising)
     minimise: ClassVar[dict[str, bool]] = minimise
@@ -269,7 +271,7 @@ class Metric(Params):
         '''
         val1 = getattr(m1, name)
         val2 = getattr(m2, name)
-        if name == "main_metric":
+        if name == "_main_metric":
             # val1 and val2 are the names of the main metric
             assert val1 == val2, "Main metrics do not correspond!"
             return val1
@@ -358,7 +360,7 @@ class Metric(Params):
         "Metric"
             A new instance of the class "Metric" is being returned.
         '''
-        new = self.__class__(main_metric=self.main_metric) + self
+        new = self.__class__(_main_metric=self._main_metric) + self
         new.num *= other
         return new
 
@@ -477,7 +479,29 @@ class Metric(Params):
         -------
         torch.Tensor
         '''
-        return getattr(self, self.main_metric)
+        if ":" in (_m := self._main_metric):
+            column: None | str = None
+            row: None | int = None
+            main_metric, column, row_str = _m.split(":")
+            row = int(row_str)
+            main_value = getattr(self, main_metric)
+            assert isinstance(main_value, pd.DataFrame)
+            return main_value[column][row]
+        else:
+            return getattr(self, _m)
+
+    @property
+    def main_metric(self) -> str:
+        '''Returns the main metric's attribute name.
+
+        Returns
+        -------
+        torch.Tensor
+        '''
+        main_metric = self._main_metric
+        if ":" in main_metric:
+            main_metric, _, _ = main_metric.split(":")
+        return main_metric
 
     def __gt__(self, other: object) -> bool:
         '''This function compares two objects based on their main values
@@ -614,7 +638,7 @@ class SupervisedMetric(Metric):
         '''
         if self.alpha is None:
 
-            warning(None, logger, "SupervisedMetric.alpha is None!")
+            logmaker.warning(None, logger, "SupervisedMetric.alpha is None!")
             return (self._lm_loss
                     + self._arc_loss)
         else:
@@ -685,12 +709,12 @@ class SupervisedEvalMetric(SupervisedMetric, EvalMetric):
 
     Attributes
     ----------
-    _uas : float
+    _uas : float | pd.DataFrame
         Unlabelled attachment score.
-    _att_entropy: pd.DataFrame
+    _att_entropy: pd.DataFrame | None
         Attention entropy of the model heads.
     '''
-    _uas: float = 0
+    _uas: float | pd.DataFrame = 0
     _att_entropy: pd.DataFrame | None = None
     _to_mean: ClassVar[set[str]] = (SupervisedMetric._to_mean
                                     | EvalMetric._to_mean
@@ -765,21 +789,6 @@ class MetricWriter(SummaryWriter):
             parameters and metrics are being added. It is used to track
             the progress of the training process.
         '''
-        def check_type(value: Any) -> bool:
-            if (isinstance(value, float)
-                    or isinstance(value, int)
-                    or isinstance(value, torch.Tensor)
-                    or isinstance(value, bool)
-                    or isinstance(value, str)):
-                return True
-            return False
-
-        def check_numeral(value: Any) -> bool:
-            if (isinstance(value, numbers.Number)
-                    or isinstance(value, torch.Tensor)
-                    or isinstance(value, np.ndarray)):
-                return True
-            return False
         self.add_hparams(
             {key: value for key, value
                 in params.items() if check_type(value)},
@@ -809,3 +818,21 @@ def metric_writer(*args, **kwargs):
     finally:
         # Code to release resource, e.g.:
         writer.flush()
+
+
+def check_type(value: Any) -> bool:
+    if (isinstance(value, float)
+            or isinstance(value, int)
+            or isinstance(value, torch.Tensor)
+            or isinstance(value, bool)
+            or isinstance(value, str)):
+        return True
+    return False
+
+
+def check_numeral(value: Any) -> bool:
+    if (isinstance(value, numbers.Number)
+            or isinstance(value, torch.Tensor)
+            or isinstance(value, np.ndarray)):
+        return True
+    return False

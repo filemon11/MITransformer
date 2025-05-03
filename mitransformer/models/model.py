@@ -1,9 +1,11 @@
 """
+Custom GPT models
+
 Snippets taken from
 https://github.com/karpathy/nanoGPT/blob/master/model.py"""
 
-from ..utils import params
-from ..models import pe
+from .. import utils
+from . import pe
 
 import torch
 import torch.nn as nn
@@ -15,14 +17,24 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 
-from typing import (TypedDict, NotRequired, Sequence, Literal)
+from typing import (Sequence, Mapping, Literal)
 
 
 def combine_scores(
-        score_dicts: Sequence[dict[str, list[torch.Tensor]]]
-        ) -> dict[str, list[torch.Tensor]]:
-    """Currently: collects all scores for each tag
+        score_dicts: Sequence[Mapping[str, list[torch.Tensor]]]
+        ) -> dict[str, torch.Tensor]:
+    """Collects all scores for each tag
     category separately in a list.
+
+    Parameters
+    ----------
+    score_dicts : Sequence[dict[str, list[torch.Tensor]]]
+        Seqence of mappings of attention scores.
+
+    Returns
+    -------
+    dict[str, torch.Tensor[shape[M, B, S, S]]]
+        Dictionary of attention scores.
     """
     # Do we need to distinguish different layers (vertical heights) here?
 
@@ -36,16 +48,30 @@ def combine_scores(
         for key, scores in sc_dict.items():
             combined_dicts[key].extend(scores)
 
-    return combined_dicts
-
-
-class BatchInput(TypedDict):
-    input_ids: torch.Tensor
-    masks: NotRequired[dict[str, torch.Tensor | None]]
+    return {key: torch.stack(scores) for key, scores in combined_dicts.items()}
 
 
 class FeedForward(nn.Module):
-    def __init__(self, n_embd, d_ff_factor, dropout, bias: bool = True):
+    """Feed forward network with two
+    linear networks and GELU activation function.
+    """
+    def __init__(
+            self, n_embd: int,
+            d_ff_factor: int, dropout: float,
+            bias: bool = True):
+        """Initialise feed forward network.
+        Parameters
+        ----------
+        n_embd : int
+            Input and output dimensionality.
+        d_ff_factor : int
+            Factor for inner dimensionality.
+            Size is `n_embd*d_ff_factor`.
+        dropout : float
+            Dropout to apply after feed forward network.
+        bias : bool, default=True
+            Include bias in linear networks.
+        """
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, d_ff_factor*n_embd, bias=bias),
@@ -54,48 +80,111 @@ class FeedForward(nn.Module):
             nn.Dropout(dropout)
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply the feed forward network
+        to an input.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input.
+
+        Returns
+        -------
+        torch.Tensor
+            Feed forward network output.
+        """
         return self.net(x)
 
 
 class DualFixedLinear(nn.Module):
-    def __init__(self, in_dim, out_dim, bias: bool = False):
+    """Dual fixed layer for fixing
+    governor head Q and dependent K
+    as well as governor head K and dependent Q.
+    """
+    def __init__(self, in_dim: int, out_dim: int, bias: bool = False):
+        """Initialise dual fixed layer.
+
+        Parameters
+        ----------
+        in_dim : int
+            Input dimensionality.
+        out_dim : int
+            Output dimensionality.
+        bias : bool, default=False
+            Whether to include bias in linear layer.
+        """
         super().__init__()
         # TODO: make possible to use when having other keys
-        # => then head, child must be first pair
         # in addition to head and child
+        # => then head, child must be first pair
         # num_keys; saves 1/3 keys * proportion
         # dim: out_dim - (out_dim/3)*(2/num_keys)
         self.w_qkv = nn.Linear(in_dim, 2 * out_dim // 3, bias=bias)
         # -> 2*(M * H/2 * (E/3)*2)
 
-    def forward(self, x):
-        # x : [B, S, E]
-        # -> B x (M/2 * H * E/3)
-        qk, v = self.w_qkv(x).chunk(2, dim=-1)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply dual fixed linear module.
+
+        Parameters
+        ----------
+        x : torch.Tensor, shape[B, S, in_dim]
+            Input.
+
+        Returns
+        -------
+        torch.Tensor, shape[B, S, out_dim]
+            Output.
+        """
+        out: torch.Tensor = self.w_qkv(x)
+        qk, v = out.chunk(2, dim=-1)
         # take v from end
         # take q, k and chunk rest into two
-        # cat q, k, r1, k, q, r2, v
         q, k = qk.chunk(2, dim=-1)
         m = torch.cat((q, k, k, q, v), dim=-1)
         return m
 
 
-LayerDescription = tuple[tuple[str, ...], int]  # tag : num_heads
+LayerDescription = tuple[tuple[str, ...], int]
+"""Description for transformer layer:
+tuple of head names and a dimensionality."""
 
 
 class MIAttention(nn.Module):
+    """Mask-informed attention module.
+    """
     # NOTE: This layer design only works for descriptions with
     # multihead-attention modules of the same size
     def __init__(
-            self, n_embd, layer_description: LayerDescription,
-            block_size, attn_dropout,
-            resid_dropout, overlay_causal: bool = False,
+            self, n_embd: int, layer_description: LayerDescription,
+            block_size: int, attn_dropout: float,
+            resid_dropout: float, overlay_causal: bool = False,
             use_dual_fixed: bool = False, bias: bool = False):
+        """Initialise mask-informed attention module.
+
+        Parameters
+        ----------
+        n_embd : int
+            Module layer width.
+        layer_description : LayerDescription
+            Layer description.
+        block_size : int
+            Maximum sequence length.
+        attn_dropout : float
+            Dropout for attention weights.
+        resid_dropout : float
+            Dropout for residual connection.
+        overlay_causal : bool, default=False
+            Apply causal mask, i.e. make model incremental.
+        use_dual_fixed : bool, default=False
+            Cross-fix query and key vectors in dual-head
+            transformer.
+        bias : bool, default=False
+            Include bias in linear layers.
+        """
         # n_embd: embedding dimensionType[DependencyMultiHeadAttention]
         # n_heads : the number of heads we'd like to use
         super().__init__()
-
         self.tags: tuple[str, ...] = layer_description[0]
         self.n_multihead: int = len(self.tags)
         self.n_head: int = layer_description[1]
@@ -113,7 +202,7 @@ class MIAttention(nn.Module):
 
         self.proj = nn.Linear(n_embd, n_embd, bias=bias)
 
-        self.attn_dropout = nn.Dropout(attn_dropout)
+        self.attn_dropout = attn_dropout
         self.resid_dropout = nn.Dropout(resid_dropout)
 
         self.overlay_causal: bool = overlay_causal
@@ -135,6 +224,16 @@ class MIAttention(nn.Module):
             x: torch.Tensor,
             masks: dict[str, torch.Tensor | None]
             ) -> tuple[torch.Tensor, dict[str, list[torch.Tensor]]]:
+        tags_l = list(self.tags)
+        # just for compatibility
+        for i in range(len(tags_l)):
+            if (
+                    not tags_l[i].endswith("_current")
+                    and not tags_l[i].endswith("_next")):
+                tags_l[i] = tags_l[i] + "_current"
+
+        tags = tuple(tags_l)
+
         """Mask shape: [M, B, S, S]
         with M number of multiheads,
         B batch size, S sequence length"""
@@ -159,18 +258,20 @@ class MIAttention(nn.Module):
 
         # (B, M, H, S, S)
         if self.overlay_causal:
-            att = att.masked_fill(self.tril[:S, :S] == 0, float('-inf'))
+            att = att.masked_fill(
+                self.tril[:S, :S] == 0, float('-inf'))  # type: ignore
 
         # TODO: get an empty mask for all tags not occurring in the
         # mask argument; then stack all masks on dim 0 and fill masks
 
         if masks is not None:
             mask_list: list[torch.Tensor] = []
-            for tag in self.tags:
+            for tag in tags:
                 if tag in masks.keys() and masks[tag] is not None:
                     mask_list.append(masks[tag])    # type: ignore
                 else:
-                    mask_list.append(self.ones[:S, :S].unsqueeze(0))
+                    mask_list.append(
+                        self.ones[:S, :S].unsqueeze(0))  # type: ignore
 
             masks_stacked = torch.stack(mask_list, dim=1)
             masks_stacked = masks_stacked.unsqueeze(2)  # (B, M, 1, S, S)
@@ -180,7 +281,12 @@ class MIAttention(nn.Module):
                 float('-inf'))
             # unclear why type checker complains
 
-        arc_scores = F.sigmoid(att)
+        if self.attn_dropout > 0 and self.training:
+            att[..., 2:][torch.rand(
+                att.shape, device=att.device)[..., 2:]
+                < self.attn_dropout] = float('-inf')
+
+        att_logits = att
 
         att = F.softmax(att, dim=-1)
         att = einops.rearrange(att, 'b m h s1 s2 -> b (m h) s1 s2')
@@ -194,10 +300,10 @@ class MIAttention(nn.Module):
         out = self.proj(out)
         out = self.resid_dropout(out)
 
-        out_scores = {
-            tag: [arc_scores[:, m, h] for h in range(self.n_head)]
-            for tag, m in zip(self.tags, range(self.n_multihead))}
-        return out, out_scores
+        out_logits = {
+            tag: [att_logits[:, m, h] for h in range(self.n_head)]
+            for tag, m in zip(tags, range(self.n_multihead))}
+        return out, out_logits
 
 
 class MILayer(nn.Module):
@@ -207,9 +313,10 @@ class MILayer(nn.Module):
     # multihead-attention modules of the same size
 
     def __init__(
-            self, n_embd, layer_description: LayerDescription,
-            d_ff_factor, block_size, attn_dropout, resid_dropout,
-            dropout_ff, overlay_causal: bool = False,
+            self, n_embd: int, layer_description: LayerDescription,
+            d_ff_factor: int, block_size: int, attn_dropout: float,
+            resid_dropout: float,
+            dropout_ff: float, overlay_causal: bool = False,
             use_dual_fixed: bool = False, bias: bool = False):
         # n_embd: embedding dimensionType[DependencyMultiHeadAttention]
         # n_heads : the number of heads we'd like to use
@@ -232,19 +339,20 @@ class MILayer(nn.Module):
         with M number of multiheads,
         B batch size, S sequence length"""
 
-        x_attn, out_scores = self.attn(self.ln_1(x), masks)
+        x_attn, out_logits = self.attn(self.ln_1(x), masks)
         x = x + x_attn
         x = x + self.ff(self.ln_2(x))
 
-        return x, out_scores
+        return x, out_logits
 
 
 TransformerDescription = tuple[LayerDescription, ...]
 
 
 @dataclass
-class MITransformerConfig(params.Params):
-    transformer_description: TransformerDescription = ((("head", "child"), 1),)
+class MITransformerConfig(utils.Params):
+    transformer_description: TransformerDescription = (
+        (("head_current", "child_current"), 1),)
     d_ff_factor: int = 4
     dropout_attn: float = 0.3
     dropout_resid: float = 0.3
@@ -276,7 +384,6 @@ class MITransformer(nn.Module):
             config.overlay_causal, config.use_dual_fixed,
             config.bias)
             for layer_description in transformer_description])
-
         self.block_size = config.block_size
 
         self.vocab_size = config.vocab_size
@@ -308,11 +415,15 @@ class MITransformer(nn.Module):
 
         self.lstm = None
         if config.use_lstm:
-            self.lstm = torch.nn.LSTM(n_embd, n_embd, batch_first=True)
+            self.lstm = torch.nn.LSTM(
+                n_embd, n_embd, batch_first=True)
             self.lstm_dropout = nn.Dropout(config.dropout_lstm)
-            # TODO separate dropout for LSTM
+            self.ln_1 = nn.LayerNorm(n_embd)
+            self.ln_2 = nn.LayerNorm(n_embd)
+            self.ff = FeedForward(
+                n_embd, config.d_ff_factor, config.dropout_ff, config.bias)
 
-    def _init_weights(self, module):
+    def _init_weights(self, module: nn.Module):
         if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if module.bias is not None:
@@ -324,7 +435,7 @@ class MITransformer(nn.Module):
             self, input_ids: torch.Tensor,
             masks: dict[str, torch.Tensor | None] | None = None,
             **kwargs
-            ) -> tuple[torch.Tensor, dict[str, list[torch.Tensor]]]:
+            ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """
             Input:
             x : [B, S, E]
@@ -347,15 +458,17 @@ class MITransformer(nn.Module):
         x = self.embd_dropout(tok_emb + pos_emb)
 
         if self.lstm is not None:
-            x = self.lstm(x)[0]
-            x = self.lstm_dropout(x)
+            # x = self.lstm(x)[0]
+            x = x + self.lstm_dropout(self.lstm(self.ln_1(x))[0])
+            x = x + self.ff(self.ln_2(x))
 
-        scores = []
+        att_logits = []
         for layer in self.layers:
-            x, sc = layer(x, masks if self.use_input_mask else None)
-            scores.append(sc)
+            x, al = layer(x, masks if self.use_input_mask else None)
+            att_logits.append(al)
 
-        return x, combine_scores(scores)
+        # TODO: stack the masks in the mask lists
+        return x, combine_scores(att_logits)
 
 
 class MITransformerLM(nn.Module):
@@ -386,19 +499,19 @@ class MITransformerLM(nn.Module):
     def forward(
             self, input_ids: torch.Tensor,
             masks: dict[str, torch.Tensor | None] | None = None, **kwargs
-            ) -> tuple[torch.Tensor, dict[str, list[torch.Tensor]]]:
+            ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """
             Input:
             x : [B, S, E]
             masks : dictionary mapping from tags to masks
             mask shape: [B, S, S]
-            masksshould be a boolean mask with True being the elements not
+            masks should be a boolean mask with True being the elements not
             to mask and False being the entries to mask.
 
             Output : Shape[B, S, E]
         """
 
-        x, scores = self.mi_transformer(input_ids, masks)
+        x, att_logits = self.mi_transformer(input_ids, masks)
 
         x = self.ln(x)
         logits = self.lm_head(x)
@@ -406,7 +519,7 @@ class MITransformerLM(nn.Module):
         # shape (B,T,C)  B : batch, T : sequence length, C : embedding dim
 
         # logits = x @ self.embds
-        return logits, scores
+        return logits, att_logits
 
     def generate(self, input_ids: torch.Tensor, max_new_tokens: int, **kwargs):
         """ given a context idx, generate max_new_tokens tokens
@@ -414,7 +527,8 @@ class MITransformerLM(nn.Module):
         for _ in range(max_new_tokens):
             idx_cond = input_ids[:, -self.mi_transformer.block_size:]
             # we can never have any idx longer than block_size
-            logits = self(idx_cond, {"head": None, "child": None})[0]
+            logits = self(idx_cond, {
+                "head_current": None, "child_current": None})[0]
             # call fwd without targets
             logits = logits[:, -1, :]
             # take last token. from shape (B, C, T) to (B, C)
@@ -433,7 +547,7 @@ class MITransformerLM(nn.Module):
 
 
 def description_builder(
-        layer_design: tuple[str, ...] = ("head", "child"),
+        layer_design: tuple[str, ...] = ("head_current", "child_current"),
         use_standard: bool = False,
         width: int = 1,
         depth: int = 1,
