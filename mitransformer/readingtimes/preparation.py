@@ -70,18 +70,40 @@ def zuco_stories_to_csv(
     df.to_csv(output_file, index=False)
 
 
-def add_split(
+def process(
         input_file: str, output_file: str,
         model_dir: str, token_mapper_dir: str,
+        raw: bool = True,
         token_col: str = TOKEN_COL,
+        text_id_col: str = TEXT_ID_COL,
+        wnum_col: str = WNUM_COL,
+        baseline_metrics: Iterable[str] = ("frequency", "length"),
         device: str = DEVICE,
         batch_size: int = BATCH_SIZE,
         masks_setting: Literal[
-            "current", "next", "both"] = "current",
+            "current", "next"] = "current",
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
-        shift: int = 0) -> None:
-    assert not masks_setting == "next", "mask_setting next not implemented!"
+        shift: int = -1,
+        corpus: Literal["naturalstories", "zuco"] = "naturalstories"
+        ) -> None:
+
+    # Convert original format to sensible csv
+    load_func = (
+        natural_stories_to_csv if corpus == "naturalstories"
+        else zuco_stories_to_csv)
+
+    load_func(
+        input_file, output_file,
+        token_col, text_id_col,
+        wnum_col, None if raw else token_mapper_dir)
+
+    # Add baseline predictors
+    orig_frame = UnsplitFrame(
+        pd.read_csv(output_file), {"word_col": token_col}, tokenised=False)
+
+    for metric in baseline_metrics:
+        orig_frame.add_(metric)
 
     df = pd.read_csv(input_file)
     words = df[token_col]
@@ -157,13 +179,9 @@ def add_split(
 
     frame.untokenise_()
 
-    # combine old frame and new frame and then save
-    old_frame = UnsplitFrame(
-        df, tokenised=False)
-
     # print(frame.tokenised)
     # print(old_frame.tokenised)
-    frame = frame | old_frame.split([
+    frame = frame | orig_frame.split([
         len(sentence) for sentence in frame.df["word"]])
     # TODO: check whether both columns split
     # print(frame.tokenised)
@@ -173,50 +191,3 @@ def add_split(
     unsplit_frame = frame.unsplit()
 
     unsplit_frame.df.to_csv(output_file, index=False)
-
-
-def process(
-        input_file: str, output_file: str,
-        model_dir: str, token_mapper_dir: str,
-        raw: bool = True,
-        token_col: str = TOKEN_COL,
-        text_id_col: str = TEXT_ID_COL,
-        wnum_col: str = WNUM_COL,
-        baseline_metrics: Iterable[str] = ("frequency", "length"),
-        device: str = DEVICE,
-        batch_size: int = BATCH_SIZE,
-        masks_setting: Literal[
-            "current", "next"] = "current",
-        only_content_words_left: bool = False,
-        only_content_words_cost: bool = False,
-        shift: int = -1,
-        corpus: Literal["naturalstories", "zuco"] = "naturalstories"
-        ) -> None:
-
-    # Convert original format to sensible csv
-    load_func = (
-        natural_stories_to_csv if corpus == "naturalstories"
-        else zuco_stories_to_csv)
-
-    load_func(
-        input_file, output_file,
-        token_col, text_id_col,
-        wnum_col, None if raw else token_mapper_dir)
-
-    # Add baseline predictors
-    lf = UnsplitFrame(
-        pd.read_csv(output_file), {"word_col": token_col}, tokenised=False)
-
-    for metric in baseline_metrics:
-        lf.add_(metric)
-
-    lf.df.to_csv(output_file, index=False)
-
-    # Add metrics based on "tokenised" and parsed corpus
-    add_split(
-        output_file, output_file, model_dir,
-        token_mapper_dir, token_col,
-        device, batch_size, masks_setting=masks_setting,
-        only_content_words_left=only_content_words_left,
-        only_content_words_cost=only_content_words_cost,
-        shift=shift)
