@@ -5,8 +5,8 @@ import sys
 import argparse
 from ast import literal_eval as make_tuple
 
-from mitransformer import io
-from mitransformer.utils import logmaker
+from . import io
+from .utils import logmaker
 
 
 logger = logmaker.getLogger(__name__)
@@ -14,7 +14,7 @@ optuna.logging.enable_propagation()  # Propagate logs to the root logger.
 optuna.logging.disable_default_handler()  # Stop showing logs in sys.stderr.
 
 
-# TODO:correct parser args for data loading
+# TODO: correct parser args for data loading
 # TODO: make bool args optionally just acccept flag for True
 
 
