@@ -25,7 +25,7 @@ pd.set_option('mode.chained_assignment', None)
 
 LANG = "en"
 
-TOKEN_COL = "WORD"
+TOKEN_COL = "word"
 TEXT_ID_COL = "item"
 WNUM_COL = "zone"
 DEVICE = "cpu"
@@ -101,12 +101,13 @@ def process(
     # Add baseline predictors
     orig_frame = UnsplitFrame(
         pd.read_csv(output_file), {"word_col": token_col}, tokenised=False)
+    # print(orig_frame.df["word"].to_list()); raise Exception
 
     for metric in baseline_metrics:
         orig_frame.add_(metric)
 
-    df = pd.read_csv(input_file)
-    words = df[token_col]
+    df = pd.read_csv(output_file)
+    words = df["word"]
 
     # Add surprisal
 
@@ -114,6 +115,7 @@ def process(
     frame.add_("conllu", words=words)  # dataset attribute missing
     frame.add_("space_after")
     frame.add_("word")
+    frame.add_("position")
     frame.add_("head")
     frame.add_("pos")
     frame.add_("deprel")
@@ -179,12 +181,9 @@ def process(
 
     frame.untokenise_()
 
-    # print(frame.tokenised)
-    # print(old_frame.tokenised)
     frame = frame | orig_frame.split([
         len(sentence) for sentence in frame.df["word"]])
     # TODO: check whether both columns split
-    # print(frame.tokenised)
 
     frame.shift_(shift)
 

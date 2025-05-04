@@ -21,4 +21,5 @@ if __name__ == "__main__":
     mapper = "processed/Wikitext_processed/mapper"  # TODO set to processed
     process(
         in_file, out_file, model_name, mapper,
-        raw=True, corpus=corpus)
+        raw=True, corpus=corpus, shift=0,
+        only_content_words_cost=False, only_content_words_left=False)

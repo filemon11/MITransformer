@@ -358,6 +358,20 @@ class UntokSplitLast(UntokSplitFunc):
         return it
 
 
+class UntokSplitFirst(UntokSplitFunc):
+    def __init__(
+            self, col: str, space_after_col: str,
+            *args, **kwargs):
+        super().__init__(col, space_after_col)
+
+    def __call__(self, untok_df: pd.DataFrame) -> Sequence:
+        it = [list(untokenise(
+            untok_df[self.col][i],
+            untok_df[self.space_after_col][i], "first"))
+                for i in range(len(untok_df))]
+        return it
+
+
 def untokenise_split_df(
         df: pd.DataFrame,
         untok_funcs: Sequence[UntokSplitFunc]

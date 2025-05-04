@@ -47,7 +47,9 @@ class Frame():
         assert self.tokenised == other.tokenised
         new_untok_funcs = self.untok_funcs + other.untok_funcs
         new_additional = self.additional | other.additional
-        new_df = pd.concat([self.df, other.df], axis=1)
+        new_df = self.df.copy()
+        for col in other.df.columns:
+            new_df[col] = other.df[col]
         return self.__class__(
             df=new_df, colnames=new_colnames, tokenised=self.tokenised,
             untok_funcs=new_untok_funcs, additional=new_additional
@@ -106,13 +108,11 @@ def shift_(
                 sign = -1
             else:
                 sign = +1
-            list_frame[colname] = list_frame.apply(
-                lambda df: df[colname][
+            obj = [sentence[
                     max(0, sign*amount):min(
-                        len(df[colname]),
-                        len(df[colname])+(sign*amount))],
-                axis=1)
-
+                        len(sentence),
+                        len(sentence)+(sign*amount))] for sentence in list_frame[colname]]
+            list_frame[colname] = obj
 
 def split_to_sentence_list(
         items: Iterable[T], ends: Iterable[bool]) -> Iterable[list[T]]:
@@ -189,6 +189,10 @@ def unsplit_df(
     return unsplit_df
 
 
+# TODO change structure wrt. to the sets (shift, to_unsplit, etc.)
+# new: maintain two dicts:
+# 1. <type>_col: <colname>
+# 2. <colname>: (<type>, shift, to_unsplit, untok_func,...)
 class SplitFrame(Frame):
     generators = gen_and_untok
 
@@ -256,9 +260,9 @@ class SplitFrame(Frame):
         assert not self.tokenised, "Cannot shift tokenised dataframe."
         names_to_shift = {
             colname for colname, shift in self.shift.items() if shift}
-        names_to_ignore = {
+        cols_to_ignore = {
             colname for colname, shift in self.shift.items() if shift is None}
-        shift_(self.df, amount, names_to_shift, names_to_ignore)
+        shift_(self.df, amount, names_to_shift, cols_to_ignore)
 
     def untokenise_(self) -> None:
         assert self.tokenised

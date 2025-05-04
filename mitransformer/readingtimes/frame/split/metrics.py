@@ -6,7 +6,7 @@ import torch
 
 from ...lingutils import (
     UntokSplitFunc, UntokSplitAdd,
-    UntokSplitHead,
+    UntokSplitHead, UntokSplitFirst,
     pos_merge, TAGSET, CONTENT_POS)
 from ....data import CoNLLUDataset, parse_list_of_words_with_spacy, TokenMapper
 from ....data.dataset import (
@@ -52,6 +52,15 @@ class SplitTokMetricMakerPOS(SplitTokWordMetricMaker):
         return df.apply(
             lambda r: get_POS_tags(
                 r[self.word_col]), axis=1), dict()  # type: ignore
+
+
+class SplitTokMetricMakerPosition(SplitTokWordMetricMaker):
+    def __call__(
+            self, df: pd.DataFrame,
+            *args, **kwargs
+            ) -> tuple[pd.Series, dict[str, Any]]:
+        return df.apply(
+            lambda r: list(range(len(r[self.word_col]))), axis=1), dict()  # type: ignore
 
 
 class SplitTokConlluDatasetMetricMaker(SplitTokMetricMaker):
@@ -129,9 +138,10 @@ class SplitTokMetricMakerTokenlist(SplitTokMetricMaker):
 
     def __call__(
             self, df: pd.DataFrame, words: Iterable[str],
-            max_len: int = 40, *args, **kwargs
+            max_len: int | None = None,
+            min_len: int | None = None, *args, **kwargs
             ) -> tuple[pd.Series, dict[str, Any]]:
-        conllu = parse_list_of_words_with_spacy(words, min_len=0)
+        conllu = parse_list_of_words_with_spacy(words, min_len=None)
         tokenlists = load_conllu_from_str(conllu, max_len)
         return pd.Series(tokenlists), {}
 
@@ -506,8 +516,8 @@ def generate_head_distance(
     """WARNING: untested"""
     # assumes that governor and child mask are called head and child
     # these are already triangulated
-    mask_gov = masks[gov_name]
-    mask_dep = masks[dep_name]
+    mask_gov = masks[gov_name].copy()
+    mask_dep = masks[dep_name].copy()
 
     assert mask_gov is not None and mask_dep is not None
 
@@ -822,8 +832,8 @@ def generate_left_dependents_distance_sum(
 
     # assumes that governor and child mask are called head and child
     # these are already triangulated
-    mask_gov = masks[gov_name]
-    mask_dep = masks[dep_name]
+    mask_gov = masks[gov_name].copy()
+    mask_dep = masks[dep_name].copy()
 
     assert mask_gov is not None and mask_dep is not None
 
@@ -874,8 +884,8 @@ def generate_left_dependents_count(
 
     # assumes that governor and child mask are called head and child
     # these are already triangulated
-    mask_gov = masks[gov_name]
-    mask_dep = masks[dep_name]
+    mask_gov = masks[gov_name].copy()
+    mask_dep = masks[dep_name].copy()
 
     assert mask_gov is not None and mask_dep is not None
 
@@ -961,10 +971,10 @@ def generate_kl_divergence(
 
     # assumes that governor and child mask are called head and child
     # these are already triangulated
-    mask_gov = attention_matrices[
-        gov_name][0].clone().softmax(-1).numpy()
-    mask_dep = attention_matrices[
-        dep_name][0].clone().softmax(-1).numpy()
+    mask_gov = (attention_matrices[
+        gov_name].mean(0).clone()).softmax(-1).numpy()
+    mask_dep = (attention_matrices[
+        dep_name].mean(0).clone()).softmax(-1).numpy()
 
     # assumes that governor and child mask are called head and child
     # these are already triangulated
@@ -972,6 +982,7 @@ def generate_kl_divergence(
     assert masks[dep_name] is not None
     mask_gov_gold = masks[gov_name].copy().astype(float)
     mask_dep_gold = masks[dep_name].copy().astype(float)
+
     mask_gov_gold /= mask_gov_gold.sum(-1)
     mask_dep_gold /= mask_dep_gold.sum(-1)
 
@@ -987,11 +998,17 @@ def generate_kl_divergence(
     #     mask_dep_gold = np.concatenate(
     #         (zeros, mask_dep_gold[:-1]), axis=0)
 
+    # print(mask_gov_gold / mask_gov)
+
     kl_gov = (mask_gov_gold*np.log(mask_gov_gold / mask_gov))
     kl_dep = (mask_dep_gold*np.log(mask_dep_gold / mask_dep))
 
     kl_gov[np.isnan(kl_gov)] = 0
     kl_dep[np.isnan(kl_dep)] = 0
+
+    kl_gov[np.isinf(kl_gov)] = 0
+    kl_dep[np.isinf(kl_dep)] = 0
+    
     cost = (kl_dep + kl_gov).sum(-1)[2:]
 
     return cost
@@ -1012,8 +1029,8 @@ def generate_demberg(
 
     # assumes that governor and child mask are called head and child
     # these are already triangulated
-    mask_gov = masks[gov_name]
-    mask_dep = masks[dep_name]
+    mask_gov = masks[gov_name].copy()
+    mask_dep = masks[dep_name].copy()
 
     assert mask_gov is not None and mask_dep is not None
 
@@ -1134,6 +1151,7 @@ gen_and_untok: dict[str, tuple[
         "pos": (SplitTokMetricMakerPOS, False, UntokSplitHead, True),
         "word": (SplitTokMetricMakerWord, False, UntokSplitAdd, True),
         "space_after": (SplitTokMetricMakerSpaceAfter, False, None, False),
+        "position": (SplitTokMetricMakerPosition, False, UntokSplitFirst, True),
         "conllu": (SplitTokMetricMakerTokenlist, None, None, False),
         "deprel": (SplitTokMetricMakerDeprels, False, UntokSplitHead, True),
         "head": (SplitTokMetricMakerHeadlist, False, None, False),
