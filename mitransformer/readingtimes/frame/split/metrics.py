@@ -1158,7 +1158,7 @@ gen_and_untok: dict[str, tuple[
         # TODO: use different detokenisation since head is shifted when
         # untokenising. Side note: This also holds for costs and distances
         # maybe one should produce them after detokenising
-        "surprisal": (SplitTokMetricMakerSurprisal, True, UntokSplitAdd, True),
+        "surprisal": (SplitTokMetricMakerSurprisal, False, UntokSplitAdd, True),
         "mask": (SplitTokMetricMakerMask, None, None, False),
         "head_distance": (
             SplitTokMetricMakerHeadDistance, True, UntokSplitHead, True),
