@@ -341,7 +341,7 @@ class Metric(params.Params):
         '''
         return self + other
 
-    def __truediv__(self, other: float) -> "Metric":
+    def __truediv__(self, other: float) -> Self:
         '''This function allows to apply division
         to the metric.
         This is done by multiplying `self.num` with
@@ -362,7 +362,7 @@ class Metric(params.Params):
         '''
         new = self.__class__(_main_metric=self._main_metric) + self
         new.num *= other
-        return new
+        return new  # type: ignore
 
     def print(
             self, epoch: int,
@@ -616,9 +616,11 @@ class SupervisedMetric(Metric):
         Dependency parsing loss.
     '''
 
+    arc_num: float = 0
     _arc_loss: torch.Tensor = torch.tensor(0)
     alpha: float | None = None
     _to_mean: ClassVar[set[str]] = Metric._to_mean | {"arc_loss"}
+    _arc_to_mean: ClassVar[set[str]] = set()
 
     @property
     def _loss(self) -> torch.Tensor:
@@ -684,6 +686,99 @@ class SupervisedMetric(Metric):
 
         return super()._add_fields(name, m1, m2)
 
+    def __getattr__(self, prop: str):
+        '''The function `__getattr__` calculates the mean for
+        metrics based on the provided property.
+
+        Parameters
+        ----------
+        prop : str
+            The `prop` parameter in the `__getattr__` method
+            represents the name of the attribute that is
+            being accessed or requested. This method is called when an
+            attribute is not found through the
+            usual process of looking up the attribute in the instance's
+            dictionary. It allows you to
+            dynamically compute or provide attributes
+
+        Returns
+        -------
+        None
+        '''
+        if prop in self._arc_to_mean:
+            val = self.__getattribute__(f"_{prop}") / self.arc_num
+            if prop in self._convert:
+                val = self._convert[prop](val)
+            return val
+        else:
+            return super().__getattr__(prop)
+
+    def __truediv__(self, other: float) -> "Metric":
+        '''This function allows to apply division
+        to the metric.
+        This is done by multiplying `self.num` with
+        the `other` parameter. We divide the metrics by `self.num`
+        before retrieving them.
+
+        Parameters
+        ----------
+        other : float
+            The `other` parameter in the `__truediv__` method represents
+            the value by which the current
+            object will be divided.
+
+        Returns
+        -------
+        "Metric"
+            A new instance of the class "Metric" is being returned.
+        '''
+        new = super().__truediv__(other)
+        new.arc_num *= other
+        return new
+
+    def to_dict(self, as_str: bool = False,
+                omit_undefined: bool = False) -> dict[str, Any]:
+        if as_str:
+            return {attr: str(getattr(self, attr))
+                    for attr in self._to_mean | self._arc_to_mean}
+        else:
+            return {attr: self._to_float(getattr(self, attr))
+                    for attr in self._to_mean | self._arc_to_mean}
+
+    def print(
+            self, epoch: int,
+            total_epochs: int, kind: str) -> None:
+        '''The function `print` formats and prints information
+        about the current epoch, total epochs, and a
+        specified kind of data.
+
+        Parameters
+        ----------
+        epoch : int
+            The `epoch` parameter represents the current
+            epoch number during training or iteration in a
+            machine learning model. It is typically an
+            integer value indicating the current iteration step.
+        total_epochs : int
+            Total_epochs is the total number of epochs in the training process.
+            It represents the number of
+            times the algorithm has gone through the entire training dataset.
+        kind : str
+            Kind refers to the type of operation or
+            process being performed during the current epoch.
+            It could be training, validation, testing, or any
+            other relevant operation that is being executed.
+        '''
+        strs = [f"{name}: {getattr(self, name):.2f}" for name in self._to_mean | self._arc_to_mean]
+        print(f"[{epoch}/{total_epochs}] {kind}:: " + ", ".join(strs))
+
+    def print_test(self) -> None:
+        '''The function `print_test` prints formatted
+        test results based on attributes of the object it is
+        called on.
+        '''
+        strs = [f"{name}: {getattr(self, name):.2f}" for name in self._to_mean | self._arc_to_mean]
+        print("Test results: " + ", ".join(strs))
 
 @dataclass
 class EvalMetric(Metric):

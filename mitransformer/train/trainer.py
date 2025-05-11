@@ -352,7 +352,7 @@ class LMTrainer():
             score_gold: torch.BoolTensor,
             to_ignore_mask: torch.BoolTensor | None,
             reduction: Literal["sum", "mean"] = "mean"
-            ) -> torch.Tensor:
+            ) -> tuple[torch.Tensor, int]:
         """reduction sum takes a mean across dim 1
         of the mask"""
         # TODO: what if we have more than two masks?
@@ -422,7 +422,7 @@ class LMTrainer():
         else:
             pass  # loss /= num_scores/total_len  # = factor
             # Each position can be attended to S+1 times
-        return loss
+        return loss, int(num_scores)
 
     @staticmethod
     def filter_arc_scores(
@@ -515,6 +515,7 @@ class LMTrainer():
             self,
             num_instances: int,
             lm_loss: torch.Tensor,
+            num_arc_instances: int | None = None,
             arc_loss: torch.Tensor | None = None,
             perplexity: float | None = None,
             uas: float | pd.DataFrame | None = None,
@@ -522,8 +523,10 @@ class LMTrainer():
         if perplexity is not None:
             if arc_loss is not None:
                 assert uas is not None
+                assert num_arc_instances is not None
                 return SupervisedEvalMetric(
                     num_instances,
+                    arc_num=num_arc_instances,
                     _lm_loss=lm_loss,
                     _perplexity=perplexity,
                     _arc_loss=arc_loss,
@@ -543,8 +546,10 @@ class LMTrainer():
                 num_instances, _lm_loss=lm_loss,
                 _main_metric=self.config.early_stop_metric)
         else:
+            assert num_arc_instances is not None
             return SupervisedMetric(
-                num_instances, _lm_loss=lm_loss, _arc_loss=arc_loss,
+                num_instances, arc_num=num_arc_instances,
+                _lm_loss=lm_loss, _arc_loss=arc_loss,
                 alpha=self.config.loss_alpha,
                 _main_metric=self.config.early_stop_metric)
 
@@ -565,6 +570,7 @@ class LMTrainer():
             reduction="sum")
         arc_loss: torch.Tensor | None = None
 
+        num_arc_instances: int | None = None
         if self.train_config.dependency_mode == "supervised":
             score_pair = self.prepare_scores(
                 arc_logits, batch["masks"])
@@ -580,8 +586,9 @@ class LMTrainer():
                         preds_concat,
                         batch["label_ids"],
                         ignore_index)
+                # TODO: is this correctly masked? For current should we shift to_ignore?
 
-                arc_loss = self.arc_loss(
+                arc_loss, num_arc_instances = self.arc_loss(
                     preds_concat,
                     cast(torch.BoolTensor, golds_concat),
                     to_ignore,
@@ -595,6 +602,7 @@ class LMTrainer():
 
         metric = self.get_metric(
             num_instances,
+            num_arc_instances=num_arc_instances,
             lm_loss=lm_loss,
             arc_loss=arc_loss)
 
@@ -660,7 +668,7 @@ class LMTrainer():
                     torch.BoolTensor, torch.concat(
                         list(to_ignore_dict.values())))
 
-                arc_loss = self.arc_loss(
+                arc_loss, num_arc_instances = self.arc_loss(
                     preds_concat,
                     cast(torch.BoolTensor, golds_concat),
                     to_ignore,
@@ -701,6 +709,7 @@ class LMTrainer():
             num_instances,
             lm_loss=lm_loss,
             arc_loss=arc_loss,
+            num_arc_instances=num_arc_instances,
             perplexity=surprisal_sum,
             uas=uas_abs,
             att_entropy=att_entropy)
@@ -1184,7 +1193,7 @@ def unpad_masks(masks: torch.Tensor, labels: torch.Tensor,
     return unpadded_list
 
 
-def get_uas_abs(inp: tuple[np.ndarray, np.ndarray, int]) -> int:
+def get_uas_abs(inp: tuple[np.ndarray, np.ndarray, np.ndarray]) -> int:
     pred_arcs, gold_arcs, upto_not_padding = inp
     pred_arcs = pred_arcs[upto_not_padding][:, upto_not_padding]
     gold_arcs = gold_arcs[upto_not_padding][:, upto_not_padding]
@@ -1193,10 +1202,9 @@ def get_uas_abs(inp: tuple[np.ndarray, np.ndarray, int]) -> int:
     # but this would not correspond to the max probability
     # tree given the scores
     gold_headlist = mask_to_headlist(gold_arcs)
-    # print(pred_headlist, gold_headlist)
+
     uas_s = uas_absolute(pred_headlist, gold_headlist) + 1
-    # add 1 for dummy mask since metric divides through
-    # the number of all tokens)
+    # add 1 for dummy mask
     return uas_s
 
 
@@ -1247,9 +1255,9 @@ def uas_composition(
                 (zeros, values_np[:, :, :-1]), axis=2)
 
     preds_arcs = dummy_mask_removal(
-        merge_head_child_scores(values_np[0], values_np[1]))
+        merge_head_child_scores(values_np[0], values_np[2]))
     golds_arcs = dummy_mask_removal(
-        merge_head_child_scores(values_np[2], values_np[3]))
+        merge_head_child_scores(values_np[1], values_np[3]))
 
     not_padding = (
         label_ids
