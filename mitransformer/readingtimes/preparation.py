@@ -181,9 +181,15 @@ def process(
 
     frame.untokenise_()
 
-    frame = frame | orig_frame.split([
+    split_frame = orig_frame.split([
         len(sentence) for sentence in frame.df["word"]])
-    # TODO: check whether both columns split
+    
+    # # for debugging
+    # for sen1, sen2 in zip(frame.df["word"], split_frame.df["word"]):
+    #     print(sen1, sen2)
+    #     assert sen1[0] == sen2[0]
+
+    frame = frame | split_frame
 
     frame.shift_(shift)
 

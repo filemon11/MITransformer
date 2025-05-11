@@ -102,16 +102,26 @@ def shift_(
         list_frame: pd.DataFrame, amount: int,
         cols_to_shift: Collection[str],
         cols_to_ignore: Collection[str]) -> None:
+    
     for colname in list_frame.columns:
         if colname not in cols_to_ignore:
             if colname in cols_to_shift:
                 sign = -1
             else:
                 sign = +1
-            obj = [sentence[
-                    max(0, sign*amount):min(
-                        len(sentence),
-                        len(sentence)+(sign*amount))] for sentence in list_frame[colname]]
+            obj = []
+            for sentence in list_frame[colname]:
+                try:
+                    obj.append(sentence[
+                        max(0, sign*amount):min(
+                            len(sentence),
+                            len(sentence)+(sign*amount))])
+                except TypeError:
+                    raise Exception(
+                        f"Does sentence ({sentence}) have the right format?"
+                        " Likey there is a misalignment, maybe caused by spacy?"
+                        " This can happen when two punctuation symbols follow a"
+                        " word. Suggestion: Remove one.")
             list_frame[colname] = obj
 
 def split_to_sentence_list(

@@ -14,12 +14,14 @@ if __name__ == "__main__":
 
     if corpus == "naturalstories":
         in_file = "naturalstories-master/words.tsv"
+    elif corpus == "zuco":
+        in_file = "zuco/training_data.csv"
     else:
-        in_file = "zuco/trial_data.csv"
+        raise Exception(f"Corpus {corpus} unknown.")
 
     out_file = f"RT/data/words_processed_{model_name}.csv"
     mapper = "processed/Wikitext_processed/mapper"  # TODO set to processed
     process(
         in_file, out_file, model_name, mapper,
         raw=True, corpus=corpus, shift=0,
-        only_content_words_cost=False, only_content_words_left=False)
+        only_content_words_cost=True, only_content_words_left=False)
