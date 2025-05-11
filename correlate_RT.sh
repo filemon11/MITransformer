@@ -6,8 +6,8 @@ prepare_baseline=$5
 
 for i in $(seq 0 $((model_count -1)))
 do
-    # python -m mitransformer.readingtimes ${model}_${i} ${corpus}
-    python reading_times.py ${model}_${i} ${corpus}
+    python -m mitransformer.readingtimes ${model}_${i} ${corpus}
+    # python reading_times.py ${model}_${i} ${corpus}
     cd RT
     if [ $corpus = "zuco" ]
     then
@@ -18,8 +18,8 @@ do
     cd ..
     if [ $prepare_baseline = 1 ]
     then
-        # python -m mitransformer.readingtimes ${baseline}_${i} ${corpus}
-        python reading_times.py  ${baseline}_${i} ${corpus}
+        python -m mitransformer.readingtimes ${baseline}_${i} ${corpus}
+        # python reading_times.py  ${baseline}_${i} ${corpus}
         cd RT
         if [ $corpus = "zuco" ]
         then
