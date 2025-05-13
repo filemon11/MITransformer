@@ -45,7 +45,7 @@ def load_zuco(
     if token_mapper_dir is not None:
         token_mapper = tokeniser.TokenMapper.load(token_mapper_dir)
 
-    file = pd.read_csv(csv_file, keep_default_na=False,na_values=['NaN'])
+    file = pd.read_csv(csv_file, keep_default_na=False, na_values=['NaN'])
 
     file["word"] = file["word"].str.replace("<EOS>", "")
     if make_lower:
