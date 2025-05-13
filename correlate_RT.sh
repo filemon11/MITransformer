@@ -3,10 +3,13 @@ model=$2 # "exp1_dep-supervised_det_39"
 baseline=$3
 model_count=$4
 prepare_baseline=$5
+shift=$6
+cost_param=$7
+left_param=$8
 
 for i in $(seq 0 $((model_count -1)))
 do
-    python -m mitransformer.readingtimes ${model}_${i} ${corpus}
+    python -m mitransformer.readingtimes ${model}_${i} ${corpus} ${shift} ${cost_param} ${left_param}
     # python reading_times.py ${model}_${i} ${corpus}
     cd RT
     if [ $corpus = "zuco" ]
@@ -18,7 +21,7 @@ do
     cd ..
     if [ $prepare_baseline = 1 ]
     then
-        python -m mitransformer.readingtimes ${baseline}_${i} ${corpus}
+        python -m mitransformer.readingtimes ${baseline}_${i} ${corpus} ${shift} ${cost_param} ${left_param}
         # python reading_times.py  ${baseline}_${i} ${corpus}
         cd RT
         if [ $corpus = "zuco" ]
