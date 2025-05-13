@@ -586,7 +586,8 @@ class LMTrainer():
                         preds_concat,
                         batch["label_ids"],
                         ignore_index)
-                # TODO: is this correctly masked? For current should we shift to_ignore?
+                # TODO: is this correctly masked?
+                # For current should we shift to_ignore?
 
                 arc_loss, num_arc_instances = self.arc_loss(
                     preds_concat,

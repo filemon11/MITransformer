@@ -5,6 +5,7 @@ Required: spacy_conll module
 from . import naturalstories
 
 from spacy.symbols import ORTH  # type: ignore
+from spacy.language import Language
 import en_core_web_trf  # type: ignore
 
 import conllu
@@ -17,14 +18,35 @@ nlp = en_core_web_trf.load()
 nlp.add_pipe("conll_formatter", last=True)
 nlp.tokenizer.add_special_case("<unk>", [{ORTH: "<unk>"}])  # type: ignore
 
+
+@Language.component("prevent-sbd")
+def prevent_sentence_boundary_detection(doc):
+    for token in doc:
+        # This will entirely disable spaCy's sentence detection
+        token.is_sent_start = False
+    return doc
+
+
+nlp_wo_sentseg = en_core_web_trf.load()
+nlp_wo_sentseg.add_pipe("conll_formatter", last=True)
+nlp_wo_sentseg.tokenizer.add_special_case(
+    "<unk>", [{ORTH: "<unk>"}])  # type: ignore
+
+nlp_wo_sentseg.add_pipe(
+    "prevent-sbd", name='prevent-sbd', before='parser')
+
+
 ENCODING = "utf-8"
 
 TSV = "./naturalstories-master/words.tsv"
 PARSED = "./naturalstories-master/parses/ud/stories-aligned.conllx"
 
 
-def parse(text: str):
-    return nlp(text)
+def parse(text: str, segment_sentences: bool = True):
+    if segment_sentences:
+        return nlp(text)
+    else:
+        return nlp_wo_sentseg(text)
 
 
 @overload
@@ -114,10 +136,23 @@ def parse_natural_stories_with_spacy(
 
 def parse_list_of_words_with_spacy(
         list_of_words: Iterable[str],
-        min_len: int | None = None
+        min_len: int | None = None,
+        segment_sentences: bool = True
         ) -> str:
     return save_doc_as_conllu(
-        parse(" ".join(list_of_words)), location=None, min_len=min_len)
+        parse(
+            " ".join(list_of_words),
+            segment_sentences=segment_sentences),
+        location=None, min_len=min_len)
+
+
+def parse_list_of_sentences_with_spacy(
+        list_of_sentences: Iterable[Iterable[str]],
+        min_len: int | None = None
+        ) -> str:
+    return "".join([parse_list_of_words_with_spacy(
+        sentence, min_len, segment_sentences=False)
+        for sentence in list_of_sentences])
 
 
 # Note: Wikitext is slighty tokenised. For instance,

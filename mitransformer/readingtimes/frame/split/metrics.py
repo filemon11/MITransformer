@@ -8,7 +8,9 @@ from ...lingutils import (
     UntokSplitFunc, UntokSplitAdd,
     UntokSplitHead, UntokSplitFirst,
     pos_merge, TAGSET, CONTENT_POS)
-from ....data import CoNLLUDataset, parse_list_of_words_with_spacy, TokenMapper
+from ....data import (
+    CoNLLUDataset, parse_list_of_words_with_spacy, TokenMapper,
+    parse_list_of_sentences_with_spacy)
 from ....data.dataset import (
     load_conllu_from_str, get_tokens, get_head_list, get_space_after,
     get_deprels, TokenList, Sequence, TransformMaskHeadChild,
@@ -60,7 +62,8 @@ class SplitTokMetricMakerPosition(SplitTokWordMetricMaker):
             *args, **kwargs
             ) -> tuple[pd.Series, dict[str, Any]]:
         return df.apply(
-            lambda r: list(range(len(r[self.word_col]))), axis=1), dict()  # type: ignore
+            lambda r: list(
+                range(len(r[self.word_col]))), axis=1), dict()  # type: ignore
 
 
 class SplitTokConlluDatasetMetricMaker(SplitTokMetricMaker):
@@ -138,10 +141,40 @@ class SplitTokMetricMakerTokenlist(SplitTokMetricMaker):
 
     def __call__(
             self, df: pd.DataFrame, words: Iterable[str],
+            sentence_ids: Iterable[int] | None,
             max_len: int | None = None,
             min_len: int | None = None, *args, **kwargs
             ) -> tuple[pd.Series, dict[str, Any]]:
-        conllu = parse_list_of_words_with_spacy(words, min_len=None)
+        if sentence_ids is None:
+            conllu = parse_list_of_words_with_spacy(words, min_len=min_len)
+        else:
+            def yield_sentences(
+                    words: Iterable[str], sentence_ids: Iterable[int]
+                    ) -> Iterable[Iterable[str]]:
+                iter_words = iter(words)
+                iter_sentence_ids = iter(sentence_ids)
+
+                try:
+                    prev_sentence_id = next(iter_sentence_ids)
+
+                    sentence = [next(iter_words)]
+
+                    for word, sentence_id in zip(
+                            iter_words, iter_sentence_ids):
+                        if sentence_id != prev_sentence_id:
+                            yield sentence
+                            sentence = []
+
+                        sentence.append(word)
+                        prev_sentence_id = sentence_id
+                    yield sentence
+
+                except StopIteration:
+                    pass
+            conllu = parse_list_of_sentences_with_spacy(
+                yield_sentences(words, sentence_ids),
+                min_len=min_len
+            )
         tokenlists = load_conllu_from_str(conllu, max_len)
         return pd.Series(tokenlists), {}
 
@@ -1008,7 +1041,7 @@ def generate_kl_divergence(
 
     kl_gov[np.isinf(kl_gov)] = 0
     kl_dep[np.isinf(kl_dep)] = 0
-    
+
     cost = (kl_dep + kl_gov).sum(-1)[2:]
 
     return cost
@@ -1151,14 +1184,16 @@ gen_and_untok: dict[str, tuple[
         "pos": (SplitTokMetricMakerPOS, False, UntokSplitHead, True),
         "word": (SplitTokMetricMakerWord, False, UntokSplitAdd, True),
         "space_after": (SplitTokMetricMakerSpaceAfter, False, None, False),
-        "position": (SplitTokMetricMakerPosition, False, UntokSplitFirst, True),
+        "position": (
+            SplitTokMetricMakerPosition, False, UntokSplitFirst, True),
         "conllu": (SplitTokMetricMakerTokenlist, None, None, False),
         "deprel": (SplitTokMetricMakerDeprels, False, UntokSplitHead, True),
         "head": (SplitTokMetricMakerHeadlist, False, None, False),
         # TODO: use different detokenisation since head is shifted when
         # untokenising. Side note: This also holds for costs and distances
         # maybe one should produce them after detokenising
-        "surprisal": (SplitTokMetricMakerSurprisal, False, UntokSplitAdd, True),
+        "surprisal": (
+            SplitTokMetricMakerSurprisal, False, UntokSplitAdd, True),
         "mask": (SplitTokMetricMakerMask, None, None, False),
         "head_distance": (
             SplitTokMetricMakerHeadDistance, True, UntokSplitHead, True),

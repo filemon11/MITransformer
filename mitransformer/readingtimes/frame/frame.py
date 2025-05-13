@@ -102,7 +102,7 @@ def shift_(
         list_frame: pd.DataFrame, amount: int,
         cols_to_shift: Collection[str],
         cols_to_ignore: Collection[str]) -> None:
-    
+
     for colname in list_frame.columns:
         if colname not in cols_to_ignore:
             if colname in cols_to_shift:
@@ -119,10 +119,13 @@ def shift_(
                 except TypeError:
                     raise Exception(
                         f"Does sentence ({sentence}) have the right format?"
-                        " Likey there is a misalignment, maybe caused by spacy?"
-                        " This can happen when two punctuation symbols follow a"
+                        " Likey there is a misalignment, "
+                        "maybe caused by spacy?"
+                        " This can happen when two punctuation "
+                        "symbols follow a"
                         " word. Suggestion: Remove one.")
             list_frame[colname] = obj
+
 
 def split_to_sentence_list(
         items: Iterable[T], ends: Iterable[bool]) -> Iterable[list[T]]:

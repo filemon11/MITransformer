@@ -109,10 +109,15 @@ def process(
     df = pd.read_csv(output_file)
     words = df["word"]
 
-    # Add surprisal
+    sentence_ids: None | pd.Series = None
+    if corpus != "naturalstories":
+        sentence_ids = df["item"]
 
+    # Add surprisal
     frame = SplitFrame(tokenised=True)
-    frame.add_("conllu", words=words)  # dataset attribute missing
+    frame.add_(
+        "conllu",
+        words=words, sentence_ids=sentence_ids)  # dataset attribute missing
     frame.add_("space_after")
     frame.add_("word")
     frame.add_("position")
@@ -183,11 +188,11 @@ def process(
 
     split_frame = orig_frame.split([
         len(sentence) for sentence in frame.df["word"]])
-    
-    # # for debugging
-    # for sen1, sen2 in zip(frame.df["word"], split_frame.df["word"]):
-    #     print(sen1, sen2)
-    #     assert sen1[0] == sen2[0]
+
+    # for debugging
+    for sen1, sen2 in zip(frame.df["word"], split_frame.df["word"]):
+        print(sen1, sen2)
+        assert sen1[0] == sen2[0]
 
     frame = frame | split_frame
 
