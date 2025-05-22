@@ -2,7 +2,7 @@
 
 Required: spacy_conll module
 """
-from . import naturalstories
+from .corpora import naturalstories
 
 from spacy.symbols import ORTH  # type: ignore
 from spacy.language import Language

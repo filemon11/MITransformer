@@ -192,13 +192,14 @@ def untokenise(
 
         left_border, right_border = idx - num_in, idx
 
-        head = curr_info.head - 2
-        if curr_info.head < 0:
+        if curr_info.head < 2:
             head = idx
+        else:
+            head = curr_info.head - 2
 
-        left_dist = max(0, idx-head) if history is None else history[1]
+        left_dist = max(head, idx) - head if history is None else history[1]
         right_dist = max(
-            0, head-idx) if history is None else max(0, history[2] - 1)
+            idx, head) - idx if history is None else max(1, history[2]) - 1
 
         if (head < left_border
                 and (left_border - head > left_dist)

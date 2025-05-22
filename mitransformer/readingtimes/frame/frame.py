@@ -11,6 +11,7 @@ from typing import (
 
 
 T = TypeVar("T")
+F = TypeVar("F", bound="Frame")
 
 
 def unsplit_add_column_(
@@ -42,22 +43,79 @@ class Frame():
         for key, item in kwargs.items():
             self.additional[key] = item
 
-    def __or__(self, other: Self) -> Self:
-        new_colnames = self.colnames | other.colnames
-        assert self.tokenised == other.tokenised
-        new_untok_funcs = self.untok_funcs + other.untok_funcs
-        new_additional = self.additional | other.additional
-        new_df = self.df.copy()
-        for col in other.df.columns:
-            new_df[col] = other.df[col]
+    def copy(self) -> Self:
         return self.__class__(
-            df=new_df, colnames=new_colnames, tokenised=self.tokenised,
+            df=self.df.copy(), colnames=self.colnames.copy(),
+            tokenised=self.tokenised,
+            untok_funcs=self.untok_funcs.copy(),
+            additional=self.additional.copy()
+        )
+
+    def clone_settings(self, old_colname: str, new_colname: str) -> None:
+        # TODO: untok_funcs etc.
+        pass
+
+    @classmethod
+    def conservative_add_col(
+            cls,
+            df: pd.DataFrame, colname: str, column: pd.Series) -> str:
+        name = colname
+        if colname in df.columns:
+            numbers_list = colname.split(".")
+            try:
+                if len(numbers_list) > 0:
+                    num = int(numbers_list[-1])
+                    name = ".".join(numbers_list[:-1] + [str(num+1)])
+
+                else:
+                    raise ValueError()
+            except ValueError:
+                name = f"{colname}.1"
+                Frame.conservative_add_col(
+                    df, name, column)
+        else:
+            df[colname] = column
+        return name
+
+    @classmethod
+    def merge_dataframes(
+            cls,
+            df1: pd.DataFrame, df2: pd.DataFrame
+            ) -> tuple[pd.DataFrame, dict[str, str]]:
+        new_df = df1.copy()
+        clone_dict: dict[str, str] = {}
+        for col in df2.columns:
+            clone_dict[col] = cls.conservative_add_col(new_df, col, df2[col])
+        return new_df, clone_dict
+
+    @classmethod
+    def merge_frames(
+            cls,
+            new_df: pd.DataFrame, frame1: Self, frame2: Self) -> Self:
+        new_colnames = frame1.colnames | frame2.colnames
+        assert frame1.tokenised == frame2.tokenised
+        new_untok_funcs = frame1.untok_funcs + frame2.untok_funcs
+        new_additional = frame1.additional | frame2.additional
+        return frame1.__class__(
+            df=new_df, colnames=new_colnames, tokenised=frame1.tokenised,
             untok_funcs=new_untok_funcs, additional=new_additional
         )
+
+    def __or__(self, other: Self) -> Self:
+        new_df, clone_dict = self.merge_dataframes(self.df, other.df)
+        new_frame = self.merge_frames(new_df, self, other)
+        for old, new in clone_dict.items():
+            new_frame.clone_settings(old, new)
+        return new_frame
 
 
 class UnsplitFrame(Frame):
     generators = gen_without_tok
+
+    def copy(self) -> Self:
+        new_frame = super().copy()
+        new_frame.generators = self.generators.copy()
+        return new_frame
 
     def add_column_(
             self,
@@ -216,12 +274,33 @@ class SplitFrame(Frame):
             to_unsplit: dict[str, bool] = dict(),
             tokenised: bool = False,
             untok_funcs: list[UntokSplitFunc] = [],
-            additional: dict[str, Any] = {}):
+            additional: dict[str, Any] = {},
+            trunc_left: int = 0,
+            trunc_right: int = 0):
         super().__init__(
             df=df, colnames=colnames, tokenised=tokenised,
             untok_funcs=untok_funcs, additional=additional)
-        self.shift = shift
+        self.shift: dict[str, bool | None] = shift
         self.to_unsplit = to_unsplit
+        self.trunc_left: int = trunc_left
+        self.trunc_right: int = trunc_right
+
+    def copy(self) -> Self:
+        new_frame = super().copy()
+        new_frame.generators = self.generators.copy()
+        new_frame.shift = self.shift.copy()
+        new_frame.to_unsplit = self.to_unsplit.copy()
+        new_frame.trunc_left = self.trunc_left
+        new_frame.trunc_right = self.trunc_right
+        return new_frame
+
+    def clone_settings(self, old_colname: str, new_colname: str) -> None:
+        # TODO: untok_funcs etc.
+        super().clone_settings(old_colname, new_colname)
+        if old_colname in self.shift.keys():
+            self.shift[new_colname] = self.shift[old_colname]
+        if old_colname in self.to_unsplit.keys():
+            self.to_unsplit[new_colname] = self.to_unsplit[old_colname]
 
     def add_column_(
             self,
@@ -271,11 +350,15 @@ class SplitFrame(Frame):
             self,
             amount: int) -> None:
         assert not self.tokenised, "Cannot shift tokenised dataframe."
+        if amount == 0:
+            return
         names_to_shift = {
             colname for colname, shift in self.shift.items() if shift}
         cols_to_ignore = {
             colname for colname, shift in self.shift.items() if shift is None}
         shift_(self.df, amount, names_to_shift, cols_to_ignore)
+        self.trunc_left += max(0, amount)
+        self.trunc_right += max(0, -amount)
 
     def untokenise_(self) -> None:
         assert self.tokenised
@@ -296,8 +379,60 @@ class SplitFrame(Frame):
             self.additional)
 
     def __or__(self, other: Self) -> Self:
-        new_frame = super().__or__(other)
+        trunc_diff_left = other.trunc_left - self.trunc_left
+        trunc_diff_right = other.trunc_right - self.trunc_right
+
+        trunc_self_left = max(0, trunc_diff_left)
+        trunc_self_right = max(0, trunc_diff_right)
+
+        trunc_other_left = max(0, -trunc_diff_left)
+        trunc_other_right = max(0, -trunc_diff_right)
+
+        df1 = self.df.copy()
+        df2 = other.df.copy()
+
+        cols_to_ignore1 = {
+            colname for colname, shift in self.shift.items()
+            if shift is None}
+
+        cols_to_ignore2 = {
+            colname for colname, shift in other.shift.items()
+            if shift is None}
+
+        self.truncate_df_(
+            df1, cols_to_ignore1, trunc_self_left, trunc_self_right)
+        self.truncate_df_(
+            df2, cols_to_ignore2, trunc_other_left, trunc_other_right)
+
+        new_df, clone_dict = self.merge_dataframes(
+            df1, df2)
+
+        new_frame = self.merge_frames(new_df, self, other)
+
+        for old, new in clone_dict.items():
+            new_frame.clone_settings(old, new)
+
         new_frame.generators = self.generators | other.generators
         new_frame.shift = self.shift | other.shift
-        self.to_unsplit = self.to_unsplit | other.to_unsplit
+        new_frame.to_unsplit = self.to_unsplit | other.to_unsplit
+        new_frame.trunc_left = max(self.trunc_left, other.trunc_left)
+        new_frame.trunc_right = max(self.trunc_right, other.trunc_right)
+
+        for old, new in clone_dict.items():
+            new_frame.clone_settings(old, new)
         return new_frame
+
+    @staticmethod
+    def truncate_df_(
+            df: pd.DataFrame,
+            cols_to_ignore: Collection[str],
+            left: int, right: int) -> None:
+        for colname in df.columns:
+            if colname not in cols_to_ignore:
+                new_series = []
+                for sentence in df[colname]:
+                    length = len(sentence)
+                    new_series.append(
+                        sentence[left:length-right]
+                    )
+                df[colname] = new_series

@@ -5,19 +5,19 @@ from a .tsv file.
 import pandas as pd
 from transformers import AutoTokenizer  # type: ignore
 
-from . import tokeniser
+from .. import tokeniser
 
 
 def load_zuco(
-        csv_file: str,
+        input_file: str,
         make_lower: bool = True,
         token_mapper_dir: str | None = None
         ) -> tuple[list[str], list[int], list[int]]:
-    """Load natural stories corpus from tsv file.
+    """Load natural stories corpus from csv file.
 
     Parameters
     ----------
-    csv_file : str
+    input_file : str
         .csv file that contains the corpus.
     make_lower : bool, default=True
         Whether to convert the tokens to lowercase.
@@ -45,7 +45,7 @@ def load_zuco(
     if token_mapper_dir is not None:
         token_mapper = tokeniser.TokenMapper.load(token_mapper_dir)
 
-    file = pd.read_csv(csv_file, keep_default_na=False, na_values=['NaN'])
+    file = pd.read_csv(input_file, keep_default_na=False, na_values=['NaN'])
 
     file["word"] = file["word"].str.replace("<EOS>", "")
     if make_lower:
@@ -56,11 +56,11 @@ def load_zuco(
         file["word"] = file["word"].apply(
             lambda t: [
                 tup[0] for tup in
-                pretokeniser.backend_tokenizer.pre_tokenizer.pre_tokenize_str(
+                pretokeniser.pre_tokenize_str(
                     t)])
         file["word"] = file["word"].apply(
             lambda t: token_mapper.decode(
-                token_mapper.encode([t.split(" ")]),
+                token_mapper.encode([t]),
                 to_string=True, join_with="")[0])
 
     return (

@@ -4,9 +4,10 @@ Linearity-of-surprisal-on-RT/blob/main/Preparing%20Corpora/get_frequency.py"""
 
 
 import pandas as pd
+
 from ..train import LMTrainer
 from ..data import (
-    load_natural_stories, load_zuco,
+    load_natural_stories, load_zuco, load_frank, CorpusLoader,
     TransformMaskHeadChild)
 from .frame import SplitFrame, UnsplitFrame
 
@@ -32,33 +33,27 @@ DEVICE = "cpu"
 BATCH_SIZE = 8
 
 
-def natural_stories_to_csv(
+Corpus = Literal["naturalstories", "zuco", "frank_SP", "frank_ET"]
+
+
+def corpus_to_csv(
+        corpus: Corpus,
         input_file: str, output_file: str,
         token_col: str = TOKEN_COL,
         text_id_col: str = TEXT_ID_COL,
         wnum_col: str = WNUM_COL,
         token_mapper_dir: str | None = None
         ) -> None:
-    tokens, text_ids, wnums = load_natural_stories(
-        input_file, token_mapper_dir=token_mapper_dir)
-    # making lowercase makes no difference
+    corpus_to_func: dict[Corpus, CorpusLoader] = {
+        "naturalstories": load_natural_stories,
+        "zuco": load_zuco,
+        "frank_ET": load_frank,
+        "frank_SP": load_frank
+    }
 
-    df = pd.DataFrame({
-        token_col: tokens,
-        text_id_col: text_ids,
-        wnum_col: wnums})
+    func = corpus_to_func[corpus]
 
-    df.to_csv(output_file, index=False)
-
-
-def zuco_stories_to_csv(
-        input_file: str, output_file: str,
-        token_col: str = TOKEN_COL,
-        text_id_col: str = TEXT_ID_COL,
-        wnum_col: str = WNUM_COL,
-        token_mapper_dir: str | None = None
-        ) -> None:
-    tokens, text_ids, wnums = load_zuco(
+    tokens, text_ids, wnums = func(
         input_file, token_mapper_dir=token_mapper_dir)
     # making lowercase makes no difference
 
@@ -85,15 +80,12 @@ def process(
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
         shift: int = -1,
-        corpus: Literal["naturalstories", "zuco"] = "naturalstories"
+        corpus: Corpus = "naturalstories"
         ) -> None:
 
     # Convert original format to sensible csv
-    load_func = (
-        natural_stories_to_csv if corpus == "naturalstories"
-        else zuco_stories_to_csv)
-
-    load_func(
+    corpus_to_csv(
+        corpus,
         input_file, output_file,
         token_col, text_id_col,
         wnum_col, None if raw else token_mapper_dir)
@@ -189,14 +181,18 @@ def process(
     split_frame = orig_frame.split([
         len(sentence) for sentence in frame.df["word"]])
 
-    # for debugging
-    for sen1, sen2 in zip(frame.df["word"], split_frame.df["word"]):
-        print(sen1, sen2)
-        assert sen1[0] == sen2[0]
+    # # for debugging
+    # for sen1, sen2 in zip(frame.df["word"], split_frame.df["word"]):
+    #     print(sen1, sen2)
+    #     assert sen1[0] == sen2[0]
 
-    frame = frame | split_frame
+    # (frame_forward := frame.copy()).shift_(1)
+    # (frame_backward := frame.copy()).shift_(-1)
+    #
+    # frame = split_frame | frame | frame_forward | frame_backward
 
     frame.shift_(shift)
+    frame = split_frame | frame
 
     unsplit_frame = frame.unsplit()
 

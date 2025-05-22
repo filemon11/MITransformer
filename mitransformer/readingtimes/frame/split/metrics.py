@@ -1033,8 +1033,9 @@ def generate_kl_divergence(
 
     # print(mask_gov_gold / mask_gov)
 
-    kl_gov = (mask_gov_gold*np.log(mask_gov_gold / mask_gov))
-    kl_dep = (mask_dep_gold*np.log(mask_dep_gold / mask_dep))
+    with np.errstate(divide='ignore', invalid='ignore'):
+        kl_gov = (mask_gov_gold*np.log(mask_gov_gold / mask_gov))
+        kl_dep = (mask_dep_gold*np.log(mask_dep_gold / mask_dep))
 
     kl_gov[np.isnan(kl_gov)] = 0
     kl_dep[np.isnan(kl_dep)] = 0
@@ -1193,7 +1194,7 @@ gen_and_untok: dict[str, tuple[
         # untokenising. Side note: This also holds for costs and distances
         # maybe one should produce them after detokenising
         "surprisal": (
-            SplitTokMetricMakerSurprisal, False, UntokSplitAdd, True),
+            SplitTokMetricMakerSurprisal, True, UntokSplitAdd, True),
         "mask": (SplitTokMetricMakerMask, None, None, False),
         "head_distance": (
             SplitTokMetricMakerHeadDistance, True, UntokSplitHead, True),
@@ -1201,11 +1202,11 @@ gen_and_untok: dict[str, tuple[
             SplitTokMetricMakerFirstDependentDistance, True,
             UntokSplitHead, True),
         "first_dependent_correct": (
-            SplitTokMetricMakerFirstDependentCorrect, False,
+            SplitTokMetricMakerFirstDependentCorrect, True,
             UntokSplitHead, True),
         "first_dependent_distance_weight": (
             SplitTokMetricMakerFirstDependentDistanceWeight,
-            False, UntokSplitHead, True),
+            True, UntokSplitHead, True),
         "first_dependent_deprel": (
             SplitTokMetricMakerFirstDependentDeprel,
             True, UntokSplitHead, True),
@@ -1217,10 +1218,10 @@ gen_and_untok: dict[str, tuple[
             True, UntokSplitHead, True),
         "expected_distance": (
             SplitTokMetricMakerExpectedDistance,
-            False, UntokSplitHead, True),
+            True, UntokSplitHead, True),
         "kl_divergence": (
             SplitTokMetricMakerKLDivergence,
-            False, UntokSplitHead, True),
+            True, UntokSplitHead, True),
         "demberg": (
             SplitTokMetricMakerDemberg,
             True, UntokSplitHead, True)

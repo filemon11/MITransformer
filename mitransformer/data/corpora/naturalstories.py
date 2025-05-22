@@ -2,11 +2,11 @@
 from a .tsv file.
 """
 
-from . import tokeniser
+from .. import tokeniser
 
 
 def load_natural_stories(
-        tsv_file: str,
+        input_file: str,
         make_lower: bool = True,
         token_mapper_dir: str | None = None
         ) -> tuple[list[str], list[int], list[int]]:
@@ -14,7 +14,7 @@ def load_natural_stories(
 
     Parameters
     ----------
-    tsv_file : str
+    input_file : str
         .tsv file that contains the corpus.
     make_lower : bool, default=True
         Whether to convert the tokens to lowercase.
@@ -42,7 +42,7 @@ def load_natural_stories(
     words: list[str] = []
     story_ids: list[int] = []
     word_ids: list[int] = []
-    with open(tsv_file, "r") as file:
+    with open(input_file, "r") as file:
         for line in file:
             line.strip()
             token_id, token = line.split("\t")

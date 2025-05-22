@@ -16,5 +16,5 @@ from .parse import (  # noqa: F401
     parse_list_of_words_with_spacy, parse_wikitext_with_spacy,
     parse_natural_stories_with_spacy, parse_list_of_sentences_with_spacy
 )
-from .naturalstories import load_natural_stories  # noqa: F401
-from .zuco import load_zuco  # noqa: F401
+from .corpora import (  # noqa: F401
+    load_natural_stories, load_zuco, load_frank, CorpusLoader)
