@@ -713,7 +713,7 @@ class SupervisedMetric(Metric):
         else:
             return super().__getattr__(prop)
 
-    def __truediv__(self, other: float) -> "Metric":
+    def __truediv__(self, other: float) -> Self:
         '''This function allows to apply division
         to the metric.
         This is done by multiplying `self.num` with
@@ -769,7 +769,8 @@ class SupervisedMetric(Metric):
             It could be training, validation, testing, or any
             other relevant operation that is being executed.
         '''
-        strs = [f"{name}: {getattr(self, name):.2f}" for name in self._to_mean | self._arc_to_mean]
+        strs = [f"{name}: {getattr(self, name):.2f}"
+                for name in self._to_mean | self._arc_to_mean]
         print(f"[{epoch}/{total_epochs}] {kind}:: " + ", ".join(strs))
 
     def print_test(self) -> None:
@@ -777,8 +778,10 @@ class SupervisedMetric(Metric):
         test results based on attributes of the object it is
         called on.
         '''
-        strs = [f"{name}: {getattr(self, name):.2f}" for name in self._to_mean | self._arc_to_mean]
+        strs = [f"{name}: {getattr(self, name):.2f}"
+                for name in self._to_mean | self._arc_to_mean]
         print("Test results: " + ", ".join(strs))
+
 
 @dataclass
 class EvalMetric(Metric):
