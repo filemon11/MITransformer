@@ -619,8 +619,8 @@ class SupervisedMetric(Metric):
     arc_num: float = 0
     _arc_loss: torch.Tensor = torch.tensor(0)
     alpha: float | None = None
-    _to_mean: ClassVar[set[str]] = Metric._to_mean | {"arc_loss"}
-    _arc_to_mean: ClassVar[set[str]] = set()
+    _to_mean: ClassVar[set[str]] = Metric._to_mean | set()
+    _arc_to_mean: ClassVar[set[str]] = {"arc_loss"}
 
     @property
     def _loss(self) -> torch.Tensor:

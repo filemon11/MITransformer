@@ -66,7 +66,8 @@ class Frame():
                 if len(numbers_list) > 0:
                     num = int(numbers_list[-1])
                     name = ".".join(numbers_list[:-1] + [str(num+1)])
-
+                    Frame.conservative_add_col(
+                        df, name, column)
                 else:
                     raise ValueError()
             except ValueError:
@@ -74,7 +75,7 @@ class Frame():
                 Frame.conservative_add_col(
                     df, name, column)
         else:
-            df[colname] = column
+            df[name] = column
         return name
 
     @classmethod

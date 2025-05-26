@@ -1,8 +1,8 @@
 import sys
 import subprocess
 
-from .preparation import process, Corpus
-from .rtprep import prepare_RTs
+from . import preparation
+from . import rtprep
 
 from typing import cast
 
@@ -15,7 +15,7 @@ if __name__ == "__main__":
     only_content_words_cost = bool(int(sys.argv[4]))
     only_content_words_left = bool(int(sys.argv[5]))
 
-    corpus_to_infile: dict[Corpus, str] = {
+    corpus_to_infile: dict[preparation.Corpus, str] = {
         "naturalstories": "naturalstories-master/words.tsv",
         "zuco": "zuco/training_data.csv",
         "frank_ET": "frank/stimuli.txt",
@@ -25,23 +25,23 @@ if __name__ == "__main__":
         in_file = corpus_to_infile[corpus]  # type: ignore
     except KeyError:
         raise Exception(f"Corpus {corpus} unknown.")
-    corpus = cast(Corpus, corpus)
+    corpus = cast(preparation.Corpus, corpus)
 
     out_file = f"RT/data/{corpus}_candidates_{model_name}.csv"
     mapper = "processed/Wikitext_processed/mapper"  # TODO set to processed
-    process(
+    preparation.process(
         in_file, out_file, model_name, mapper,
         raw=True, corpus=corpus, shift=shift,
         only_content_words_cost=only_content_words_cost,
         only_content_words_left=only_content_words_left)
 
-    corpus_to_rt_infile: dict[Corpus, str] = {
+    corpus_to_rt_infile: dict[preparation.Corpus, str] = {
         "naturalstories": "RT/data/processed_RTs.tsv",
         "zuco": "zuco/training_data.csv",
         "frank_ET": "frank/eyetracking.RT.txt",
         "frank_SP": "frank/selfpacedreading.RT.txt"
     }
-    prepare_RTs(
+    rtprep.prepare_RTs(
         corpus_to_rt_infile[corpus],
         f"RT/data/{corpus}_metrics.csv",
         corpus=corpus)
