@@ -159,7 +159,8 @@ class LMTrainer():
             ))
             state_dict = torch.load(
                     os.path.join(cls.model_dir, model_name, "model"),
-                    weights_only=True)
+                    weights_only=True,
+                    map_location=device)
         transformer_config = cast(
             models.MITransformerConfig, transformer_config)
         model: models.MITransformerLM = models.MITransformerLM(
