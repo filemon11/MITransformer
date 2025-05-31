@@ -125,7 +125,7 @@ class HyperoptSpace(Generic[T]):
         assert len(split) < 2, (
             f"Range must have one starting and one end point. Given: {value}")
 
-        split = value.split(",")
+        split = value.split(";")
         if len(split) == 1:
             try:
                 return self.type(value)  # type: ignore
@@ -246,8 +246,11 @@ def main_train(
             args.unrestricted_before,
             args.unrestricted_after
         )
+        n_heads = len(args.layer_design) * args.width
+    else:
+        n_heads = sum(
+            [len(layer[0])*layer[1] for layer in args.transformer_description])
     # make n_embd divisible by number of heads
-    n_heads = len(args.layer_design * args.width)
     args.n_embd = args.n_embd // n_heads * n_heads
 
     transformer_config = MITransformerConfig.from_kwargs(
