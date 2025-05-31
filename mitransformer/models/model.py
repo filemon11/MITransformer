@@ -226,11 +226,11 @@ class MIAttention(nn.Module):
             ) -> tuple[torch.Tensor, dict[str, list[torch.Tensor]]]:
         tags_l = list(self.tags)
         # just for compatibility
-        for i in range(len(tags_l)):
-            if (
-                    not tags_l[i].endswith("_current")
-                    and not tags_l[i].endswith("_current")):
-                tags_l[i] = tags_l[i] + "_current"
+        # for i in range(len(tags_l)):
+        #     if (
+        #             not tags_l[i].endswith("_next")
+        #             and not tags_l[i].endswith("_current")):
+        #         tags_l[i] = tags_l[i] + "_current"
 
         tags = tuple(tags_l)
 
