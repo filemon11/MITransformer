@@ -226,7 +226,11 @@ def main_train(
     args.vocab_size = data_provider.datasets["token_mapper"].vocab_size
 
     # make proper transformer description
-    if args.transformer_description is None:
+    if args.transformer_description is None and args.masks_setting == "both":
+        args.transformer_description = (
+            (('head_current', 'child_current'), 1), 
+            (('head_next', 'child_next'), 1))
+    elif args.transformer_description is None:
         if args.layer_design is None:
             if args.masks_setting == "current":
                 args.layer_design = (
@@ -234,10 +238,6 @@ def main_train(
             elif args.masks_setting == "next":
                 args.layer_design = (
                     "head_next", "child_next")
-            else:
-                raise Exception(
-                    "Define transformer_description "
-                    "explicitly for masks_setting='both'.")
         args.transformer_description = description_builder(
             args.layer_design,
             args.use_standard,
@@ -246,12 +246,12 @@ def main_train(
             args.unrestricted_before,
             args.unrestricted_after
         )
-        n_heads = len(args.layer_design) * args.width
-    else:
-        n_heads = sum(
-            [len(layer[0])*layer[1] for layer in args.transformer_description])
-    # make n_embd divisible by number of heads
-    args.n_embd = args.n_embd // n_heads * n_heads
+    n_heads: list[int] = [
+        len(layer[0])*layer[1] for layer in args.transformer_description]
+
+    # make n_embd divisible by number of heads in each layer
+    for n_h_l in n_heads:
+        args.n_embd = args.n_embd // n_h_l * n_h_l
 
     transformer_config = MITransformerConfig.from_kwargs(
         **args.to_dict(),
