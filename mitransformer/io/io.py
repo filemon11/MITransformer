@@ -17,6 +17,7 @@ import optuna
 import random
 import os
 import numpy as np
+import pandas as pd
 from contextlib import contextmanager
 from dataclasses import dataclass
 from copy import copy
@@ -674,8 +675,11 @@ class Objective:
         metrics = None
         for step, metrics in enumerate(train_iterator, start=1):
             # Handle pruning based on the intermediate value.
+            opt_metric = getattr(metrics["eval"], self.args.optimise.lower())
+            if isinstance(opt_metric, pd.DataFrame):
+                opt_metric = float(opt_metric.to_numpy().sum())
             trial.report(
-                getattr(metrics["eval"], self.args.optimise),
+                opt_metric,
                 step)
 
             if trial.should_prune():
@@ -683,7 +687,7 @@ class Objective:
                 break
 
         assert metrics is not None, (
-           "eval_interval is larger than total number of steps")
+            "eval_interval is larger than total number of steps")
         if self.writer is not None:
             self.writer.add_params(
                 args.to_dict(),
@@ -695,14 +699,17 @@ class Objective:
             raise optuna.exceptions.TrialPruned()
         # trial.set_user_attr("metric_dicts", metric_dicts)
 
-        loss: float = getattr(metrics["eval"], self.args.optimise)
+        opt_metric = getattr(metrics["eval"], self.args.optimise.lower())
+        if isinstance(opt_metric, pd.DataFrame):
+            opt_metric = opt_metric.to_numpy().sum()
+        loss: float = float(opt_metric)
         return loss
 
 
 def main_hyperopt(
         args: "HyperoptParserArgs",
         world_size: int) -> None:
-    direction = "minimize" if minimise[args.optimise.lower()] else "maximize"
+    direction = "minimize" if minimise[args.optimise.lower().split(":")[0]] else "maximize"
 
     ld = os.path.join("./runs", f"{args.name}_hyperopt")
     with new_pg(world_size, "gloo") as pg, metric_writer(log_dir=ld) as writer:

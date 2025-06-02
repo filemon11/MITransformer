@@ -272,7 +272,6 @@ def parse_args() -> (
         "hyperopt", help="hyperopt mode")
     hyperopt_parser.add_argument(
         '--optimise', type=str,
-        choices=("perplexity", "uas", "loss", "lm_loss", "arc_loss"),
         default="perplexity",
         help="metric to optimise")
     hyperopt_parser.add_argument(

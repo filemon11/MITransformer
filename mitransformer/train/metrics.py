@@ -142,7 +142,8 @@ class Metric(params.Params):
     num: float = 0
     _lm_loss: torch.Tensor = torch.tensor(0)
 
-    _to_mean: ClassVar[set[str]] = {"lm_loss", "loss"}
+    _no_mean: ClassVar[set[str]] = {"loss"}
+    _to_mean: ClassVar[set[str]] = {"lm_loss"}
 
     _convert: ClassVar[dict[str, Callable[[N], N]]] = {}    # type: ignore
 
@@ -211,6 +212,25 @@ class Metric(params.Params):
         '''
         return -self.minval()
 
+
+    def getattr_retrieve(self, prop: str):
+        if prop not in self._to_mean and prop not in self._no_mean:
+            raise AttributeError(
+                f"'{self.__class__}' has no attribute '{prop}' or '_{prop}'.")
+        return self.__getattribute__(f"_{prop}")
+
+
+    def getattr_divide(self, prop: str, val):
+        if prop in self._to_mean:
+            return val / self.num
+        return val
+
+    def getattr_convert(self, prop: str, val):
+        if prop in self._convert:
+            return self._convert[prop](val)
+        return val
+
+
     def __getattr__(self, prop: str):
         '''The function `__getattr__` calculates the mean for
         metrics based on the provided property.
@@ -230,14 +250,21 @@ class Metric(params.Params):
         -------
         None
         '''
-        if prop in self._to_mean:
-            val = self.__getattribute__(f"_{prop}") / self.num
-            if prop in self._convert:
-                val = self._convert[prop](val)
-            return val
-        else:
-            raise AttributeError(
-                f"'{self.__class__}' has no attribute '{prop}' or '_{prop}'.")
+        column: None | str = None
+        row: None | int = None
+        if ":" in prop:
+            prop, column, row_str = prop.split(":")
+            row = int(row_str)
+
+        val = self.getattr_retrieve(prop)
+        val = self.getattr_divide(prop, val)
+        val = self.getattr_convert(prop, val)
+
+        if column is not None and row is not None:
+            assert isinstance(val, pd.DataFrame)
+            print(val)
+            val = val[column][row]
+        return val
 
     def _add_fields(self,
                     name: str,
@@ -410,7 +437,7 @@ class Metric(params.Params):
             The `_loss` property is returning the `_lm_loss` attribute,
             which is expected to be a torch.Tensor.
         '''
-        return self._lm_loss
+        return getattr(self, "lm_loss")
 
     def detach(self) -> None:
         '''The `detach` function iterates through
@@ -479,16 +506,7 @@ class Metric(params.Params):
         -------
         torch.Tensor
         '''
-        if ":" in (_m := self._main_metric):
-            column: None | str = None
-            row: None | int = None
-            main_metric, column, row_str = _m.split(":")
-            row = int(row_str)
-            main_value = getattr(self, main_metric)
-            assert isinstance(main_value, pd.DataFrame)
-            return main_value[column][row]
-        else:
-            return getattr(self, _m)
+        return getattr(self, self._main_metric)
 
     @property
     def main_metric(self) -> str:
@@ -587,10 +605,10 @@ class Metric(params.Params):
                 omit_undefined: bool = False) -> dict[str, Any]:
         if as_str:
             return {attr: str(getattr(self, attr))
-                    for attr in self._to_mean}
+                    for attr in self._to_mean | self._no_mean}
         else:
             return {attr: self._to_float(getattr(self, attr))
-                    for attr in self._to_mean}
+                    for attr in self._to_mean | self._no_mean}
 
     def _to_float(self, item: Any) -> Any:
         try:
@@ -638,14 +656,16 @@ class SupervisedMetric(Metric):
             not None, it returns a weighted sum of `_lm_loss`
             and `_arc_loss` based on the value of `alpha`.
         '''
+        lm_loss = getattr(self, "lm_loss")
+        arc_loss = getattr(self, "arc_loss")
         if self.alpha is None:
 
             logmaker.warning(None, logger, "SupervisedMetric.alpha is None!")
-            return (self._lm_loss
-                    + self._arc_loss)
+            return (lm_loss
+                    + arc_loss)
         else:
-            return (self.alpha*self._lm_loss
-                    + (1-self.alpha)*self._arc_loss)
+            return (self.alpha*lm_loss
+                    + (1-self.alpha)*arc_loss)
 
     def _add_fields(self,
                     name: str,
@@ -686,32 +706,20 @@ class SupervisedMetric(Metric):
 
         return super()._add_fields(name, m1, m2)
 
-    def __getattr__(self, prop: str):
-        '''The function `__getattr__` calculates the mean for
-        metrics based on the provided property.
 
-        Parameters
-        ----------
-        prop : str
-            The `prop` parameter in the `__getattr__` method
-            represents the name of the attribute that is
-            being accessed or requested. This method is called when an
-            attribute is not found through the
-            usual process of looking up the attribute in the instance's
-            dictionary. It allows you to
-            dynamically compute or provide attributes
-
-        Returns
-        -------
-        None
-        '''
+    def getattr_retrieve(self, prop: str):
         if prop in self._arc_to_mean:
-            val = self.__getattribute__(f"_{prop}") / self.arc_num
-            if prop in self._convert:
-                val = self._convert[prop](val)
-            return val
+            return self.__getattribute__(f"_{prop}")
         else:
-            return super().__getattr__(prop)
+            return super().getattr_retrieve(prop)
+
+
+    def getattr_divide(self, prop: str, val):
+        if prop in self._arc_to_mean:
+            return val / self.arc_num
+        else:
+            return super().getattr_divide(prop, val)
+
 
     def __truediv__(self, other: float) -> Self:
         '''This function allows to apply division
@@ -740,10 +748,10 @@ class SupervisedMetric(Metric):
                 omit_undefined: bool = False) -> dict[str, Any]:
         if as_str:
             return {attr: str(getattr(self, attr))
-                    for attr in self._to_mean | self._arc_to_mean}
+                    for attr in self._to_mean | self._arc_to_mean | self._no_mean}
         else:
             return {attr: self._to_float(getattr(self, attr))
-                    for attr in self._to_mean | self._arc_to_mean}
+                    for attr in self._to_mean | self._arc_to_mean | self._no_mean}
 
     def print(
             self, epoch: int,
