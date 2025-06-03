@@ -187,14 +187,9 @@ def process(
     #     assert sen1[0] == sen2[0]
 
     (frame_forward := frame.copy()).shift_(1)
-    print(frame_forward.df.columns)
     (frame_backward := frame.copy()).shift_(-1)
-    print(frame_backward.df.columns)
-
-    print(frame.df.columns)
 
     frame = split_frame | frame | frame_forward | frame_backward
-    print(frame.df.columns)
 
     # frame.shift_(shift)
     # frame = split_frame | frame
