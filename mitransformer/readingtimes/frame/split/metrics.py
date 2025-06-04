@@ -292,6 +292,41 @@ class SplitTokMetricMakerFirstDependentDistance(SplitTokMetricMaker):
         }
 
 
+class SplitTokMetricMakerPredictedFirstDependentDistance(SplitTokMetricMaker):
+    def __init__(self, pos_col: str, *args, **kwargs):
+        self.pos_col = pos_col
+
+    def __call__(
+            self, df: pd.DataFrame,
+            attention_logits: dict[str, np.ndarray],
+            gov_name: str = "head_current",
+            dep_name: str = "child_current",
+            only_content_words_left: bool = False,
+            only_content_words_cost: bool = False,
+            masks_setting: Literal[
+                "current", "next"] = "current",
+            content_pos: Collection[str] = CONTENT_POS[TAGSET],
+            *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
+        attention_matrices = [
+            {name: masks[i] for name, masks in attention_logits.items()}
+            for i in range(len(list(attention_logits.values())[0]))]
+        return pd.Series([
+            generate_predicted_first_dependent_distance(
+                att_mat, pos,
+                only_content_words_left=only_content_words_left,
+                only_content_words_cost=only_content_words_cost,
+                gov_name=gov_name,
+                dep_name=dep_name,
+                masks_setting=masks_setting)
+            for att_mat, pos in zip(
+                attention_matrices,
+                df[self.pos_col])]), {
+            "content_pos": content_pos,
+            "only_content_words_left": only_content_words_left,
+            "only_content_words_cost": only_content_words_cost
+        }
+
+
 class SplitTokMetricMakerFirstDependentCorrect(SplitTokMetricMaker):
     def __init__(
             self, mask_col: str, pos_col: str,
@@ -1048,6 +1083,74 @@ def generate_kl_divergence(
     return cost
 
 
+def generate_predicted_first_dependent_distance(
+        attention_matrices: dict[str, torch.Tensor],
+        pos_tags: Sequence[str],
+        gov_name: str = "head_current",
+        dep_name: str = "child_current",
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False,
+        masks_setting: Literal["current", "next"] = "current",
+        content_pos: Collection[str] = CONTENT_POS[TAGSET]) -> npt.NDArray:
+    # TODO: all left ones distance sum
+    # TODO: all left ones number
+    # TODO: Discard punctuation
+    """WARNING: untested"""
+
+    # assumes that governor and child mask are called head and child
+    # these are already triangulated
+    mask_gov = attention_matrices[gov_name][0].clone().sigmoid()
+    mask_dep = attention_matrices[dep_name][0].clone().sigmoid()
+
+    content_word_mask = get_content_word_mask_by_POS_tags(
+            pos_tags,
+            content_pos,
+            dummies_present=False)
+
+    if only_content_words_left:
+        # disregard connections to non-content words
+        mask_gov[:, 2:][:, ~content_word_mask] = 0
+        mask_dep[:, 2:][:, ~content_word_mask] = 0
+
+    mask_gov[mask_gov >= 0.5] = 1
+    mask_gov[mask_gov < 0.5] = 0
+
+    mask_dep[mask_dep >= 0.5] = 1
+    mask_dep[mask_dep < 0.5] = 0
+
+    mask_gov[:, 0] = 0
+    mask_gov[:, 1] = 0
+    mask_dep[:, 0] = 0
+    mask_dep[:, 1] = 0
+
+    mask = np.tril(np.logical_or(mask_gov, mask_dep))
+    mask = np.logical_or(mask, mask.T)
+
+    first_connection: npt.NDArray[np.int_] = np.argmax(
+        mask, axis=1)
+
+    length = mask_gov.shape[0]
+    indices: npt.NDArray[np.int_] = np.tile(
+        np.flip(np.arange(1, length+1)), length).reshape(length, -1)
+    indices = indices - np.flip(
+        np.arange(1, length+1))[..., np.newaxis]
+
+    distances = -indices[
+        np.arange(0, first_connection.shape[0]),
+        first_connection]
+
+    if masks_setting == "next":
+        distances += 1
+
+    distances[first_connection == 0] = 0    # if root, then distance 0
+
+    costs = distances[2:]
+    if only_content_words_cost:
+        costs[~content_word_mask] = 0
+
+    return costs
+
+
 def generate_demberg(
         masks: dict[str, np.ndarray],
         pos_tags: Sequence[str],
@@ -1200,6 +1303,9 @@ gen_and_untok: dict[str, tuple[
             SplitTokMetricMakerHeadDistance, True, UntokSplitHead, True),
         "first_dependent_distance": (
             SplitTokMetricMakerFirstDependentDistance, True,
+            UntokSplitHead, True),
+        "predicted_first_dependent_distance": (
+            SplitTokMetricMakerPredictedFirstDependentDistance, True,
             UntokSplitHead, True),
         "first_dependent_correct": (
             SplitTokMetricMakerFirstDependentCorrect, True,

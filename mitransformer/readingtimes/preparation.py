@@ -155,21 +155,34 @@ def process(
         frame.add_("first_dependent_correct")
         frame.add_("expected_distance")
         frame.add_("kl_divergence")
+        frame.add_("predicted_first_dependent_distance")
 
     if not masks_setting == "current":
+        next_args = dict(
+            gov_name="head_next",
+            child_name="child_next",
+            masks_setting="next"
+        )
         frame.add_(
             "first_dependent_distance_weight",
             "first_dependent_distance_weight_next_col",
-            gov_name="head_next", dep_name="child_next")
+            **next_args)
         frame.add_(
             "first_dependent_correct",
-            "first_dependent_correct_next_col")
+            "first_dependent_correct_next_col",
+            **next_args)
         frame.add_(
             "expected_distance",
-            "expected_distance_next_col")
+            "expected_distance_next_col",
+            **next_args)
         frame.add_(
             "kl_divergence",
-            "kl_divergence_next_col")
+            "kl_divergence_next_col",
+            **next_args)
+        frame.add_(
+            "predicted_first_dependent_distance",
+            "predicted_first_dependent_distance_next_col",
+            **next_args)
 
     # TODO: Make it possible to provide a second argument to add_
     # to save the content in a new column
