@@ -73,33 +73,33 @@ if (corpus_type == "ET") {
 # big.dundee does not have RT for WNUM=1
 dundee <- big.dundee2 %>%
   dplyr::select(interest) %>%
-  inner_join(dundee.meta) %>%
-  mutate(surprisal = as.numeric(surprisal),
-         surprisal.1 = as.numeric(surprisal.1),
-         surprisal.2 = as.numeric(surprisal.2),
-         frequency = as.numeric(frequency),
-         position = as.numeric(position),
-         head_distance = as.numeric(head_distance),
-         demberg = as.numeric(demberg),
-         first_dependent_distance = as.numeric(first_dependent_distance),
-         first_dependent_distance_weight = as.numeric(first_dependent_distance_weight),
-         left_dependents_distance_sum = as.numeric(left_dependents_distance_sum),
-         left_dependents_count = as.numeric(left_dependents_count),
-         length = as.numeric(length),
-         WorkerId=as.factor(WorkerId))
+  inner_join(dundee.meta)
+  # mutate(surprisal = as.numeric(surprisal),
+  #        surprisal.1 = as.numeric(surprisal.1),
+  #        surprisal.2 = as.numeric(surprisal.2),
+  #        frequency = as.numeric(frequency),
+  #        position = as.numeric(position),
+  #        head_distance = as.numeric(head_distance),
+  #        demberg = as.numeric(demberg),
+  #        first_dependent_distance = as.numeric(first_dependent_distance),
+  #        first_dependent_distance_weight = as.numeric(first_dependent_distance_weight),
+  #        left_dependents_distance_sum = as.numeric(left_dependents_distance_sum),
+  #        left_dependents_count = as.numeric(left_dependents_count),
+  #        length = as.numeric(length),
+  #        WorkerId=as.factor(WorkerId))
 
 #dundee <- dundee[
 #  order(dundee[,3], dundee[,1], dundee[,2] ),
 #]
 
-dundee <- dundee %>%
-  mutate(surprisal.s=scaling_var(dundee$surprisal),
-         surprisal.s.1=scaling_var(dundee$surprisal.1),
-         surprisal.s.2=scaling_var(dundee$surprisal.2),
-         frequency.s=scaling_var(dundee$frequency),
-         length.s=scaling_var(dundee$length)) %>%
-  group_by(WorkerId, item) %>%
-  ungroup()
+# dundee <- dundee %>%
+#   mutate(surprisal.s=scaling_var(dundee$surprisal),
+#          surprisal.s.1=scaling_var(dundee$surprisal.1),
+#          surprisal.s.2=scaling_var(dundee$surprisal.2),
+#          frequency.s=scaling_var(dundee$frequency),
+#          length.s=scaling_var(dundee$length)) %>%
+#   group_by(WorkerId, item) %>%
+#   ungroup()
 
 # dundee <- dundee %>%
 #   filter(surprisal>-20)
