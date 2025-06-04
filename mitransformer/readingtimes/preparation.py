@@ -199,14 +199,13 @@ def process(
     #     print(sen1, sen2)
     #     assert sen1[0] == sen2[0]
 
-    (frame_forward := frame.copy()).shift_(1)
-    (frame_backward := frame.copy()).shift_(-1)
+    frame = frame.include_spillover(shift)
+    # (frame_forward := frame.copy()).shift_(1)
+    # (frame_backward := frame.copy()).shift_(-1)
 
-    frame = split_frame | frame | frame_forward | frame_backward
+    frame.truncate_(right=1)
 
-    # frame.shift_(shift)
-    # frame = split_frame | frame
+    frame = split_frame | frame
 
     unsplit_frame = frame.unsplit()
-
     unsplit_frame.df.to_csv(output_file, index=False)

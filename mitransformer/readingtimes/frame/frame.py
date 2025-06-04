@@ -66,13 +66,13 @@ class Frame():
                 if len(numbers_list) > 0:
                     num = int(numbers_list[-1])
                     name = ".".join(numbers_list[:-1] + [str(num+1)])
-                    Frame.conservative_add_col(
+                    name = Frame.conservative_add_col(
                         df, name, column)
                 else:
                     raise ValueError()
             except ValueError:
                 name = f"{colname}.1"
-                Frame.conservative_add_col(
+                name = Frame.conservative_add_col(
                     df, name, column)
         else:
             df[name] = column
@@ -300,8 +300,10 @@ class SplitFrame(Frame):
         super().clone_settings(old_colname, new_colname)
         if old_colname in self.shift.keys():
             self.shift[new_colname] = self.shift[old_colname]
+            del self.shift[old_colname]
         if old_colname in self.to_unsplit.keys():
             self.to_unsplit[new_colname] = self.to_unsplit[old_colname]
+            del self.to_unsplit[old_colname]
 
     def add_column_(
             self,
@@ -408,19 +410,35 @@ class SplitFrame(Frame):
         new_df, clone_dict = self.merge_dataframes(
             df1, df2)
 
-        new_frame = self.merge_frames(new_df, self, other)
-
+        # This is messy...
+        other_clone = other.copy()
         for old, new in clone_dict.items():
-            new_frame.clone_settings(old, new)
+            other_clone.clone_settings(old, new)
 
-        new_frame.generators = self.generators | other.generators
-        new_frame.shift = self.shift | other.shift
-        new_frame.to_unsplit = self.to_unsplit | other.to_unsplit
-        new_frame.trunc_left = max(self.trunc_left, other.trunc_left)
-        new_frame.trunc_right = max(self.trunc_right, other.trunc_right)
+        new_frame = self.merge_frames(new_df, self, other_clone)
 
-        for old, new in clone_dict.items():
-            new_frame.clone_settings(old, new)
+        return new_frame
+
+    @classmethod
+    def merge_frames(
+            cls,
+            new_df: pd.DataFrame, frame1: Self, frame2: Self) -> Self:
+        new_colnames = frame1.colnames | frame2.colnames
+        assert frame1.tokenised == frame2.tokenised
+        new_untok_funcs = frame1.untok_funcs + frame2.untok_funcs
+        new_additional = frame1.additional | frame2.additional
+        new_generators = frame1.generators | frame2.generators
+        new_shift = frame1.shift | frame2.shift
+        new_to_unsplit = frame1.to_unsplit | frame2.to_unsplit
+        new_trunc_left = max(frame1.trunc_left, frame2.trunc_left)
+        new_trunc_right = max(frame1.trunc_right, frame2.trunc_right)
+        new_frame = cls(
+            df=new_df, colnames=new_colnames, tokenised=frame1.tokenised,
+            untok_funcs=new_untok_funcs, additional=new_additional,
+            shift=new_shift, to_unsplit=new_to_unsplit, trunc_left=new_trunc_left,
+            trunc_right=new_trunc_right
+        )
+        new_frame.generators = new_generators
         return new_frame
 
     @staticmethod
@@ -437,3 +455,39 @@ class SplitFrame(Frame):
                         sentence[left:length-right]
                     )
                 df[colname] = new_series
+
+    def truncate_(
+            self,
+            left: int = 0,
+            right: int = 0) -> None:
+        assert not self.tokenised, "Cannot truncate tokenised dataframe."
+        if left == 0 and right == 0:
+            return
+
+        cols_to_ignore = {
+            colname for colname, shift in self.shift.items()
+            if shift is None}
+
+        self.truncate_df_(
+            self.df, cols_to_ignore, left, right)
+
+        self.trunc_left += left
+        self.trunc_right += right
+
+    def include_spillover(
+            self,
+            upto: int = 1) -> Self:
+
+        if upto == 0:
+            return self
+        elif upto < 0:
+            raise Exception(
+                "Negative spillover not implemented for this function.",
+                " Please do this manually via frame.shift_(-x)")
+
+        out_frame = self
+        for i in range(1, upto+1):
+            (frame_forward := self.copy()).shift_(i)
+            out_frame = out_frame | frame_forward
+
+        return out_frame
