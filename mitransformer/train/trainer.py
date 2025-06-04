@@ -647,6 +647,7 @@ class LMTrainer():
         uas_abs: None | pd.DataFrame | float = None
         arc_loss = None
         att_entropy = None
+        num_arc_instances = None
         if mode == "supervised":
             score_pair = self.prepare_scores(
                 arc_logits, batch["masks"])
