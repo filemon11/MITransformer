@@ -113,7 +113,7 @@ class TransformMaskHeadChild(MaskTransform):
         child = mask.T
         # head[range(len(head)), range(len(head))] = True
         # child[range(len(child)), range(len(child))] = True
-
+    
         if self.connect_with_dummy:
             tril_head = np.tril(head, -1)
             set_true = ~tril_head.any(1)
@@ -536,7 +536,6 @@ class MemMapDataset(DepDataset[EssentialSentence]):
                 self.transform_mask(head_list_to_adjacency_matrix(heads)))
 
         masks = shift_masks(self.masks_setting, masks)
-        # print(masks)
 
         return EssentialSentence(
             idx=np.array(idx),
@@ -827,6 +826,8 @@ def head_list_to_adjacency_matrix(
         ) -> npt.NDArray[np.bool_]:
     sen_len = len(headlist)
     headlist_arr = np.array(headlist)
+    
+    headlist_arr[1:][np.equal(headlist_arr[1:], np.arange(0, len(headlist_arr))[1:])] = 1
 
     # print("before overunder:", headlist_arr)
     if correct_underflow_overflow:
@@ -836,6 +837,7 @@ def head_list_to_adjacency_matrix(
 
     adjacenceny_matrix = np.full((sen_len, sen_len), False, dtype=bool)
     adjacenceny_matrix[np.arange(sen_len), headlist_arr] = True
+
     return adjacenceny_matrix
 
 

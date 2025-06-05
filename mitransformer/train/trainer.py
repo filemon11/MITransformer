@@ -633,8 +633,6 @@ class LMTrainer():
             logits, labels,
             ignore_index=ignore_index, reduction="sum")
 
-        # print(batch["masks"])
-
         num_instances = int((labels != ignore_index).sum().item())
 
         surprisal_sum = sum_depadded(

@@ -203,6 +203,7 @@ class PaddingCollate(Collate):
         self.pad_with = pad_with
         self.pad_mask_with = pad_mask_with
         self.connect_with_dummy = connect_with_dummy
+        self.connect_with_self = connect_with_self
         assert not connect_with_self, "not implemented"
 
     def __call__(
@@ -242,9 +243,13 @@ class PaddingCollate(Collate):
             for key, b in self.pad_mask_with.items():
                 for mask_k, mask in new_sentence[key].items():  # type: ignore
                     new_mask = np.full((max_lens[key], max_lens[key]), b)
-                    # if self.connect_with_dummy:
-                    #     # prevent rows without a single true value
-                    #     new_mask[:, 0] = not b
+                    if self.connect_with_dummy:
+                        # prevent rows without a single true value
+                        new_mask[:, 0] = not b
+                    elif self.connect_with_self:
+                        new_mask[
+                            np.arange(new_mask.shape[0]),
+                            np.arange(new_mask.shape[0])] = not b
                     new_mask[:mask.shape[0], :mask.shape[1]] = mask
                     new_sentence[key][mask_k] = new_mask  # type: ignore
 

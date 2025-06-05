@@ -8,7 +8,6 @@ from ast import literal_eval as make_tuple
 from . import io
 from .utils import logmaker
 
-
 logger = logmaker.getLogger(__name__)
 optuna.logging.enable_propagation()  # Propagate logs to the root logger.
 optuna.logging.disable_default_handler()  # Stop showing logs in sys.stderr.
