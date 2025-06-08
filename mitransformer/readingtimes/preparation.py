@@ -110,12 +110,10 @@ def process(
     frame.add_(
         "conllu",
         words=words, sentence_ids=sentence_ids)  # dataset attribute missing
-    frame.add_("space_after")
-    frame.add_("word")
-    frame.add_("position")
-    frame.add_("head")
-    frame.add_("pos")
-    frame.add_("deprel")
+    frame.add_(
+        "space_after", "word",
+        "position", "head",
+        "pos", "deprel")
     # TODO: subsume all above under conllu
 
     # Surprisal
@@ -141,48 +139,39 @@ def process(
         gov_name="head_current", dep_name="child_current")
     frame.add_(
         "head_distance",
+        "first_dependent_distance",
+        "first_dependent_deprel",
+        "left_dependents_distance_sum",
+        "left_dependents_count",
+        "demberg",
         only_content_words_cost=only_content_words_cost,
         only_content_words_left=only_content_words_left)
-    frame.add_("first_dependent_distance")
-    frame.add_("first_dependent_deprel")
-    frame.add_("left_dependents_distance_sum")
-    frame.add_("left_dependents_count")
-    frame.add_("demberg")
 
     if not masks_setting == "next":
         # Dependent on dependency prediction
-        frame.add_("first_dependent_distance_weight")
-        frame.add_("first_dependent_correct")
-        frame.add_("expected_distance")
-        frame.add_("kl_divergence")
-        frame.add_("predicted_first_dependent_distance")
-
-    if not masks_setting == "current":
-        next_args = dict(
-            gov_name="head_next",
-            child_name="child_next",
-            masks_setting="next"
-        )
         frame.add_(
             "first_dependent_distance_weight",
-            "first_dependent_distance_weight_next_col",
-            **next_args)
-        frame.add_(
             "first_dependent_correct",
-            "first_dependent_correct_next_col",
-            **next_args)
-        frame.add_(
             "expected_distance",
-            "expected_distance_next_col",
-            **next_args)
-        frame.add_(
             "kl_divergence",
-            "kl_divergence_next_col",
-            **next_args)
-        frame.add_(
+            "predicted_first_dependent_distance")
+
+    if not masks_setting == "current":
+        candidates = (
+            "first_dependent_distance_weight",
+            "first_dependent_correct",
+            "expected_distance",
+            "kl_divergence",
             "predicted_first_dependent_distance",
-            "predicted_first_dependent_distance_next_col",
-            **next_args)
+        )
+        candidate_tuples = [
+            cand + "_next_col" for cand in candidates]
+
+        frame.add_(
+            *candidate_tuples,
+            gov_name="head_next",
+            child_name="child_next",
+            masks_setting="next")
 
     # TODO: Make it possible to provide a second argument to add_
     # to save the content in a new column

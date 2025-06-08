@@ -128,9 +128,20 @@ class UnsplitFrame(Frame):
         self.colnames[colkey] = colname
         self.add_override_additional(**additional)
 
-    def add_(self, coltype: str, alt_name: str | None = None,
-             *args, **kwargs) -> None:
+    def add_(self,
+             *args: str | tuple[str, str],
+             **kwargs) -> None:
         self.add_override_additional(**kwargs)
+
+        assert len(args) > 0
+
+        alt_name: None | str
+        if isinstance(args[0], str):
+            coltype = args[0]
+            alt_name = None
+        else:
+            coltype = args[0][0]
+            alt_name = args[0][1]
 
         colname = alt_name if alt_name is not None else coltype
         colkey = f"{colname}_col"
@@ -138,7 +149,11 @@ class UnsplitFrame(Frame):
         self.add_column_(
             colkey, colname,
             *self.generators[coltype](**self.colnames)(
-                self.df, *args, **self.additional))
+                self.df, **self.additional))
+
+        if len(args) > 1:
+            self.add_(
+                *args[1:])
 
     def split(self, lengths: Iterable[int]) -> "SplitFrame":
         ends = [item for le in lengths for item in [False]*(le-1)+[True]]
@@ -326,9 +341,20 @@ class SplitFrame(Frame):
         self.shift[colname] = shift
         self.to_unsplit[colname] = to_unsplit
 
-    def add_(self, coltype: str, alt_name: str | None = None,
-             *args, **kwargs) -> None:
+    def add_(self,
+             *args: str | tuple[str, str],
+             **kwargs) -> None:
         self.add_override_additional(**kwargs)
+
+        assert len(args) > 0
+
+        alt_name: None | str
+        if isinstance(args[0], str):
+            coltype = args[0]
+            alt_name = None
+        else:
+            coltype = args[0][0]
+            alt_name = args[0][1]
 
         colname = alt_name if alt_name is not None else coltype
         colkey = f"{colname}_col"
@@ -344,10 +370,14 @@ class SplitFrame(Frame):
         self.add_column_(
             colkey, colname,
             *self.generators[coltype][0](**self.colnames)(
-                self.df, *args, **self.additional),
+                self.df, **self.additional),
             self.generators[coltype][1],
             self.generators[coltype][3],
             untok)
+
+        if len(args) > 1:
+            self.add_(
+                *args[1:])
 
     def shift_(
             self,
@@ -435,7 +465,8 @@ class SplitFrame(Frame):
         new_frame = cls(
             df=new_df, colnames=new_colnames, tokenised=frame1.tokenised,
             untok_funcs=new_untok_funcs, additional=new_additional,
-            shift=new_shift, to_unsplit=new_to_unsplit, trunc_left=new_trunc_left,
+            shift=new_shift, to_unsplit=new_to_unsplit,
+            trunc_left=new_trunc_left,
             trunc_right=new_trunc_right
         )
         new_frame.generators = new_generators
