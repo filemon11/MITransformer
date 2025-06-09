@@ -145,25 +145,24 @@ def process(
         "left_dependents_count",
         "demberg",
         only_content_words_cost=only_content_words_cost,
-        only_content_words_left=only_content_words_left)
+        only_content_words_left=only_content_words_left,
+        only_left=True)
 
-    if not masks_setting == "next":
-        # Dependent on dependency prediction
-        frame.add_(
-            "first_dependent_distance_weight",
-            "first_dependent_correct",
-            "expected_distance",
-            "kl_divergence",
-            "predicted_first_dependent_distance")
-
-    if not masks_setting == "current":
-        candidates = (
+    candidates = (
             "first_dependent_distance_weight",
             "first_dependent_correct",
             "expected_distance",
             "kl_divergence",
             "predicted_first_dependent_distance",
+            "attention_entropy",
         )
+    if not masks_setting == "next":
+        # Dependent on dependency prediction
+        frame.add_(
+            *candidates,
+            only_past=True)
+
+    if not masks_setting == "current":
         candidate_tuples = [
             cand + "_next_col" for cand in candidates]
 
@@ -171,7 +170,8 @@ def process(
             *candidate_tuples,
             gov_name="head_next",
             child_name="child_next",
-            masks_setting="next")
+            masks_setting="next",
+            only_past=True)
 
     # TODO: Make it possible to provide a second argument to add_
     # to save the content in a new column
@@ -188,13 +188,12 @@ def process(
     #     print(sen1, sen2)
     #     assert sen1[0] == sen2[0]
 
+    frame = split_frame | frame
     frame = frame.include_spillover(shift)
     # (frame_forward := frame.copy()).shift_(1)
     # (frame_backward := frame.copy()).shift_(-1)
 
     frame.truncate_(right=1)
-
-    frame = split_frame | frame
 
     unsplit_frame = frame.unsplit()
     unsplit_frame.df.to_csv(output_file, index=False)

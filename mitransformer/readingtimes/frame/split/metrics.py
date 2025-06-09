@@ -254,14 +254,16 @@ class SplitTokMetricMakerHeadDistance(SplitTokMetricMaker):
             dep_name: str = "child_current",
             only_content_words_cost: bool = False,
             content_pos: Collection[str] = CONTENT_POS[TAGSET],
+            only_left: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
         return pd.Series([
             generate_head_distance(
                 pos, mask, only_content_words_cost=only_content_words_cost,
-                gov_name=gov_name, dep_name=dep_name)
+                gov_name=gov_name, dep_name=dep_name, only_left=only_left)
             for pos, mask in zip(df[self.pos_col], df[self.mask_col])]), {
             "content_pos": content_pos,
-            "only_content_words_cost": only_content_words_cost
+            "only_content_words_cost": only_content_words_cost,
+            "only_left": only_left
         }
 
 
@@ -277,6 +279,7 @@ class SplitTokMetricMakerFirstDependentDistance(SplitTokMetricMaker):
             only_content_words_left: bool = False,
             only_content_words_cost: bool = False,
             content_pos: Collection[str] = CONTENT_POS[TAGSET],
+            only_left: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
         return pd.Series([
             generate_first_dep_distance(
@@ -284,11 +287,14 @@ class SplitTokMetricMakerFirstDependentDistance(SplitTokMetricMaker):
                 only_content_words_left=only_content_words_left,
                 only_content_words_cost=only_content_words_cost,
                 gov_name=gov_name,
-                dep_name=dep_name)
+                dep_name=dep_name,
+                only_left=only_left)
             for pos, mask in zip(df[self.pos_col], df[self.mask_col])]), {
             "content_pos": content_pos,
             "only_content_words_left": only_content_words_left,
-            "only_content_words_cost": only_content_words_cost
+            "only_content_words_cost": only_content_words_cost,
+            "gov_name": gov_name,
+            "dep_name": dep_name
         }
 
 
@@ -306,6 +312,7 @@ class SplitTokMetricMakerPredictedFirstDependentDistance(SplitTokMetricMaker):
             masks_setting: Literal[
                 "current", "next"] = "current",
             content_pos: Collection[str] = CONTENT_POS[TAGSET],
+            only_past: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
         attention_matrices = [
             {name: masks[i] for name, masks in attention_logits.items()}
@@ -317,13 +324,16 @@ class SplitTokMetricMakerPredictedFirstDependentDistance(SplitTokMetricMaker):
                 only_content_words_cost=only_content_words_cost,
                 gov_name=gov_name,
                 dep_name=dep_name,
-                masks_setting=masks_setting)
+                masks_setting=masks_setting,
+                content_pos=content_pos,
+                only_past=only_past)
             for att_mat, pos in zip(
                 attention_matrices,
                 df[self.pos_col])]), {
             "content_pos": content_pos,
             "only_content_words_left": only_content_words_left,
-            "only_content_words_cost": only_content_words_cost
+            "only_content_words_cost": only_content_words_cost,
+            "only_past": only_past
         }
 
 
@@ -475,11 +485,9 @@ class SplitTokMetricMakerLeftDependentsCount(SplitTokMetricMaker):
 class SplitTokMetricMakerExpectedDistance(SplitTokMetricMaker):
     def __init__(
             self, mask_col: str, pos_col: str,
-            first_dependent_distance_col: str,
             *args, **kwargs):
         self.mask_col = mask_col
         self.pos_col = pos_col
-        self.first_dependent_distance_col = first_dependent_distance_col
 
     def __call__(
             self, df: pd.DataFrame,
@@ -506,7 +514,36 @@ class SplitTokMetricMakerExpectedDistance(SplitTokMetricMaker):
                 df[self.pos_col])]), {
             "content_pos": content_pos,
             "masks_setting": masks_setting,
-            "only_content_words_left": only_content_words_left
+            "only_content_words_left": only_content_words_left,
+            "gov_name": gov_name,
+            "dep_name": dep_name
+        }
+
+
+class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
+    def __init__(
+            self, mask_col: str,
+            *args, **kwargs):
+        self.mask_col = mask_col
+
+    def __call__(
+            self, df: pd.DataFrame,
+            attention_logits: dict[str, np.ndarray],
+            gov_name: str = "head_current",
+            dep_name: str = "child_current",
+            *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
+        attention_matrices = [
+            {name: masks[i] for name, masks in attention_logits.items()}
+            for i in range(len(list(attention_logits.values())[0]))]
+
+        return pd.Series([
+            generate_attention_entropy(
+                att_mat,
+                gov_name=gov_name,
+                dep_name=dep_name)
+            for att_mat in attention_matrices]), {
+            "gov_name": gov_name,
+            "dep_name": dep_name
         }
 
 
@@ -579,7 +616,8 @@ def generate_head_distance(
         only_content_words_cost: bool = False,
         gov_name: str = "head_current",
         dep_name: str = "child_current",
-        content_pos: Collection[str] = CONTENT_POS[TAGSET]
+        content_pos: Collection[str] = CONTENT_POS[TAGSET],
+        only_left: bool = False
         ) -> npt.NDArray[np.int_]:
     """WARNING: untested"""
     # assumes that governor and child mask are called head and child
@@ -620,6 +658,10 @@ def generate_head_distance(
         costs[~content_word_mask] = 0
     assert len(pos_tags) == len(costs)
     cost_array: npt.NDArray[np.int_] = np.array(costs)
+
+    if only_left:
+        cost_array[cost_array > 0] = 0
+        cost_array *= -1
     return cost_array
 
 
@@ -630,6 +672,7 @@ def generate_first_dep_distance(
         dep_name: str = "child_current",
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
+        only_left: bool = False
         ) -> npt.NDArray[np.int_]:
     # TODO: all left ones distance sum
     # TODO: all left ones number
@@ -679,6 +722,10 @@ def generate_first_dep_distance(
     costs = distances[2:]
     if only_content_words_cost:
         costs[~content_word_mask] = 0
+
+    if only_left:
+        costs[costs > 0] = 0
+        costs *= -1
 
     return costs
 
@@ -1026,6 +1073,31 @@ def generate_expected_distance(
     return cost[2:].numpy()
 
 
+def generate_attention_entropy(
+        attention_matrices: dict[str, torch.Tensor],
+        gov_name: str = "head_current",
+        dep_name: str = "child_current"
+        ) -> npt.NDArray:
+    # TODO: all left ones distance sum
+    # TODO: all left ones number
+    # TODO: Discard punctuation
+    """WARNING: untested"""
+
+    # assumes that governor and child mask are called head and child
+    # these are already triangulated
+    mask_gov = attention_matrices[gov_name][0].clone().softmax(-1)
+    mask_dep = attention_matrices[dep_name][0].clone().softmax(-1)
+    masks = torch.stack((mask_gov, mask_dep))
+
+    entropy = -(masks*torch.log(masks))
+    entropy = torch.tril(entropy, 0)
+    entropy[torch.isnan(entropy)] = 0
+
+    entropy = entropy.sum(-1).mean(0)
+
+    return entropy[2:].numpy()
+
+
 def generate_kl_divergence(
         masks: dict[str, np.ndarray],
         attention_matrices: dict[str, torch.Tensor],
@@ -1091,7 +1163,8 @@ def generate_predicted_first_dependent_distance(
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
         masks_setting: Literal["current", "next"] = "current",
-        content_pos: Collection[str] = CONTENT_POS[TAGSET]) -> npt.NDArray:
+        content_pos: Collection[str] = CONTENT_POS[TAGSET],
+        only_past: bool = False) -> npt.NDArray:
     # TODO: all left ones distance sum
     # TODO: all left ones number
     # TODO: Discard punctuation
@@ -1148,6 +1221,9 @@ def generate_predicted_first_dependent_distance(
     if only_content_words_cost:
         costs[~content_word_mask] = 0
 
+    if only_past:
+        costs[costs > 0] = 0
+        costs *= -1
     return costs
 
 
@@ -1330,7 +1406,10 @@ gen_and_untok: dict[str, tuple[
             True, UntokSplitHead, True),
         "demberg": (
             SplitTokMetricMakerDemberg,
-            True, UntokSplitHead, True)
+            True, UntokSplitHead, True),
+        "attention_entropy": (
+            SplitTokMetricMakerAttentionEntropy,
+            True, UntokSplitHead, True),
     }
 
 

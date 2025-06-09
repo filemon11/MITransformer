@@ -313,12 +313,13 @@ class SplitFrame(Frame):
     def clone_settings(self, old_colname: str, new_colname: str) -> None:
         # TODO: untok_funcs etc.
         super().clone_settings(old_colname, new_colname)
-        if old_colname in self.shift.keys():
-            self.shift[new_colname] = self.shift[old_colname]
-            del self.shift[old_colname]
-        if old_colname in self.to_unsplit.keys():
-            self.to_unsplit[new_colname] = self.to_unsplit[old_colname]
-            del self.to_unsplit[old_colname]
+        if old_colname != new_colname:
+            if old_colname in self.shift.keys():
+                self.shift[new_colname] = self.shift[old_colname]
+                del self.shift[old_colname]
+            if old_colname in self.to_unsplit.keys():
+                self.to_unsplit[new_colname] = self.to_unsplit[old_colname]
+                del self.to_unsplit[old_colname]
 
     def add_column_(
             self,
@@ -385,10 +386,16 @@ class SplitFrame(Frame):
         assert not self.tokenised, "Cannot shift tokenised dataframe."
         if amount == 0:
             return
+        # Shift unknown columns as well
         names_to_shift = {
-            colname for colname, shift in self.shift.items() if shift}
+            colname for colname in
+            self.df.columns if (
+                colname not in self.shift.keys() or
+                self.shift[colname])}
+        # colname for colname, shift in self.shift.items() if shift}
         cols_to_ignore = {
             colname for colname, shift in self.shift.items() if shift is None}
+
         shift_(self.df, amount, names_to_shift, cols_to_ignore)
         self.trunc_left += max(0, amount)
         self.trunc_right += max(0, -amount)
