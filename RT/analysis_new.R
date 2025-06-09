@@ -56,30 +56,52 @@ compute_mean <- function(datasets, factor1, factor2) {
   data.frame(Mean = mean(corrs), SD = sd(corrs))
 }
 
-compute_deltalogliks <- function(datasets, to_predict, predict_from, predict_from_baseline) {
+get_spillover <- function(predictors, spillover) {
+  out <- c()
+  for (item in predictors) {
+    out <- c(paste(item, ".", spillover, sep=""), out)
+  }
+  out
+}
+
+get_spillover_upto <- function(predictors, spillover) {
+  out <- predictors
+  if (spillover > 0) {
+    for (i in 1:(spillover)) {
+      out <- c(out, get_spillover(predictors, i))
+    }
+  }
+  out
+}
+
+get_slopes <- function(predictors, slopes_for) {
+  out <- c()
+  for (sl in slopes_for) {
+    out <- c(paste("(", paste(predictors, collapse="+"), "|", sl, ")", sep=""), out)
+  }
+  out
+}
+
+compute_deltalogliks <- function(datasets, to_predict, predict_from, baseline) {
   deltalogliks.s <- c()
   deltaAIC <- c()
-  if (predict_from_baseline != "") {
-    predict_from_baseline <- paste(predict_from_baseline, " +")
-  }
+  slopes <- get_slopes(c("1"), c("WorkerId", "item"))
+
   for (data in datasets) {
     # ---------------------- Step 1 ----------------------
-    formula_str <- paste(to_predict, "~ frequency + length + ", predict_from_baseline, 
-                 " (1|WorkerId) + (1|item)")
+    formula_str <- paste(to_predict, " ~ ", paste(c(baseline, slopes), collapse=" + "))
     s0 <- lmer(as.formula(formula_str),
                data=na.omit(data),
                REML=FALSE)
     
     # ---------------------- Step 2 ----------------------
-    formula_str <- paste(to_predict, "~ frequency + length + ", predict_from_baseline,
-                 predict_from, " +
-                 (1|WorkerId) + (1|item)")
+    formula_str <- paste(to_predict, " ~ ", paste(c(baseline, slopes, predict_from), collapse=" + "))
     s1 <- lmer(as.formula(formula_str),
                data=na.omit(data),
                REML=FALSE)
     
     a <- anova(s0, s1)  # Significant?
-    print(paste("Anova for ", to_predict, " and ", predict_from, " with baseline ", predict_from_baseline, sep=""))
+    print(paste("Anova for ", to_predict, " and ", paste(predict_from, collapse=", "), " with baseline ", paste(baseline, collapse=", "), sep=""))
     print(a)
 
     deltalogliks.s <- c(deltalogliks.s, (a$logLik[2]-a$logLik[1]) / nrow(data))
@@ -95,45 +117,37 @@ if (corpus_type == "SP") {
   goals <- c("FFD", "GPT")
 }
 
-candidates <- c("surprisal", "demberg")
+candidates <- c("surprisal", "demberg", "predicted_first_dependent_distance", "expected_distance", "attention_entropy")
+baseline_predictors <- c("frequency", "length")
 
 for (goal in goals) {
   for (candidate in candidates) {
     print(paste("Correlation between ", goal, " and ", candidate, sep=""))
     print(compute_mean(datasets, goal, candidate))
 
-    predict_from <- candidate
+    base_predict_from <- c(candidate, baseline_predictors)
     if (spillover > 0) {
-      if (spillover > 1) {
-        for (i in 1:(spillover-1)) {
-          predict_from <- paste(predict_from, " + ", candidate, ".", i, sep="")
-        }
-      }
+      predict_from <- get_spillover_upto(c(candidate, baseline_predictors), spillover-1)
       print(paste("lme DeltaLogLik for ", goal, " and ", candidate,
                   ", improvement of spillover ", spillover, sep=""))
-      print(compute_deltalogliks(datasets, goal, paste(candidate, ".", spillover, sep=""),
-                                 predict_from))
-      
-      predict_from <- paste(predict_from, " + ", candidate, ".", spillover, sep="")
+      print(compute_deltalogliks(datasets, goal, get_spillover(c(candidate, baseline_predictors), spillover),
+                                  predict_from))
     }
-    
+
     print(paste("lme DeltaLogLik for ", goal, " and ", candidate,
                 ", overall", sep=""))
-    print(compute_deltalogliks(datasets, goal, predict_from, ""))
+    print(compute_deltalogliks(datasets, goal,
+          get_spillover_upto(candidate, spillover),
+          get_spillover_upto(baseline_predictors, spillover)))
     
     for (candidate2 in candidates) {
       if (candidate != candidate2) {
-        predict_from2 <- candidate2
-        
-        # TODO: allow different spillover for candidates
-        if (spillover > 1) {
-          for (i in 1:spillover) {
-            predict_from2 <- paste(predict_from2, " + ", candidate2, ".", i, sep="")
-          }
-        }
-        print(paste("lme DeltaLogLik for ", predict_from2, " over ", predict_from,
+        predict_from2 <- get_spillover_upto(candidate2, spillover)
+
+        print(paste("lme DeltaLogLik for ", candidate2, " over ", candidate,
                     sep=""))
-        print(compute_deltalogliks(datasets, goal, predict_from2, predict_from))
+        print(compute_deltalogliks(datasets, goal, predict_from2,
+                  get_spillover_upto(c(candidate, baseline_predictors), spillover)))
       }
     }
   }
