@@ -31,14 +31,35 @@ if (corpus == "frank_SP" || corpus == "naturalstories") {
   corpus_type <- "ET"
 }
 
+if (corpus_type == "SP") {
+  goals <- c("RT")
+} else if (corpus_type == "ET") {
+  goals <- c("FFD", "GPT")
+}
+
 data_dir <- paste("data/", corpus, "_preprocessed_", sep="")
 num.models = as.numeric(args[2])
 # load data
 
 datasets <- list()
 
+scaling_var <- function(data){
+  # The input data is a vector
+  data <- as.numeric(data)
+  (data - mean(data,na.rm=TRUE))/sd(data,na.rm=TRUE)
+}
+
+excluded_vars <- c(goals, "WorkerId", "item")
 for (x in 0:(num.models-1)) {
   data <- read.csv(paste(data_dir, args[1], "_", x, ".csv", sep=""))
+  # Get names of numeric columns
+  numeric_cols <- names(data)[sapply(data, is.numeric)]
+  # Subset to numeric columns you want to scale
+  cols_to_scale <- setdiff(numeric_cols, excluded_vars)
+
+  # Apply scaling
+  data <- data %>%
+    mutate(across(all_of(cols_to_scale), scaling_var))
   datasets <- c(datasets, list(data))
 }
 
@@ -93,13 +114,17 @@ compute_deltalogliks <- function(datasets, to_predict, predict_from, baseline) {
     s0 <- lmer(as.formula(formula_str),
                data=na.omit(data),
                REML=FALSE)
+    print(paste("Summary for baseline ", paste(baseline, collapse=", "), sep=""))
+    print(summary(s0))
     
     # ---------------------- Step 2 ----------------------
     formula_str <- paste(to_predict, " ~ ", paste(c(baseline, slopes, predict_from), collapse=" + "))
     s1 <- lmer(as.formula(formula_str),
                data=na.omit(data),
                REML=FALSE)
-    
+    print(paste("Summary for s1 ", paste(predict_from, collapse=", "), sep=""))
+    print(summary(s1))
+
     a <- anova(s0, s1)  # Significant?
     print(paste("Anova for ", to_predict, " and ", paste(predict_from, collapse=", "), " with baseline ", paste(baseline, collapse=", "), sep=""))
     print(a)
@@ -111,14 +136,8 @@ compute_deltalogliks <- function(datasets, to_predict, predict_from, baseline) {
 }
 
 
-if (corpus_type == "SP") {
-  goals <- c("RT")
-} else if (corpus_type == "ET") {
-  goals <- c("FFD", "GPT")
-}
-
 candidates <- c("surprisal", "demberg", "predicted_first_dependent_distance", "expected_distance", "attention_entropy")
-baseline_predictors <- c("frequency", "length")
+baseline_predictors <- c("frequency", "length", "zone")
 
 for (goal in goals) {
   for (candidate in candidates) {
