@@ -123,7 +123,7 @@ def lm_loss(
 
 def attention_entropy_loss(
         arc_logits: torch.Tensor,
-        to_ignore_mask: torch.Tensor | None,
+        to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
         reduction: Literal["sum", "mean", "none"] = "mean",
         ) -> torch.Tensor:
     """input shape [H, B, S, S]
@@ -138,7 +138,7 @@ def attention_entropy_loss(
 
     probs = arc_logits.softmax(-1)
 
-    if to_ignore_mask is not None:
+    if to_ignore_mask is not None and to_ignore_mask != "triangular":
         to_ignore_mask = to_ignore_mask.sum(0).to(torch.bool)
 
     probs = get_head_averaged_distribution(probs)
@@ -157,7 +157,7 @@ def attention_entropy_loss(
 
 def distance_loss(
     arc_logits: torch.Tensor,
-    to_ignore_mask: torch.Tensor | None,
+    to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
     reduction: Literal["sum", "mean", "none"] = "mean",
     ) -> torch.Tensor:
     """input shape [H, B, S, S]
@@ -173,8 +173,11 @@ def distance_loss(
     probs = arc_logits.softmax(-1)
 
     if to_ignore_mask is not None:
-        to_ignore_mask = to_ignore_mask.sum(0).to(torch.bool)
-        probs[to_ignore_mask] = 0
+        if to_ignore_mask == "triangular":
+            probs = torch.tril(probs)
+        else:
+            to_ignore_mask = to_ignore_mask.sum(0).to(torch.bool)
+            probs[to_ignore_mask] = 0
 
     probs = get_head_averaged_distribution(probs)
     
@@ -206,7 +209,7 @@ def get_head_averaged_distribution(
 
 def get_attention_entropy(
         probs: torch.Tensor,
-        to_ignore: torch.Tensor | None = None,
+        to_ignore: torch.Tensor | Literal["triangular"] | None = None,
         reduction: Literal["sum", "mean", "none"] = "mean") -> torch.Tensor:
     """input shape [..., S, S]
     with S: sequence length.
@@ -214,7 +217,11 @@ def get_attention_entropy(
     entropy = -(probs*torch.log(probs))
 
     if to_ignore is not None:
-        entropy[to_ignore] = torch.nan
+        if to_ignore == "triangular":
+            entropy = entropy.masked_fill(
+                torch.tril(torch.ones(*entropy.shape, device=probs.device)), torch.nan)
+        else:
+            entropy[to_ignore] = torch.nan
     entropy[entropy.isnan()] = 0
 
     entropy = entropy.sum(-1)

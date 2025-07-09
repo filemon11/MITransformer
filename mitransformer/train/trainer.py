@@ -7,6 +7,7 @@ from ..data.dataset import (
 from .metrics import (
     sum_metrics, SupervisedEvalMetric,
     SupervisedMetric, Metric, EvalMetric,
+    CostsMetric, CostsEvalMetric,
     MetricWriter, M, N)
 
 from ..data import (
@@ -73,6 +74,10 @@ class GeneralConfig(utils.Params):
     use_ddp: bool = False
     discriminative: bool = False
     masks_setting: data.MasksSetting = "current"
+    combined_loss: bool = False
+    w1: float | None = None
+    w2: float | None = None
+    w3: float | None = None
 
 
 @dataclass
@@ -328,7 +333,7 @@ class LMTrainer():
 
     def attention_entropy_loss(
             self, arc_logits: torch.Tensor,
-            to_ignore_mask: torch.BoolTensor | None,
+            to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             reduction: Literal["sum", "mean"] = "mean"
             ) -> torch.Tensor:
         return losses.attention_entropy_loss(
@@ -336,7 +341,7 @@ class LMTrainer():
 
     def distance_loss(
             self, arc_logits: torch.Tensor,
-            to_ignore_mask: torch.BoolTensor | None,
+            to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             reduction: Literal["sum", "mean"] = "mean"
             ) -> torch.Tensor:
         return losses.distance_loss(
@@ -437,7 +442,10 @@ class LMTrainer():
             arc_loss: torch.Tensor | None = None,
             perplexity: float | None = None,
             uas: float | pd.DataFrame | None = None,
-            att_entropy: pd.DataFrame | None = None) -> Metric:
+            att_entropy: pd.DataFrame | None = None,
+            attention_entropy_loss: torch.Tensor | None = None,
+            distance_loss: torch.Tensor | None = None,
+            ) -> Metric:
         if perplexity is not None:
             if arc_loss is not None:
                 assert uas is not None
@@ -454,15 +462,49 @@ class LMTrainer():
                     _main_metric=self.config.early_stop_metric
                     )
             else:
-                return EvalMetric(
-                    num_instances, _lm_loss=lm_loss,
-                    _perplexity=perplexity,
-                    _main_metric=self.config.early_stop_metric)
+                if self.config.combined_loss is False:
+                    return EvalMetric(
+                        num_instances, _lm_loss=lm_loss,
+                        _perplexity=perplexity,
+                        _main_metric=self.config.early_stop_metric)
+                else:
+                    assert (
+                        attention_entropy_loss is not None
+                        and distance_loss is not None
+                        and self.config.w1 is not None
+                        and self.config.w2 is not None
+                        and self.config.w3 is not None
+                    )
+                    return CostsEvalMetric(
+                        num_instances, _lm_loss=lm_loss,
+                        _main_metric=self.config.early_stop_metric,
+                        _attention_entropy_loss=attention_entropy_loss,
+                        _distance_loss = distance_loss,
+                        w1=self.config.w1, w2=self.config.w2,
+                        w3=self.config.w3,
+                        _att_entropy=att_entropy   
+                    )
 
         if arc_loss is None:
-            return Metric(
-                num_instances, _lm_loss=lm_loss,
-                _main_metric=self.config.early_stop_metric)
+            if self.config.combined_loss is False:
+                return Metric(
+                    num_instances, _lm_loss=lm_loss,
+                    _main_metric=self.config.early_stop_metric)
+            else:
+                assert (
+                    attention_entropy_loss is not None
+                    and distance_loss is not None
+                    and self.config.w1 is not None
+                    and self.config.w2 is not None
+                    and self.config.w3 is not None
+                )
+                return CostsMetric(
+                    num_instances, _lm_loss=lm_loss,
+                    _main_metric=self.config.early_stop_metric,
+                    _attention_entropy_loss=attention_entropy_loss,
+                    _distance_loss = distance_loss,
+                    w1=self.config.w1, w2=self.config.w2, w3=self.config.w3   
+                )
         else:
             assert num_arc_instances is not None
             return SupervisedMetric(
@@ -487,6 +529,8 @@ class LMTrainer():
             ignore_index=ignore_index,
             reduction="sum")
         arc_loss: torch.Tensor | None = None
+        attention_entropy_loss: torch.Tensor | None = None
+        distance_loss: torch.Tensor | None = None
 
         num_arc_instances: int | None = None
         if self.train_config.dependency_mode == "supervised":
@@ -517,13 +561,21 @@ class LMTrainer():
                     self.config.rank, logger,
                     "Scores did not align. Check keys.")
 
+        elif self.config.combined_loss:
+            attention_entropy_loss = self.attention_entropy_loss(
+                arc_logits, to_ignore_mask="triangular", reduction="sum")
+            distance_loss = self.distance_loss(
+                arc_logits, to_ignore_mask="triangular", reduction="sum")
+
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
 
         metric = self.get_metric(
             num_instances,
             num_arc_instances=num_arc_instances,
             lm_loss=lm_loss,
-            arc_loss=arc_loss)
+            arc_loss=arc_loss,
+            attention_entropy_loss=attention_entropy_loss,
+            distance_loss=distance_loss)
 
         metric.loss.backward()   # backward pass
         if perform_opt:
@@ -561,6 +613,9 @@ class LMTrainer():
 
         uas_abs: None | pd.DataFrame | float = None
         arc_loss = None
+        attention_entropy_loss: torch.Tensor | None = None
+        distance_loss: torch.Tensor | None = None
+
         att_entropy = None
         num_arc_instances = None
         if mode == "supervised":
@@ -619,9 +674,14 @@ class LMTrainer():
                 att_entropy = pd.DataFrame({
                     key: losses.get_attention_entropy(
                         logits_preds.softmax(-1), to_ignore_dict[key],
-                        "none").flatten(1).mean(-1).detach().cpu()
+                        "none").flatten(1).sum(-1).detach().cpu()
                     for key, logits_preds in score_logits.items()})
                 # can make separate list of heads
+        elif self.config.combined_loss:
+            attention_entropy_loss = self.attention_entropy_loss(
+                arc_logits, to_ignore_mask="triangular", reduction="sum")
+            distance_loss = self.distance_loss(
+                arc_logits, to_ignore_mask="triangular", reduction="sum")
 
         metric = self.get_metric(
             num_instances,
@@ -630,7 +690,9 @@ class LMTrainer():
             num_arc_instances=num_arc_instances,
             perplexity=surprisal_sum,
             uas=uas_abs,
-            att_entropy=att_entropy)
+            att_entropy=att_entropy,
+            attention_entropy_loss=attention_entropy_loss,
+            distance_loss=distance_loss)
         metric.to_("cpu")
         metric.detach()
         return metric

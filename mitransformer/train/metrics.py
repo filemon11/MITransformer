@@ -103,6 +103,8 @@ minimise = {"lm_loss": True,
             "arc_loss": True,
             "perplexity": True,
             "uas": False,
+            "distance_loss": True,
+            "attention_entropy_loss": True
             }
 # The `minimise` dictionary is used to specify whether each metric should be
 # minimized or maximized
@@ -142,6 +144,7 @@ class Metric(params.Params):
     num: float = 0
     _lm_loss: torch.Tensor = torch.tensor(0)
 
+    _statics: ClassVar[set[str]] = set()
     _no_mean: ClassVar[set[str]] = {"loss"}
     _to_mean: ClassVar[set[str]] = {"lm_loss"}
 
@@ -296,6 +299,17 @@ class Metric(params.Params):
             depending on the values of the
             input parameters `m1` and `m2`.
         '''
+        
+        if name in self._statics:
+            val1 = getattr(m1, name)
+            val2 = getattr(m2, name)
+            assert (val1 == val2 or val2 is None
+                    or val1 is None), (
+                        f"Cannot combine metrics with different {name}."
+                    )
+            return val2 if val2 is not None else val1
+
+
         val1 = getattr(m1, name)
         val2 = getattr(m2, name)
         if name == "_main_metric":
@@ -634,6 +648,7 @@ class SupervisedMetric(Metric):
         Dependency parsing loss.
     '''
 
+    _statics = Metric._statics | {"alpha"}
     arc_num: float = 0
     _arc_loss: torch.Tensor = torch.tensor(0)
     alpha: float | None = None
@@ -666,46 +681,6 @@ class SupervisedMetric(Metric):
         else:
             return (self.alpha*lm_loss
                     + (1-self.alpha)*arc_loss)
-
-    def _add_fields(self,
-                    name: str,
-                    m1: "Metric",
-                    m2: "Metric") -> float | torch.Tensor:
-        '''The function `_add_fields` takes in
-        two Metric objects and a field name. If the field to sum
-        is "alpha", then it checks whether alpha is the same for both
-        objects or whether one of the objects has None as alpha
-        and returns alpha if true, else it raises
-        an assertion error if they are different. For all other names,
-        it calls `super()._add_fields`.
-
-        Parameters
-        ----------
-        name : str
-            The `name` parameter in the `_add_fields` method
-            is a string that specifies the field name for
-            which the operation is being performed.
-        m1 : "Metric"
-            Metric m1 is an instance of the class "Metric".
-        m2 : "Metric"
-            m2 is an instance of the class "Metric".
-
-        Returns
-        -------
-        float | torch.Tensor
-            Combined field value.
-        '''
-        if name == "alpha":
-            val1 = getattr(m1, name)
-            val2 = getattr(m2, name)
-            assert (val1 == val2 or val2 is None
-                    or val1 is None), (
-                        "Cannot combine metrics with different alpha."
-                    )
-            return val2 if val2 is not None else val1
-
-        return super()._add_fields(name, m1, m2)
-
 
     def getattr_retrieve(self, prop: str):
         if prop in self._arc_to_mean:
@@ -825,6 +800,69 @@ class SupervisedEvalMetric(SupervisedMetric, EvalMetric):
     _to_mean: ClassVar[set[str]] = (SupervisedMetric._to_mean
                                     | EvalMetric._to_mean
                                     | {"uas", "att_entropy"})
+
+
+@dataclass
+class CostsMetric(Metric):
+    '''TODO
+
+    Attributes
+    ----------
+    w1 : float
+        Factor for lm_loss.
+    w2 : float
+        Factor for attention_entropy_loss.
+    w3 : float
+        Factor for distance_loss.
+    _attention_entropy_loss : torch.Tensor
+        Attention entropy loss.
+    _distance_loss : torch.Tensor
+        Distance loss.
+    '''
+
+    _attention_entropy_loss: torch.Tensor = torch.tensor(0)
+    _distance_loss: torch.Tensor = torch.tensor(0)
+    w1: float = 1
+    w2: float = 1
+    w3: float = 1
+    _statics = Metric._statics | {"w1", "w2", "w3"}
+    _to_mean: ClassVar[set[str]] = Metric._to_mean | {
+        "attention_entropy_loss", "distance_loss"
+    }
+
+    @property
+    def _loss(self) -> torch.Tensor:
+        '''This function calculates a loss value based on
+        two sub-losses, with the weighting between them
+        determined by the alpha parameter.
+
+        Returns
+        -------
+        torch.Tensor
+            TODO
+        '''
+        lm_loss = getattr(self, "lm_loss")
+        attention_entropy_loss = getattr(self, "attention_entropy_loss")
+        distance_loss = getattr(self, "distance_loss")
+        return (
+            self.w1*lm_loss
+            + self.w2*attention_entropy_loss
+            + self.w3*distance_loss)
+
+
+@dataclass
+class CostsEvalMetric(CostsMetric, EvalMetric):
+    '''This Python class extends the CostsMetric class
+    and EvalMetric classes by adding additional metric fields
+    that should be computed for model evaluation.
+
+    Attributes
+    ----------
+    '''
+    _att_entropy: pd.DataFrame | None = None
+    _to_mean: ClassVar[set[str]] = (CostsMetric._to_mean
+                                    | EvalMetric._to_mean
+                                    | {"att_entropy"})
 
 
 class MetricWriter(SummaryWriter):
