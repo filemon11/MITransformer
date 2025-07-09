@@ -326,6 +326,22 @@ class LMTrainer():
             score_preds, score_gold, to_ignore_mask,
             reduction, self.config.arc_loss_weighted)
 
+    def attention_entropy_loss(
+            self, arc_logits: torch.Tensor,
+            to_ignore_mask: torch.BoolTensor | None,
+            reduction: Literal["sum", "mean"] = "mean"
+            ) -> torch.Tensor:
+        return losses.attention_entropy_loss(
+            arc_logits, to_ignore_mask, reduction=reduction)
+
+    def distance_loss(
+            self, arc_logits: torch.Tensor,
+            to_ignore_mask: torch.BoolTensor | None,
+            reduction: Literal["sum", "mean"] = "mean"
+            ) -> torch.Tensor:
+        return losses.distance_loss(
+            arc_logits, to_ignore_mask, reduction=reduction)
+
     @staticmethod
     def filter_arc_scores(
             arc_scores: Mapping[str, torch.Tensor],

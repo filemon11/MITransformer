@@ -141,9 +141,7 @@ def attention_entropy_loss(
     if to_ignore_mask is not None:
         to_ignore_mask = to_ignore_mask.sum(0).to(torch.bool)
 
-    probs = probs.mean(0)  # [B, S, S]
-
-    probs = probs.softmax(-1)  # [B, S, S]
+    probs = get_head_averaged_distribution(probs)
     
     entropy = get_attention_entropy(
         probs, to_ignore_mask, reduction="none")  # [B, S]
@@ -156,6 +154,54 @@ def attention_entropy_loss(
         case "sum":
             return entropy.sum()
 
+
+def distance_loss(
+    arc_logits: torch.Tensor,
+    to_ignore_mask: torch.Tensor | None,
+    reduction: Literal["sum", "mean", "none"] = "mean",
+    ) -> torch.Tensor:
+    """input shape [H, B, S, S]
+    with 
+    H: number of heads,
+    B: batch size,
+    S: sequence length.
+    
+    output shape
+    [B, S] if reduction = 'none'
+    else scalar"""
+
+    probs = arc_logits.softmax(-1)
+
+    if to_ignore_mask is not None:
+        to_ignore_mask = to_ignore_mask.sum(0).to(torch.bool)
+        probs[to_ignore_mask] = 0
+
+    probs = get_head_averaged_distribution(probs)
+    
+    s = probs.shape[-1]
+    r = torch.arange(1, s+1, device=probs.device)
+
+    dist_mat = torch.tril(-1 * (r.repeat(s, 1) - r.reshape(-1, 1)))
+    dist_mat = dist_mat.unsqueeze(-1)  # [B, S, S]
+
+    cost = (dist_mat*probs).sum(-1)  # [B, S]
+
+    match reduction:
+        case "sum":
+            return cost.sum()
+        case "mean":
+            return cost.mean()
+        case "none":
+            return cost
+
+
+def get_head_averaged_distribution(
+        probs: torch.Tensor
+    ) -> torch.Tensor:
+    """input: [H, B, S, S]"""
+    probs = probs.mean(0)  # [B, S, S]
+    probs = probs.softmax(-1)  # [B, S, S]
+    return probs
 
 
 def get_attention_entropy(
