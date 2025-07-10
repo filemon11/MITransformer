@@ -900,6 +900,10 @@ class TrainParserArgs(ParserArgs):
     gradient_acc: int | None
     learning_rate: float
     loss_alpha: float | None
+    combined_loss: bool
+    w1: float | None
+    w2: float | None
+    w3: float | None
     arc_loss_weighted: bool
     discriminative: bool
 
@@ -934,6 +938,7 @@ class HyperoptParserArgs(ParserArgs):
     n_trials: int
 
     dependency_mode: Literal["supervised", "input", "standard"]
+    combined_loss: bool
     batch_size: int
     use_steps: bool
     max_steps: int | None
@@ -945,6 +950,10 @@ class HyperoptParserArgs(ParserArgs):
 
     learning_rate: float | tuple[float, float] | list[float]
     loss_alpha: float | tuple[float, float] | list[float | None] | None
+    w1: float | tuple[float, float] | list[float] | None
+    w2: float | tuple[float, float] | list[float] | None
+    w3: float | tuple[float, float] | list[float] | None
+    
     arc_loss_weighted: bool | list[bool]
     discriminative: bool | list[bool]
 
@@ -979,9 +988,13 @@ class HyperoptParserArgs(ParserArgs):
 @dataclass
 class TestParserArgs(ParserArgs):
     model_name: str
-    dependency_mode: str | Undefined
+    dependency_mode: Literal["supervised", "input", "standard"] | Undefined
+    combined_loss: bool | Undefined
     batch_size: int | Undefined
     loss_alpha: float | None | Undefined
+    w1: float | None | Undefined
+    w2: float | None | Undefined
+    w3: float | None | Undefined
     arc_loss_weighted: bool | Undefined
 
     att_plot: bool

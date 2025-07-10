@@ -109,6 +109,10 @@ def parse_args() -> (
         default="supervised",
         help="how to use dependency information")
     trainer_group.add_argument(
+        '--combined_loss', type=bool,
+        default=False,
+        help="whether to use combined loss for unsupervised memory cost learning")
+    trainer_group.add_argument(
         '--batch_size', type=int, default=32,
         help=(
             "batch size; in case of multiple GPUs it is "
@@ -151,6 +155,18 @@ def parse_args() -> (
         help=(
             "loss weight for supervised learning; 1.0 is only "
             "language model training while 0.0 is only arc training"))
+    trainer_group.add_argument(
+        '--w1', type=io.OptNone(float), default=None,
+        help=(
+            "Factor for language modelling loss in combined cost"))
+    trainer_group.add_argument(
+        '--w2', type=io.OptNone(float), default=None,
+        help=(
+            "Factor for attention entropy loss in combined cost"))
+    trainer_group.add_argument(
+        '--w3', type=io.OptNone(float), default=None,
+        help=(
+            "Factor for distance loss in combined cost"))
     trainer_group.add_argument(
         '--arc_loss_weighted', type=io.str_to_bool, default=False,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
@@ -345,6 +361,10 @@ def parse_args() -> (
         default="supervised",
         help="how to use dependency information")
     hyperopt_fixed_trainer_group.add_argument(
+        '--combined_loss', type=bool,
+        default=False,
+        help="whether to use combined loss for unsupervised memory cost learning")
+    hyperopt_fixed_trainer_group.add_argument(
         '--batch_size', type=int, default=32,
         help=(
             "batch size; in case of multiple GPUs it is"
@@ -390,6 +410,18 @@ def parse_args() -> (
         help=(
             "loss weight for supervised learning; 1.0 is only"
             "language model training while 0.0 is only arc training"))
+    trainer_group.add_argument(
+        '--w1', type=io.HyperoptSpace(io.OptNone(float)), default=None,
+        help=(
+            "Factor for language modelling loss in combined cost"))
+    trainer_group.add_argument(
+        '--w2', type=io.HyperoptSpace(io.OptNone(float)), default=None,
+        help=(
+            "Factor for attention entropy loss in combined cost"))
+    trainer_group.add_argument(
+        '--w3', type=io.HyperoptSpace(io.OptNone(float)), default=None,
+        help=(
+            "Factor for distance loss in combined cost"))
     hyperopt_flexible_trainer_group.add_argument(
         '--arc_loss_weighted', type=io.HyperoptSpace(io.str_to_bool),
         default=False,
@@ -620,6 +652,10 @@ def parse_args() -> (
         default=io.Undefined,
         help="how to use dependency information")
     trainer_group.add_argument(
+        '--combined_loss', type=bool,
+        default=False,
+        help="whether to use combined loss for unsupervised memory cost learning")
+    trainer_group.add_argument(
         '--batch_size', type=int, default=io.Undefined,
         help=(
             "batch size; in case of multiple GPUs it is "
@@ -629,6 +665,18 @@ def parse_args() -> (
         help=(
             "loss weight for supervised learning; 1.0 is only "
             "language model training while 0.0 is only arc training"))
+    trainer_group.add_argument(
+        '--w1', type=io.OptNone(float), default=io.Undefined,
+        help=(
+            "Factor for language modelling loss in combined cost"))
+    trainer_group.add_argument(
+        '--w2', type=io.OptNone(float), default=io.Undefined,
+        help=(
+            "Factor for attention entropy loss in combined cost"))
+    trainer_group.add_argument(
+        '--w3', type=io.OptNone(float), default=io.Undefined,
+        help=(
+            "Factor for distance loss in combined cost"))
     trainer_group.add_argument(
         '--arc_loss_weighted', type=io.str_to_bool, default=io.Undefined,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
