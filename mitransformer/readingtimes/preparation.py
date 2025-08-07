@@ -42,7 +42,8 @@ def corpus_to_csv(
         token_col: str = TOKEN_COL,
         text_id_col: str = TEXT_ID_COL,
         wnum_col: str = WNUM_COL,
-        token_mapper_dir: str | None = None
+        token_mapper_dir: str | None = None,
+        make_lower: bool = True
         ) -> None:
     corpus_to_func: dict[Corpus, CorpusLoader] = {
         "naturalstories": load_natural_stories,
@@ -54,7 +55,8 @@ def corpus_to_csv(
     func = corpus_to_func[corpus]
 
     tokens, text_ids, wnums = func(
-        input_file, token_mapper_dir=token_mapper_dir)
+        input_file, token_mapper_dir=token_mapper_dir,
+        make_lower=make_lower)
     # making lowercase makes no difference
 
     df = pd.DataFrame({
@@ -83,22 +85,32 @@ def process(
         corpus: Corpus = "naturalstories"
         ) -> None:
 
-    # Convert original format to sensible csv
-    corpus_to_csv(
-        corpus,
-        input_file, output_file,
-        token_col, text_id_col,
-        wnum_col, None if raw else token_mapper_dir)
+    if model_dir[:4] == "hug:" and token_mapper_dir[:4] == "hug:":
+        corpus_to_csv(
+            corpus,
+            input_file, output_file,
+            token_col, text_id_col,
+            wnum_col, None if raw else token_mapper_dir,
+            make_lower=False)
+    else:
+        # Convert original format to sensible csv
+        corpus_to_csv(
+            corpus,
+            input_file, output_file,
+            token_col, text_id_col,
+            wnum_col, None if raw else token_mapper_dir)
 
     # Add baseline predictors
     orig_frame = UnsplitFrame(
-        pd.read_csv(output_file), {"word_col": token_col}, tokenised=False)
+        pd.read_csv(
+            output_file, keep_default_na=False, na_values=['']),
+            {"word_col": token_col}, tokenised=False)
     # print(orig_frame.df["word"].to_list()); raise Exception
 
     for metric in baseline_metrics:
         orig_frame.add_(metric)
 
-    df = pd.read_csv(output_file)
+    df = pd.read_csv(output_file, keep_default_na=False, na_values=[''])
     words = df["word"]
 
     sentence_ids: None | pd.Series = None
@@ -122,78 +134,114 @@ def process(
         keys_for_child={"child"})
     # TODO: load these params from somewhere
 
-    trainer = LMTrainer.load(
-        model_dir,
-        batch_size=batch_size,
-        device=device,
-        use_ddp=False,
-        world_size=1)
-
-    frame.add_(
-        "surprisal", token_mapper_dir=token_mapper_dir,
-        transform=transform, trainer=trainer, masks_setting=masks_setting)
-
-    # Other metrics
-    frame.add_(
-        "mask", masks_setting="both",
-        gov_name="head_current", dep_name="child_current")
-    frame.add_(
-        "head_distance",
-        "first_dependent_distance",
-        "first_dependent_deprel",
-        "left_dependents_distance_sum",
-        "left_dependents_count",
-        "demberg",
-        only_content_words_cost=only_content_words_cost,
-        only_content_words_left=only_content_words_left,
-        only_left=True)
-
-    candidates = (
-            "first_dependent_distance_weight",
-            "first_dependent_correct",
-            "expected_distance",
-            "kl_divergence",
-            "predicted_first_dependent_distance",
-            "attention_entropy",
-        )
-    if not masks_setting == "next":
-        # Dependent on dependency prediction
+    if model_dir[:4] == "hug:":
+        model_dir = model_dir[:model_dir.rfind("_")]  # remove model number
         frame.add_(
-            *candidates,
-            only_past=True)
+            "surprisal", token_mapper_dir=token_mapper_dir,
+            transform=transform, trainer=model_dir)
+        frame.add_(
+            "mask", masks_setting="both",
+            gov_name="head_current", dep_name="child_current")
+        frame.add_(
+            "head_distance",
+            "first_dependent_distance",
+            "first_dependent_deprel",
+            "left_dependents_distance_sum",
+            "left_dependents_count",
+            "demberg",
+            only_content_words_cost=only_content_words_cost,
+            only_content_words_left=only_content_words_left,
+            only_left=True)
 
-    if not masks_setting == "current":
-        candidate_tuples = [
-            cand + "_next_col" for cand in candidates]
+        frame.untokenise_()
+
+        split_frame = orig_frame.split([
+            len(sentence) for sentence in frame.df["word"]])
+
+        frame = split_frame | frame
+        frame = frame.include_spillover(shift)
+
+        frame.truncate_(right=1)
+        if shift == 0:
+            frame.truncate_(left=1)
+            # truncate first word for which we do not have a probability
+
+        unsplit_frame = frame.unsplit()
+        unsplit_frame.df.to_csv(output_file, index=False)
+
+    else:
+        trainer = LMTrainer.load(
+            model_dir,
+            batch_size=batch_size,
+            device=device,
+            use_ddp=False,
+            world_size=1)
 
         frame.add_(
-            *candidate_tuples,
-            gov_name="head_next",
-            child_name="child_next",
-            masks_setting="next",
-            only_past=True)
+            "surprisal", token_mapper_dir=token_mapper_dir,
+            transform=transform, trainer=trainer, masks_setting=masks_setting)
 
-    # TODO: Make it possible to provide a second argument to add_
-    # to save the content in a new column
-    # so we can compute the last for metrics for the succeeding
-    # mask prediction too
+        # Other metrics
+        frame.add_(
+            "mask", masks_setting="both",
+            gov_name="head_current", dep_name="child_current")
+        frame.add_(
+            "head_distance",
+            "first_dependent_distance",
+            "first_dependent_deprel",
+            "left_dependents_distance_sum",
+            "left_dependents_count",
+            "demberg",
+            only_content_words_cost=only_content_words_cost,
+            only_content_words_left=only_content_words_left,
+            only_left=True)
 
-    frame.untokenise_()
+        candidates = (
+                "first_dependent_distance_weight",
+                "first_dependent_correct",
+                "expected_distance",
+                "kl_divergence",
+                "predicted_first_dependent_distance",
+                "attention_entropy",
+            )
+        if not masks_setting == "next":
+            # Dependent on dependency prediction
+            frame.add_(
+                *candidates,
+                only_past=True)
 
-    split_frame = orig_frame.split([
-        len(sentence) for sentence in frame.df["word"]])
+        if not masks_setting == "current":
+            candidate_tuples = [
+                cand + "_next_col" for cand in candidates]
 
-    # # for debugging
-    # for sen1, sen2 in zip(frame.df["word"], split_frame.df["word"]):
-    #     print(sen1, sen2)
-    #     assert sen1[0] == sen2[0]
+            frame.add_(
+                *candidate_tuples,
+                gov_name="head_next",
+                child_name="child_next",
+                masks_setting="next",
+                only_past=True)
 
-    frame = split_frame | frame
-    frame = frame.include_spillover(shift)
-    # (frame_forward := frame.copy()).shift_(1)
-    # (frame_backward := frame.copy()).shift_(-1)
+        # TODO: Make it possible to provide a second argument to add_
+        # to save the content in a new column
+        # so we can compute the last for metrics for the succeeding
+        # mask prediction too
 
-    frame.truncate_(right=1)
+        frame.untokenise_()
 
-    unsplit_frame = frame.unsplit()
-    unsplit_frame.df.to_csv(output_file, index=False)
+        split_frame = orig_frame.split([
+            len(sentence) for sentence in frame.df["word"]])
+
+        # # for debugging
+        # for sen1, sen2 in zip(frame.df["word"], split_frame.df["word"]):
+        #     print(sen1, sen2)
+        #     assert sen1[0] == sen2[0]
+
+        frame = split_frame | frame
+        frame = frame.include_spillover(shift)
+        # (frame_forward := frame.copy()).shift_(1)
+        # (frame_backward := frame.copy()).shift_(-1)
+
+        frame.truncate_(right=1)
+
+        unsplit_frame = frame.unsplit()
+        unsplit_frame.df.to_csv(output_file, index=False)

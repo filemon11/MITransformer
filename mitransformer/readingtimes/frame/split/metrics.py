@@ -3,10 +3,12 @@ import nltk  # type: ignore
 import numpy as np
 import numpy.typing as npt
 import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
 
 from ...lingutils import (
     UntokSplitFunc, UntokSplitAdd,
-    UntokSplitHead, UntokSplitFirst,
+    UntokSplitHead, UntokSplitFirst, untokenise,
     pos_merge, TAGSET, CONTENT_POS)
 from ....data import (
     CoNLLUDataset, parse_list_of_words_with_spacy, TokenMapper,
@@ -16,7 +18,7 @@ from ....data.dataset import (
     get_deprels, TokenList, Sequence, TransformMaskHeadChild,
     head_list_to_adjacency_matrix, shift_masks)
 from ....train import LMTrainer
-from ....train.trainer import inverse_sigmoid
+from ....train.trainer import inverse_sigmoid, select_true, unpad
 
 from abc import ABC, abstractmethod
 
@@ -187,11 +189,12 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             self, df: pd.DataFrame,
             token_mapper_dir: str,
             transform: TransformMaskHeadChild,
-            trainer: LMTrainer,
+            trainer: LMTrainer | str,
             dataset: CoNLLUDataset | None = None,
             masks_setting: Literal[
             "current", "next"] = "current", *args, **kwargs
             ) -> tuple[pd.Series, dict[str, Any]]:
+
         if dataset is None:
             assert self.conllu_col is not None
 
@@ -199,24 +202,60 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             dataset = CoNLLUDataset.from_conllu(
                 tokenlists, transform, masks_setting=masks_setting)
 
+        if isinstance(trainer, str):
+            assert trainer[:4] == "hug:" and token_mapper_dir[:4] == "hug:"
+            
+            tokeniser = AutoTokenizer.from_pretrained(token_mapper_dir[4:])
+            model = AutoModelForCausalLM.from_pretrained(trainer[4:])
+            tokeniser.pad_token_id = tokeniser.eos_token_id
+
+            joined_sentences = [" ".join(sen[2:-1]) for sen in dataset.tokens]
+            inputs = tokeniser(joined_sentences, return_tensors="pt", padding=True)
+            labels = inputs.input_ids[:,1:]
+
+            model_outputs = model(inputs.input_ids).logits.softmax(-1)
+
+            model_outputs = select_true(
+                model_outputs[:,:-1],
+                labels,
+                tokeniser.pad_token_id)
+
+            unpadded_output = unpad(-model_outputs.log(), labels, tokeniser.pad_token_id)
+
+            surprisals = []
+            for i, out_sen in enumerate(unpadded_output):
+                num_toks = len(out_sen)
+                ids_sen = np.array(inputs.word_ids(i)[:num_toks+1])
+                space_after = (ids_sen[:-1] != ids_sen[1:])
+
+                untokenised = untokenise(out_sen.tolist(), space_after.tolist(), "add")
+                surprisals.append([1] + list(untokenised))    # first token probability?
+
+            return pd.Series(surprisals), {
+                "dataset": dataset,
+                "transform": transform,
+                "token_mapper_dir": token_mapper_dir,
+                "trainer": trainer,
+                "masks_setting": masks_setting}
+
+        else:
             token_mapper: TokenMapper = TokenMapper.load(token_mapper_dir)
             dataset.map_to_ids(token_mapper)
 
-        assert dataset is not None
-        pred_probs, attention_logits = trainer.predict(
-            dataset,
-            make_prob=True,
-            only_true=True)
-        probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
-        assert all(len(p) == len(t) for p, t in zip(probs, df["word"])), (
-            ([(len(p), len(t)) for p, t in zip(probs, df["word"])]))
-        return pd.Series(probs), {
-            "attention_logits": attention_logits,
-            "dataset": dataset,
-            "transform": transform,
-            "token_mapper_dir": token_mapper_dir,
-            "trainer": trainer,
-            "masks_setting": masks_setting}
+            pred_probs, attention_logits = trainer.predict(
+                dataset,
+                make_prob=True,
+                only_true=True)
+            probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
+            assert all(len(p) == len(t) for p, t in zip(probs, df["word"])), (
+                ([(len(p), len(t)) for p, t in zip(probs, df["word"])]))
+            return pd.Series(probs), {
+                "attention_logits": attention_logits,
+                "dataset": dataset,
+                "transform": transform,
+                "token_mapper_dir": token_mapper_dir,
+                "trainer": trainer,
+                "masks_setting": masks_setting}
 
 
 class SplitTokMetricMakerMask(SplitTokMetricMaker):

@@ -162,7 +162,8 @@ def parse_wikitext_with_spacy(
         output_dir: str = OUTPUT_DIR,
         output_file_name_train: str = "wikitext_spacy_train.conllu",
         output_file_name_dev: str = "wikitext_spacy_dev.conllu",
-        output_file_name_test: str = "wikitext_spacy_test.conllu"):
+        output_file_name_test: str = "wikitext_spacy_test.conllu",
+        lowercase: bool = True):
     """Files should not exist or be empty"""
 
     from datasets import (   # type: ignore # noqa: E402
@@ -184,7 +185,8 @@ def parse_wikitext_with_spacy(
                 dataset[split][idx:idx+batch_size]["text"])    # type: ignore
             treated = remove_at_symbols("".join(lines))
             treated = remove_newlines(treated)
-            treated = make_lowercase(treated)
+            if lowercase:
+                treated = make_lowercase(treated)
             save_doc_as_conllu(
                 parse(treated),
                 os.path.join(output_dir, filename), min_len=4)

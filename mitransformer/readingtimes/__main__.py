@@ -9,11 +9,17 @@ from typing import cast
 if __name__ == "__main__":
     # Compute probabilities for natural stories corpus
     # based on a model trianed on Wikitext_processed
-    model_name = sys.argv[1]
+    model_name = sys.argv[1]        # hug:<name> loads a huggingface model
     corpus = sys.argv[2]
     shift = int(sys.argv[3])
     only_content_words_cost = bool(int(sys.argv[4]))
     only_content_words_left = bool(int(sys.argv[5]))
+    try:
+        mapper = sys.argv[6]            # hug:<name> loads a huggingface tokeniser
+    except IndexError:
+        mapper = "processed/Wikitext_processed/mapper"
+        # TODO unclear; does this mean the model must have been trained on Wikitext?
+        # Is the mapper not a model property that can be loaded?
 
     corpus_to_infile: dict[preparation.Corpus, str] = {
         "naturalstories": "naturalstories-master/words.tsv",
@@ -28,7 +34,7 @@ if __name__ == "__main__":
     corpus = cast(preparation.Corpus, corpus)
 
     out_file = f"RT/data/{corpus}_candidates_{model_name}.csv"
-    mapper = "processed/Wikitext_processed/mapper"  # TODO set to processed
+
     preparation.process(
         in_file, out_file, model_name, mapper,
         raw=True, corpus=corpus, shift=shift,
