@@ -34,8 +34,12 @@ if (corpus == "frank_SP" || corpus == "naturalstories") {
 if (corpus_type == "SP") {
   goals <- c("RT")
 } else if (corpus_type == "ET") {
-  goals <- c("FFD", "GPT")
+  goals <- c("FFD", "GPT", "GD")
 }
+
+candidates <- c("surprisal", "demberg", "first_dependent_distance")
+# candidates <- c("surprisal", "demberg", "predicted_first_dependent_distance", "expected_distance", "attention_entropy")
+baseline_predictors <- c("frequency", "length")
 
 data_dir <- paste("data/", corpus, "_preprocessed_", sep="")
 num.models = as.numeric(args[2])
@@ -49,6 +53,31 @@ scaling_var <- function(data){
   (data - mean(data,na.rm=TRUE))/sd(data,na.rm=TRUE)
 }
 
+remove_outliers <- function(data, cols){
+  # Remove outliers
+  print(paste("nrows before outlier removal ", nrow(data)))
+  # Calculate quartiles and IQR
+
+  get_bounds <- function(x) {
+    Q1 <- quantile(x, 0.25)
+    Q3 <- quantile(x, 0.75)
+    IQR <- Q3 - Q1
+    lower <- Q1 - 1.5 * IQR
+    upper <- Q3 + 1.5 * IQR
+    return(c(lower, upper))
+  }
+
+  # Get bounds for all columns
+  bounds <- lapply(data[cols], get_bounds)
+  data <- data[
+    apply(data[cols], 1, function(row) {
+      all(mapply(function(value, bound) value > bound[1] & value < bound[2], row, bounds))
+    }),
+  ]
+  print(paste("nrows after outlier removal ", nrow(data)))
+  data
+}
+
 excluded_vars <- c(goals, "WorkerId", "item")
 for (x in 0:(num.models-1)) {
   data <- read.csv(paste(data_dir, args[1], "_", x, ".csv", sep=""))
@@ -56,6 +85,9 @@ for (x in 0:(num.models-1)) {
   numeric_cols <- names(data)[sapply(data, is.numeric)]
   # Subset to numeric columns you want to scale
   cols_to_scale <- setdiff(numeric_cols, excluded_vars)
+
+  # Remove outliers
+  data <- remove_outliers(data, c(goals, baseline_predictors))
 
   # Apply scaling
   data <- data %>%
@@ -106,7 +138,7 @@ get_slopes <- function(predictors, slopes_for) {
 compute_deltalogliks <- function(datasets, to_predict, predict_from, baseline) {
   deltalogliks.s <- c()
   deltaAIC <- c()
-  slopes <- get_slopes(c("1"), c("WorkerId", "item"))
+  slopes <- get_slopes(c("1"), c("WorkerId"))
 
   for (data in datasets) {
     # ---------------------- Step 1 ----------------------
@@ -130,21 +162,17 @@ compute_deltalogliks <- function(datasets, to_predict, predict_from, baseline) {
     print(a)
 
     deltalogliks.s <- c(deltalogliks.s, (a$logLik[2]-a$logLik[1]) / nrow(data))
-    deltaAIC <- c(deltaAIC, (a$AIC[2]-a$AIC[1]))
+    deltaAIC <- c(deltaAIC, (a$AIC[2]-a$AIC[1]) / nrow(data))
   }
   data.frame(Type = c("DeltaAIC", "DeltaLogLik"), Mean = c(mean(deltaAIC), mean(deltalogliks.s)), SD = c(sd(deltaAIC), sd(deltalogliks.s)))
 }
 
-
-candidates <- c("surprisal", "demberg", "predicted_first_dependent_distance", "expected_distance", "attention_entropy")
-baseline_predictors <- c("frequency", "length", "zone")
 
 for (goal in goals) {
   for (candidate in candidates) {
     print(paste("Correlation between ", goal, " and ", candidate, sep=""))
     print(compute_mean(datasets, goal, candidate))
 
-    base_predict_from <- c(candidate, baseline_predictors)
     if (spillover > 0) {
       predict_from <- get_spillover_upto(c(candidate, baseline_predictors), spillover-1)
       print(paste("lme DeltaLogLik for ", goal, " and ", candidate,
@@ -161,12 +189,40 @@ for (goal in goals) {
     
     for (candidate2 in candidates) {
       if (candidate != candidate2) {
-        predict_from2 <- get_spillover_upto(candidate2, spillover)
 
-        print(paste("lme DeltaLogLik for ", candidate2, " over ", candidate,
-                    sep=""))
-        print(compute_deltalogliks(datasets, goal, predict_from2,
-                  get_spillover_upto(c(candidate, baseline_predictors), spillover)))
+        if (spillover > 0) {
+          predict_from <- get_spillover_upto(c(candidate, candidate2, baseline_predictors), spillover-1)
+          print(paste("lme DeltaLogLik for ", goal, " and ", candidate, "+", candidate2,
+                      ", improvement of spillover ", spillover, sep=""))
+          print(compute_deltalogliks(datasets, goal, get_spillover(c(candidate, candidate2, baseline_predictors), spillover),
+                                      predict_from))
+        }
+
+        print(paste("lme DeltaLogLik for ", goal, " and ", candidate2, " over ", candidate,
+                    ", overall", sep=""))
+        print(compute_deltalogliks(datasets, goal,
+              get_spillover_upto(candidate2, spillover),
+              get_spillover_upto(c(baseline_predictors, candidate), spillover)))
+      }
+    }
+  }
+  for (candidate1 in candidates) {
+    for (candidate2 in candidates) {
+      if (candidate1 != candidate2) {
+
+        if (spillover > 0) {
+          predict_from <- get_spillover_upto(c(candidate1, candidate2, baseline_predictors), spillover-1)
+          print(paste("lme DeltaLogLik for ", goal, " and ", candidate1, "+", candidate2,
+                      ", improvement of spillover ", spillover, sep=""))
+          print(compute_deltalogliks(datasets, goal, get_spillover(c(candidate1, candidate2, baseline_predictors), spillover),
+                                      predict_from))
+        }
+        
+        print(paste("lme DeltaLogLik for ", goal, " and ", candidate1, "+", candidate2,
+                    ", overall", sep=""))
+        print(compute_deltalogliks(datasets, goal,
+              get_spillover_upto(c(candidate1, candidate2), spillover),
+              get_spillover_upto(baseline_predictors, spillover)))
       }
     }
   }
