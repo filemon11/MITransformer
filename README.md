@@ -76,16 +76,23 @@ python -m mitransformer --first_k none --first_k_eval_test none dataprep
 sh hyperopt_standard.sh
 sh hyperopt_supervised.sh
 
+```
+
 Results can be found in the log directory.
 
-## Training the models
 
+### Training the models
+
+```
 sh standard.sh
 sh supervised.sh
+```
 
-## RT evaluation
+### RT evaluation
 
+```
 sh correlate_RT.sh <corpus> <model_name> <mode_count> <spill_over> <cost_param> <left_param> <tokeniser>
+```
 
 corpus: Wikitext here.
 model_count: 0 or 1, should be 1 in this case. It serves to aggregate results over several model runs.
