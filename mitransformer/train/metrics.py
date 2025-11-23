@@ -215,13 +215,11 @@ class Metric(params.Params):
         '''
         return -self.minval()
 
-
     def getattr_retrieve(self, prop: str):
         if prop not in self._to_mean and prop not in self._no_mean:
             raise AttributeError(
                 f"'{self.__class__}' has no attribute '{prop}' or '_{prop}'.")
         return self.__getattribute__(f"_{prop}")
-
 
     def getattr_divide(self, prop: str, val):
         if prop in self._to_mean:
@@ -232,7 +230,6 @@ class Metric(params.Params):
         if prop in self._convert:
             return self._convert[prop](val)
         return val
-
 
     def __getattr__(self, prop: str):
         '''The function `__getattr__` calculates the mean for
@@ -299,7 +296,7 @@ class Metric(params.Params):
             depending on the values of the
             input parameters `m1` and `m2`.
         '''
-        
+
         if name in self._statics:
             val1 = getattr(m1, name)
             val2 = getattr(m2, name)
@@ -308,7 +305,6 @@ class Metric(params.Params):
                         f"Cannot combine metrics with different {name}."
                     )
             return val2 if val2 is not None else val1
-
 
         val1 = getattr(m1, name)
         val2 = getattr(m2, name)
@@ -688,13 +684,11 @@ class SupervisedMetric(Metric):
         else:
             return super().getattr_retrieve(prop)
 
-
     def getattr_divide(self, prop: str, val):
         if prop in self._arc_to_mean:
             return val / self.arc_num
         else:
             return super().getattr_divide(prop, val)
-
 
     def __truediv__(self, other: float) -> Self:
         '''This function allows to apply division
@@ -722,11 +716,13 @@ class SupervisedMetric(Metric):
     def to_dict(self, as_str: bool = False,
                 omit_undefined: bool = False) -> dict[str, Any]:
         if as_str:
-            return {attr: str(getattr(self, attr))
-                    for attr in self._to_mean | self._arc_to_mean | self._no_mean}
+            return {
+                attr: str(getattr(self, attr))
+                for attr in self._to_mean | self._arc_to_mean | self._no_mean}
         else:
-            return {attr: self._to_float(getattr(self, attr))
-                    for attr in self._to_mean | self._arc_to_mean | self._no_mean}
+            return {
+                attr: self._to_float(getattr(self, attr))
+                for attr in self._to_mean | self._arc_to_mean | self._no_mean}
 
     def print(
             self, epoch: int,
