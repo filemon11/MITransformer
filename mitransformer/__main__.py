@@ -1,9 +1,5 @@
-import torch
-
 import optuna
 import sys
-import argparse
-from ast import literal_eval as make_tuple
 
 from . import io
 from .utils import logmaker
@@ -23,7 +19,13 @@ def parse_args() -> (
         | io.CompareParserArgs):
     parser = io.create_parser()
     args = parser.parse_args()
-    match args.mode:
+    
+    try:
+        mode = args.mode
+    except AttributeError:
+        raise Exception("mode attribute not found in arguments.")
+
+    match mode:
         case "train":
             return io.TrainParserArgs(**vars(args))
         case "hyperopt":
