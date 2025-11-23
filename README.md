@@ -23,7 +23,7 @@ This is the official repo the BriGap-2 paper Modelling Expectation-based and Mem
 }
 ```
 
-The paper is available on arXiv: https://aclanthology.org/2025.brigap-1.7/
+The paper is available at the ACL: https://aclanthology.org/2025.brigap-1.7/
 
 For questions/concerns/bugs please contact lukas.mielczarek at uni-duesseldorf.de.
 
@@ -43,7 +43,7 @@ wget <link>
 unzip <name>.zip
 ```
 
-(Optional) Download evaluation data: To reproduce experiments from our submission, download the UCL corpus from [UCL](https://static-content.springer.com/esm/art%3A10.3758%2Fs13428-012-0313-y/MediaObjects/13428_2012_313_MOESM1_ESM.zip).
+(Optional) Download evaluation data: To reproduce experiments from our submission, download the  [UCL corpus](https://static-content.springer.com/esm/art%3A10.3758%2Fs13428-012-0313-y/MediaObjects/13428_2012_313_MOESM1_ESM.zip).
 
 ```
 wget https://static-content.springer.com/esm/art%3A10.3758%2Fs13428-012-0313-y/MediaObjects/13428_2012_313_MOESM1_ESM.zip
@@ -69,13 +69,13 @@ python -m spacy download en_core_web_trf
 
 python -m mitransformer --first_k none --first_k_eval_test none dataprep
 
-# Run the experiments
+```
 
-## Hyperparameter search
+### Hyperparameter search
 
+```
 sh hyperopt_standard.sh
 sh hyperopt_supervised.sh
-
 ```
 
 Results can be found in the log directory.
