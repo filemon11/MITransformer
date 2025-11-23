@@ -316,7 +316,8 @@ class LMTrainer():
             reduction: Literal["sum", "mean"] = "mean"
             ) -> torch.Tensor:
         return losses.lm_loss(
-            logits, labels, ignore_index, reduction, self.config.discriminative)
+            logits, labels, ignore_index,
+            reduction, self.config.discriminative)
 
     def arc_loss(
             self, score_preds: torch.Tensor,
@@ -326,7 +327,7 @@ class LMTrainer():
             ) -> tuple[torch.Tensor, int]:
         """reduction sum takes a mean across dim 1
         of the mask"""
-        
+
         return losses.arc_loss(
             score_preds, score_gold, to_ignore_mask,
             reduction, self.config.arc_loss_weighted)
@@ -479,10 +480,10 @@ class LMTrainer():
                         num_instances, _lm_loss=lm_loss,
                         _main_metric=self.config.early_stop_metric,
                         _attention_entropy_loss=attention_entropy_loss,
-                        _distance_loss = distance_loss,
+                        _distance_loss=distance_loss,
                         w1=self.config.w1, w2=self.config.w2,
                         w3=self.config.w3,
-                        _att_entropy=att_entropy   
+                        _att_entropy=att_entropy
                     )
 
         if arc_loss is None:
@@ -502,8 +503,8 @@ class LMTrainer():
                     num_instances, _lm_loss=lm_loss,
                     _main_metric=self.config.early_stop_metric,
                     _attention_entropy_loss=attention_entropy_loss,
-                    _distance_loss = distance_loss,
-                    w1=self.config.w1, w2=self.config.w2, w3=self.config.w3   
+                    _distance_loss=distance_loss,
+                    w1=self.config.w1, w2=self.config.w2, w3=self.config.w3
                 )
         else:
             assert num_arc_instances is not None
@@ -752,6 +753,7 @@ class LMTrainer():
         else:
             pbar_steps = None
 
+        epoch = 0
         for epoch in tqdm(range(1, max_epochs+1), desc="Epochs"):
             self.init_hooks(train, "train", epoch, token_mapper)
             if break_training:
@@ -1022,9 +1024,12 @@ class LMTrainer():
                 pass
 
             # TODO: support mask
-            g = model.generate(
-                batch["input_ids"][0],
-                max_new_tokens=max_len).tolist()[0]
+            try:
+                g = model.generate(
+                    batch["input_ids"][0],  # type: ignore
+                    max_new_tokens=max_len).tolist()[0]
+            except NameError:
+                raise NameError("dataloader was empty.")
 
         eos_id = token_mapper.token2id[EOS]
         first_eos = next((i for i, x in enumerate(g) if x == eos_id), len(g))

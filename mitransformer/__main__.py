@@ -19,7 +19,7 @@ def parse_args() -> (
         | io.CompareParserArgs):
     parser = io.create_parser()
     args = parser.parse_args()
-    
+
     try:
         mode = args.mode
     except AttributeError:
