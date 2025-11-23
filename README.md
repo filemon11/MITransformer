@@ -101,5 +101,3 @@ left_param: 0 or 1, controls whether non content-words should be taken into acco
 tokeniser: optional, specify path to tokeniser if not using Wikitext corpus.
 
 Results can be found in the RT/results directory
-
-export PYTHONPATH=$(pwd)/pytorch:$PYTHONPATH
