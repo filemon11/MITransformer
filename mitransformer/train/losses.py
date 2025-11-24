@@ -62,7 +62,7 @@ def arc_loss(
         weights[score_gold] = f_true
         weights[~score_gold] = f_false
         loss *= weights
-        
+
     if to_ignore_mask is not None:
         loss = (~to_ignore_mask)*loss
     else:
@@ -80,10 +80,10 @@ def arc_loss(
 
 
 def lm_loss(
-    logits: torch.Tensor, labels: torch.Tensor,
-    ignore_index: int = -100,
-    reduction: Literal["sum", "mean", "none"] = "mean",
-    discriminative: bool = False) -> torch.Tensor:
+        logits: torch.Tensor, labels: torch.Tensor,
+        ignore_index: int = -100,
+        reduction: Literal["sum", "mean", "none"] = "mean",
+        discriminative: bool = False) -> torch.Tensor:
 
     logits = torch.swapaxes(logits, 1, 2)
     if discriminative:
@@ -128,12 +128,11 @@ def attention_entropy_loss(
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
         reduction: Literal["sum", "mean", "none"] = "mean",
         ) -> torch.Tensor:
-    """input shape [H, B, S, S]
-    with 
+    """input shape [H, B, S, S] with
     H: number of heads,
     B: batch size,
     S: sequence length.
-    
+
     output shape
     [B, S] if reduction = 'none'
     else scalar"""
@@ -141,10 +140,10 @@ def attention_entropy_loss(
     probs = arc_logits.softmax(-1)
 
     if to_ignore_mask is not None and to_ignore_mask != "triangular":
-        to_ignore_mask = to_ignore_mask.sum(0).to(torch.bool)
+        to_ignore_mask = to_ignore_mask.sum(0).to(torch.bool)  # type: ignore
 
     probs = get_head_averaged_distribution(probs)
-    
+
     entropy = get_attention_entropy(
         probs, to_ignore_mask, reduction="none")  # [B, S]
 
@@ -158,16 +157,15 @@ def attention_entropy_loss(
 
 
 def distance_loss(
-    arc_logits: torch.Tensor,
-    to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
-    reduction: Literal["sum", "mean", "none"] = "mean",
-    ) -> torch.Tensor:
-    """input shape [H, B, S, S]
-    with 
+        arc_logits: torch.Tensor,
+        to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
+        reduction: Literal["sum", "mean", "none"] = "mean",
+        ) -> torch.Tensor:
+    """input shape [H, B, S, S] with
     H: number of heads,
     B: batch size,
     S: sequence length.
-    
+
     output shape
     [B, S] if reduction = 'none'
     else scalar"""
@@ -178,11 +176,12 @@ def distance_loss(
         if to_ignore_mask == "triangular":
             probs = torch.tril(probs)
         else:
-            to_ignore_mask = to_ignore_mask.sum(0).to(torch.bool)
+            to_ignore_mask = to_ignore_mask.sum(  # type: ignore
+                0).to(torch.bool)
             probs[to_ignore_mask] = 0
 
     probs = get_head_averaged_distribution(probs)
-    
+
     s = probs.shape[-1]
     r = torch.arange(1, s+1, device=probs.device)
 
@@ -202,7 +201,7 @@ def distance_loss(
 
 def get_head_averaged_distribution(
         probs: torch.Tensor
-    ) -> torch.Tensor:
+        ) -> torch.Tensor:
     """input: [H, B, S, S]"""
     probs = probs.mean(0)  # [B, S, S]
     probs = probs.softmax(-1)  # [B, S, S]
@@ -221,9 +220,10 @@ def get_attention_entropy(
     if to_ignore is not None:
         if to_ignore == "triangular":
             entropy = entropy.masked_fill(
-                torch.tril(torch.ones(*entropy.shape, device=probs.device)), torch.nan)
+                torch.tril(torch.ones(
+                    *entropy.shape, device=probs.device)), torch.nan)
         else:
-            entropy[to_ignore] = torch.nan
+            entropy[to_ignore] = torch.nan  # type: ignore
     entropy[entropy.isnan()] = 0
 
     entropy = entropy.sum(-1)
