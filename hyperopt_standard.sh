@@ -10,13 +10,18 @@ export OMP_NUM_THREADS=$THREADS_PER_GPU
 
 if [ $N_GPUS -gt 1 ]
 then
-    DEVICE=cuda
     USE_DDP=1
 else
-    DEVICE=cpu
-    N_GPUS=1
-    # the variable denotes the number of devices
     USE_DDP=0
+fi
+
+if [ $N_GPUS = 0 ]
+then
+    DEVICE=cpu
+    NGPUS=1
+    # used as number of devices
+else
+    DEVICE=cuda
 fi
 
 
