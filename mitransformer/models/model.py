@@ -223,7 +223,10 @@ class MIAttention(nn.Module):
             self,
             x: torch.Tensor,
             masks: dict[str, torch.Tensor | None]
-            ) -> tuple[torch.Tensor, dict[str, list[torch.Tensor]]]:
+            ) -> tuple[
+                torch.Tensor,
+                dict[str, list[torch.Tensor]],
+                None | torch.Tensor]:
         tags_l = list(self.tags)
         # just for compatibility
         # for i in range(len(tags_l)):
@@ -238,22 +241,29 @@ class MIAttention(nn.Module):
         with M number of multiheads,
         B batch size, S sequence length"""
         B, S, E = x.shape
+        M = self.n_multihead
+        H = self.n_head
+        E = self.head_size
         # B = batch size, S = sequence length, E = embedding dimensionality
         # H = head number, M = multihead number
 
         qkv = self.w_qkv(x).chunk(3, dim=-1)
-        mh = self.n_head * self.n_multihead
+
+        q: torch.Tensor
+        k: torch.Tensor
+        v: torch.Tensor
+
         q, k, v = map(
             lambda t: einops.rearrange(
                 t, 'b s (mh e) -> b mh s e',
-                mh=mh), qkv)
+                mh=H*M), qkv)
 
         att: torch.Tensor = torch.matmul(q, k.transpose(-1, -2)) * self.scale
         # (B, MH, S, S)
 
         att = einops.rearrange(
             att, 'b (m h) s1 s2 -> b m h s1 s2',
-            m=self.n_multihead)
+            m=M)
         att *= (1.0 / math.sqrt(k.shape[-1]))
 
         # (B, M, H, S, S)
@@ -303,7 +313,35 @@ class MIAttention(nn.Module):
         out_logits = {
             tag: [att_logits[:, m, h] for h in range(self.n_head)]
             for tag, m in zip(tags, range(self.n_multihead))}
-        return out, out_logits
+
+        # TODO: also output att @ v (with output transform?)
+
+        projected_states: None | torch.Tensor = None
+        if True:
+            # adapted from Goro Kobayashi
+            # (https://github.com/gorokoba560/norm-analysis-of-transformer)
+            v_layer = v.permute(0, 2, 1, 3).contiguous().unsqueeze(3)
+            # b mh s e -> b s mh 1 e
+
+            # dense weight is converted to
+            # (num_heads, head_size, all_head_size)
+            output_weight = self.proj.weight.view(H*M, E, H*M*E)
+            # mhe mhe -> mh e mhe
+
+            # create transformed vectors f(x) from value vectors (value_layer)
+            # and weight matrix (output_weight).
+            # the bias of the output transformation is assumed to be
+            # distributed equally among heads
+            projected_states = v_layer.matmul(output_weight).squeeze(3)
+            # (b s mh 1 e) x (mh e mhe) -> b s mh mhe
+
+            projected_states = projected_states.permute(
+                0, 2, 1, 3).contiguous() + (self.proj.bias / H*M)
+            # (b mh s mhe)
+            projected_states = torch.einsum(
+                "bhks,bhsd->bhksd", att, projected_states)  # (b mh s s mhe)
+
+        return out, out_logits, projected_states
 
 
 class MILayer(nn.Module):
@@ -334,16 +372,19 @@ class MILayer(nn.Module):
             self,
             x: torch.Tensor,
             masks: dict[str, torch.Tensor | None]
-            ) -> tuple[torch.Tensor, dict[str, list[torch.Tensor]]]:
+            ) -> tuple[
+                torch.Tensor,
+                dict[str, list[torch.Tensor]],
+                None | torch.Tensor]:
         """Mask shape: [M, B, S, S]
         with M number of multiheads,
         B batch size, S sequence length"""
 
-        x_attn, out_logits = self.attn(self.ln_1(x), masks)
+        x_attn, out_logits, proj_states = self.attn(self.ln_1(x), masks)
         x = x + x_attn
         x = x + self.ff(self.ln_2(x))
 
-        return x, out_logits
+        return x, out_logits, proj_states
 
 
 TransformerDescription = tuple[LayerDescription, ...]
@@ -435,7 +476,8 @@ class MITransformer(nn.Module):
             self, input_ids: torch.Tensor,
             masks: dict[str, torch.Tensor | None] | None = None,
             **kwargs
-            ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+            ) -> tuple[
+                torch.Tensor, dict[str, torch.Tensor], None | torch.Tensor]:
         """
             Input:
             x : [B, S, E]
@@ -463,12 +505,20 @@ class MITransformer(nn.Module):
             x = x + self.ff(self.ln_2(x))
 
         att_logits = []
+        proj_states_list = []
         for layer in self.layers:
-            x, al = layer(x, masks if self.use_input_mask else None)
+            x, al, proj_states = layer(
+                x, masks if self.use_input_mask else None)
             att_logits.append(al)
+            if proj_states is not None:
+                proj_states_list.append(proj_states)
 
         # TODO: stack the masks in the mask lists
-        return x, combine_scores(att_logits)
+        proj_states_stacked: torch.Tensor | None = None
+        if len(proj_states_list) > 0:
+            proj_states_stacked = torch.stack(proj_states_list)
+
+        return x, combine_scores(att_logits), proj_states_stacked
 
 
 class MITransformerLM(nn.Module):
@@ -499,7 +549,8 @@ class MITransformerLM(nn.Module):
     def forward(
             self, input_ids: torch.Tensor,
             masks: dict[str, torch.Tensor | None] | None = None, **kwargs
-            ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+            ) -> tuple[
+                torch.Tensor, dict[str, torch.Tensor], None | torch.Tensor]:
         """
             Input:
             x : [B, S, E]
@@ -511,7 +562,7 @@ class MITransformerLM(nn.Module):
             Output : Shape[B, S, E]
         """
 
-        x, att_logits = self.mi_transformer(input_ids, masks)
+        x, att_logits, proj_states = self.mi_transformer(input_ids, masks)
 
         x = self.ln(x)
         logits = self.lm_head(x)
@@ -519,7 +570,7 @@ class MITransformerLM(nn.Module):
         # shape (B,T,C)  B : batch, T : sequence length, C : embedding dim
 
         # logits = x @ self.embds
-        return logits, att_logits
+        return logits, att_logits, proj_states
 
     def generate(self, input_ids: torch.Tensor, max_new_tokens: int, **kwargs):
         """ given a context idx, generate max_new_tokens tokens

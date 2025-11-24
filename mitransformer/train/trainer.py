@@ -354,11 +354,20 @@ class LMTrainer():
             arc_distributions, to_ignore_mask, reduction=reduction)
 
     def arc_losses(
-            self, arc_logits: torch.Tensor,
+            self, arc_logits: Mapping[str, torch.Tensor],
+            proj_states: torch.Tensor | None,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
+            mode: Literal["attn", "attn-n"] = "attn",
             reduction: Literal["sum", "mean"] = "mean"
             ) -> tuple[torch.Tensor, torch.Tensor]:
-        arc_distribution = self.arc_distribution(arc_logits)
+        """proj_states cannot be none if mode is `attn_n`.
+        arc_logits have form (M, B, S, S)
+        TODO: restructure so that we have two modes of returning arcs;
+        one mode (item 2 returned) for alpha computation and second mode
+        (item 3 returned with dict of proj_states and att for combined loss mode)"""
+
+        arc_distribution = self.arc_distribution(
+            arc_logits, proj_states, mode)
         return (
             self.attention_entropy_loss(
                 arc_distribution, to_ignore_mask, reduction),
@@ -367,11 +376,21 @@ class LMTrainer():
 
     def arc_distribution(
             self, arc_logits: torch.Tensor,
+            proj_states: bool | torch.Tensor,
+            mode: Literal["attn", "attn-n"]
             ) -> torch.Tensor:
+        """arc_logits:
+        
+        """
         # TODO: implement other options
 
-        probs = arc_logits.softmax(-1)
-        return probs
+        match mode:
+            case "attn":
+                return arc_logits.softmax(-1)
+
+            case "attn-n":
+                assert proj_states is not None
+                return torch.Tensor()
 
     @staticmethod
     def filter_arc_scores(
@@ -556,7 +575,10 @@ class LMTrainer():
         assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
         self.batch_to(batch, device=self.config.device)  # type: ignore
-        logits, arc_logits = self.transformerlm(**batch)
+
+        proj_states: torch.Tensor | None
+        arc_logits: dict[str, torch.Tensor]
+        logits, arc_logits, proj_states = self.transformerlm(**batch)
         self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
         lm_loss = self.loss(
@@ -564,6 +586,8 @@ class LMTrainer():
             ignore_index=ignore_index,
             reduction="sum")
         arc_loss: torch.Tensor | None = None
+        attention_entropy_loss: torch.Tensor | None = None
+        distance_loss: torch.Tensor | None = None
 
         num_arc_instances: int | None = None
         if self.train_config.dependency_mode == "supervised":
@@ -596,7 +620,8 @@ class LMTrainer():
 
         elif self.config.combined_loss:
             attention_entropy_loss, distance_loss = self.arc_losses(
-                arc_logits, to_ignore_mask="triangular", reduction="sum")
+                arc_logits, proj_states, to_ignore_mask="triangular",
+                reduction="sum")
 
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
 
@@ -624,7 +649,8 @@ class LMTrainer():
             ignore_index: int) -> Metric:
         self.batch_to(batch, device=self.config.device)  # type: ignore
 
-        logits, arc_logits = self.transformerlm(**batch)
+        proj_states: None | torch.Tensor
+        logits, arc_logits, proj_states = self.transformerlm(**batch)
         self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
 
@@ -710,7 +736,8 @@ class LMTrainer():
                 # can make separate list of heads
         elif self.config.combined_loss:
             attention_entropy_loss, distance_loss = self.arc_losses(
-                arc_logits, to_ignore_mask="triangular", reduction="sum")
+                arc_logits, proj_states,
+                to_ignore_mask="triangular", reduction="sum")
 
         metric = self.get_metric(
             num_instances,
@@ -982,7 +1009,9 @@ class LMTrainer():
             arc_logits: dict[str, torch.Tensor]
             for batch in tqdm(loader, desc="Batches"):
                 self.batch_to(batch, device=self.config.device)  # type: ignore
-                logits, arc_logits = self.transformerlm(**batch)
+
+                proj_states: torch.Tensor | None
+                logits, arc_logits, proj_states = self.transformerlm(**batch)
                 self.run_hooks(batch, (logits, arc_logits))
                 labels = batch["label_ids"]
 
