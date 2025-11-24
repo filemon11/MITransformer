@@ -127,6 +127,7 @@ def attention_entropy_loss(
         arc_logits: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
         reduction: Literal["sum", "mean", "none"] = "mean",
+        global_distr: bool = True
         ) -> torch.Tensor:
     """input shape [H, B, S, S] with
     H: number of heads,
@@ -142,10 +143,15 @@ def attention_entropy_loss(
     if to_ignore_mask is not None and to_ignore_mask != "triangular":
         to_ignore_mask = to_ignore_mask.sum(0).to(torch.bool)  # type: ignore
 
-    probs = get_head_averaged_distribution(probs)
+    if global_distr:
+        probs = get_head_averaged_distribution(probs)
+        # [H, B, S, S] -> [B, S, S]
 
     entropy = get_attention_entropy(
-        probs, to_ignore_mask, reduction="none")  # [B, S]
+        probs, to_ignore_mask, reduction="none")  # -> [B, S] or [H, B, S]
+
+    if not global_distr:
+        entropy = entropy.mean(0)  # [H, B, S] -> [B, S]
 
     match reduction:
         case "none":
@@ -160,6 +166,7 @@ def distance_loss(
         arc_logits: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
         reduction: Literal["sum", "mean", "none"] = "mean",
+        global_distr: bool = True
         ) -> torch.Tensor:
     """input shape [H, B, S, S] with
     H: number of heads,
@@ -180,15 +187,20 @@ def distance_loss(
                 0).to(torch.bool)
             probs[to_ignore_mask] = 0
 
-    probs = get_head_averaged_distribution(probs)
+    if global_distr:
+        probs = get_head_averaged_distribution(probs)
+        # [H, B, S, S] -> [B, S, S]
 
     s = probs.shape[-1]
     r = torch.arange(1, s+1, device=probs.device)
 
     dist_mat = torch.tril(-1 * (r.repeat(s, 1) - r.reshape(-1, 1)))
-    dist_mat = dist_mat.unsqueeze(-1)  # [B, S, S]
+    dist_mat = dist_mat.unsqueeze(-1)  # -> [B, S, S] or [H, B, S, S]
 
-    cost = (dist_mat*probs).sum(-1)  # [B, S]
+    cost = (dist_mat*probs).sum(-1)  # -> [B, S] or [H, B, S]
+
+    if not global_distr:
+        cost = cost.mean(0)  # [H, B, S] -> [B, S]
 
     match reduction:
         case "sum":
