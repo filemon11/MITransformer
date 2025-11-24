@@ -15,6 +15,13 @@ class SupervisedMetric(base.Metric):
         "alpha": field.MetricField(None, static=True),
     }
 
+    def _compute_loss(self) -> torch.Tensor:
+        lm_loss = getattr(self, "lm_loss")
+        arc_loss = getattr(self, "arc_loss")
+        alpha = getattr(self, "alpha")
+
+        return (alpha*lm_loss + (1-alpha)*arc_loss)
+
 
 class EvalMetric(base.Metric):
     fields = {
