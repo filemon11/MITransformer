@@ -124,7 +124,7 @@ def lm_loss(
 
 
 def attention_entropy_loss(
-        arc_logits: torch.Tensor,
+        arc_distributions: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
         reduction: Literal["sum", "mean", "none"] = "mean",
         global_distr: bool = True
@@ -138,7 +138,7 @@ def attention_entropy_loss(
     [B, S] if reduction = 'none'
     else scalar"""
 
-    probs = arc_logits.softmax(-1)
+    probs = arc_distributions
 
     if to_ignore_mask is not None and to_ignore_mask != "triangular":
         to_ignore_mask = to_ignore_mask.sum(0).to(torch.bool)  # type: ignore
@@ -163,7 +163,7 @@ def attention_entropy_loss(
 
 
 def distance_loss(
-        arc_logits: torch.Tensor,
+        arc_distributions: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
         reduction: Literal["sum", "mean", "none"] = "mean",
         global_distr: bool = True
@@ -177,7 +177,7 @@ def distance_loss(
     [B, S] if reduction = 'none'
     else scalar"""
 
-    probs = arc_logits.softmax(-1)
+    probs = arc_distributions
 
     if to_ignore_mask is not None:
         if to_ignore_mask == "triangular":

@@ -338,20 +338,40 @@ class LMTrainer():
             reduction, self.config.arc_loss_weighted)
 
     def attention_entropy_loss(
-            self, arc_logits: torch.Tensor,
+            self, arc_distributions: torch.Tensor,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             reduction: Literal["sum", "mean"] = "mean"
             ) -> torch.Tensor:
         return losses.attention_entropy_loss(
-            arc_logits, to_ignore_mask, reduction=reduction)
+            arc_distributions, to_ignore_mask, reduction=reduction)
 
     def distance_loss(
-            self, arc_logits: torch.Tensor,
+            self, arc_distributions: torch.Tensor,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             reduction: Literal["sum", "mean"] = "mean"
             ) -> torch.Tensor:
         return losses.distance_loss(
-            arc_logits, to_ignore_mask, reduction=reduction)
+            arc_distributions, to_ignore_mask, reduction=reduction)
+
+    def arc_losses(
+            self, arc_logits: torch.Tensor,
+            to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
+            reduction: Literal["sum", "mean"] = "mean"
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+        arc_distribution = self.arc_distribution(arc_logits)
+        return (
+            self.attention_entropy_loss(
+                arc_distribution, to_ignore_mask, reduction),
+            self.distance_loss(
+                arc_distribution, to_ignore_mask, reduction))
+
+    def arc_distribution(
+            self, arc_logits: torch.Tensor,
+            ) -> torch.Tensor:
+        # TODO: implement other options
+
+        probs = arc_logits.softmax(-1)
+        return probs
 
     @staticmethod
     def filter_arc_scores(
@@ -544,8 +564,6 @@ class LMTrainer():
             ignore_index=ignore_index,
             reduction="sum")
         arc_loss: torch.Tensor | None = None
-        attention_entropy_loss: torch.Tensor | None = None
-        distance_loss: torch.Tensor | None = None
 
         num_arc_instances: int | None = None
         if self.train_config.dependency_mode == "supervised":
@@ -577,9 +595,7 @@ class LMTrainer():
                     "Scores did not align. Check keys.")
 
         elif self.config.combined_loss:
-            attention_entropy_loss = self.attention_entropy_loss(
-                arc_logits, to_ignore_mask="triangular", reduction="sum")
-            distance_loss = self.distance_loss(
+            attention_entropy_loss, distance_loss = self.arc_losses(
                 arc_logits, to_ignore_mask="triangular", reduction="sum")
 
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
@@ -693,9 +709,7 @@ class LMTrainer():
                     for key, logits_preds in score_logits.items()})
                 # can make separate list of heads
         elif self.config.combined_loss:
-            attention_entropy_loss = self.attention_entropy_loss(
-                arc_logits, to_ignore_mask="triangular", reduction="sum")
-            distance_loss = self.distance_loss(
+            attention_entropy_loss, distance_loss = self.arc_losses(
                 arc_logits, to_ignore_mask="triangular", reduction="sum")
 
         metric = self.get_metric(
