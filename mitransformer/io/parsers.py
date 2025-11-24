@@ -403,15 +403,15 @@ def create_parser() -> argparse.ArgumentParser:
         help=(
             "loss weight for supervised learning; 1.0 is only"
             "language model training while 0.0 is only arc training"))
-    trainer_group.add_argument(
+    hyperopt_flexible_trainer_group.add_argument(
         '--w1', type=io.HyperoptSpace(io.OptNone(float)), default=None,
         help=(
             "Factor for language modelling loss in combined cost"))
-    trainer_group.add_argument(
+    hyperopt_flexible_trainer_group.add_argument(
         '--w2', type=io.HyperoptSpace(io.OptNone(float)), default=None,
         help=(
             "Factor for attention entropy loss in combined cost"))
-    trainer_group.add_argument(
+    hyperopt_flexible_trainer_group.add_argument(
         '--w3', type=io.HyperoptSpace(io.OptNone(float)), default=None,
         help=(
             "Factor for distance loss in combined cost"))

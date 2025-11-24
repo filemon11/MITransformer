@@ -3,6 +3,7 @@ import torch.nn.functional as F
 
 from typing import Literal
 
+
 def arc_loss(
         score_preds: torch.Tensor,
         score_gold: torch.BoolTensor,
@@ -76,6 +77,7 @@ def arc_loss(
         # Each position can be attended to S+1 times
 
     return loss, int(num_scores)
+
 
 def lm_loss(
     logits: torch.Tensor, labels: torch.Tensor,

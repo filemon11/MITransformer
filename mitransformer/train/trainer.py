@@ -8,7 +8,7 @@ from .metrics import (
     sum_metrics, SupervisedEvalMetric,
     SupervisedMetric, Metric, EvalMetric,
     CostsMetric, CostsEvalMetric,
-    MetricWriter, M, N)
+    MetricWriter)
 
 from ..data import (
     DataLoader, get_loader,
@@ -40,11 +40,16 @@ from ..utils import pickle
 
 from typing import (Self, Literal, cast,
                     Container, Iterable, Mapping,
-                    Any, Generator, TypedDict, NotRequired)
+                    Any, Generator, TypedDict, NotRequired,
+                    TypeVar)
 
 from ..utils.logmaker import getLogger, info, get_timestr, warning
 
 logger = getLogger(__name__)
+
+
+M = TypeVar("M", bound=Metric)
+N = TypeVar("N")
 
 
 class Result(TypedDict):
@@ -452,22 +457,23 @@ class LMTrainer():
                 assert uas is not None
                 assert num_arc_instances is not None
                 return SupervisedEvalMetric(
-                    num_instances,
+                    num=num_instances,
                     arc_num=num_arc_instances,
-                    _lm_loss=lm_loss,
-                    _perplexity=perplexity,
-                    _arc_loss=arc_loss,
+                    lm_loss=lm_loss,
+                    perplexity=perplexity,
+                    arc_loss=arc_loss,
                     alpha=self.config.loss_alpha,
-                    _uas=uas,
-                    _att_entropy=att_entropy,
-                    _main_metric=self.config.early_stop_metric
+                    uas=uas,
+                    att_entropy=att_entropy,
+                    main_metric=self.config.early_stop_metric
                     )
             else:
                 if self.config.combined_loss is False:
                     return EvalMetric(
-                        num_instances, _lm_loss=lm_loss,
-                        _perplexity=perplexity,
-                        _main_metric=self.config.early_stop_metric)
+                        num=num_instances,
+                        lm_loss=lm_loss,
+                        perplexity=perplexity,
+                        main_metric=self.config.early_stop_metric)
                 else:
                     assert (
                         attention_entropy_loss is not None
@@ -477,20 +483,23 @@ class LMTrainer():
                         and self.config.w3 is not None
                     )
                     return CostsEvalMetric(
-                        num_instances, _lm_loss=lm_loss,
-                        _main_metric=self.config.early_stop_metric,
-                        _attention_entropy_loss=attention_entropy_loss,
-                        _distance_loss=distance_loss,
-                        w1=self.config.w1, w2=self.config.w2,
+                        num=num_instances,
+                        lm_loss=lm_loss,
+                        main_metric=self.config.early_stop_metric,
+                        attention_entropy_loss=attention_entropy_loss,
+                        distance_loss=distance_loss,
+                        w1=self.config.w1,
+                        w2=self.config.w2,
                         w3=self.config.w3,
-                        _att_entropy=att_entropy
+                        att_entropy=att_entropy
                     )
 
         if arc_loss is None:
             if self.config.combined_loss is False:
                 return Metric(
-                    num_instances, _lm_loss=lm_loss,
-                    _main_metric=self.config.early_stop_metric)
+                    num=num_instances,
+                    lm_loss=lm_loss,
+                    main_metric=self.config.early_stop_metric)
             else:
                 assert (
                     attention_entropy_loss is not None
@@ -500,19 +509,24 @@ class LMTrainer():
                     and self.config.w3 is not None
                 )
                 return CostsMetric(
-                    num_instances, _lm_loss=lm_loss,
-                    _main_metric=self.config.early_stop_metric,
-                    _attention_entropy_loss=attention_entropy_loss,
-                    _distance_loss=distance_loss,
-                    w1=self.config.w1, w2=self.config.w2, w3=self.config.w3
+                    num=num_instances,
+                    lm_loss=lm_loss,
+                    main_metric=self.config.early_stop_metric,
+                    attention_entropy_loss=attention_entropy_loss,
+                    distance_loss=distance_loss,
+                    w1=self.config.w1,
+                    w2=self.config.w2,
+                    w3=self.config.w3
                 )
         else:
             assert num_arc_instances is not None
             return SupervisedMetric(
-                num_instances, arc_num=num_arc_instances,
-                _lm_loss=lm_loss, _arc_loss=arc_loss,
+                num=num_instances,
+                arc_num=num_arc_instances,
+                lm_loss=lm_loss,
+                arc_loss=arc_loss,
                 alpha=self.config.loss_alpha,
-                _main_metric=self.config.early_stop_metric)
+                main_metric=self.config.early_stop_metric)
 
     def train_step(
             self,
