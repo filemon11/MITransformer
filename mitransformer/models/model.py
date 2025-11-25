@@ -17,7 +17,15 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 
-from typing import (Sequence, Mapping, Literal)
+from typing import (Sequence, Mapping, Literal, TypedDict, NotRequired)
+
+
+AdditionalKeys = Literal["proj_states", "att"]
+
+
+class AdditionalResults(TypedDict):
+    proj_states: NotRequired[torch.Tensor]
+    att: torch.Tensor
 
 
 def combine_scores(
@@ -226,7 +234,7 @@ class MIAttention(nn.Module):
             ) -> tuple[
                 torch.Tensor,
                 dict[str, list[torch.Tensor]],
-                None | torch.Tensor]:
+                AdditionalResults]:
         tags_l = list(self.tags)
         # just for compatibility
         # for i in range(len(tags_l)):
@@ -316,7 +324,9 @@ class MIAttention(nn.Module):
 
         # TODO: also output att @ v (with output transform?)
 
-        projected_states: None | torch.Tensor = None
+        additional_output: AdditionalResults = {
+            "att": att
+        }
         if True:
             # adapted from Goro Kobayashi
             # (https://github.com/gorokoba560/norm-analysis-of-transformer)
@@ -336,12 +346,16 @@ class MIAttention(nn.Module):
             # (b s mh 1 e) x (mh e mhe) -> b s mh mhe
 
             projected_states = projected_states.permute(
-                0, 2, 1, 3).contiguous() + (self.proj.bias / H*M)
+                0, 2, 1, 3).contiguous()
+            if self.proj.bias is not None:
+                projected_states += (self.proj.bias / H*M)
             # (b mh s mhe)
             projected_states = torch.einsum(
                 "bhks,bhsd->bhksd", att, projected_states)  # (b mh s s mhe)
 
-        return out, out_logits, projected_states
+            additional_output["proj_states"] = projected_states
+
+        return out, out_logits, additional_output
 
 
 class MILayer(nn.Module):
@@ -375,16 +389,16 @@ class MILayer(nn.Module):
             ) -> tuple[
                 torch.Tensor,
                 dict[str, list[torch.Tensor]],
-                None | torch.Tensor]:
+                AdditionalResults]:
         """Mask shape: [M, B, S, S]
         with M number of multiheads,
         B batch size, S sequence length"""
 
-        x_attn, out_logits, proj_states = self.attn(self.ln_1(x), masks)
+        x_attn, out_logits, additional = self.attn(self.ln_1(x), masks)
         x = x + x_attn
         x = x + self.ff(self.ln_2(x))
 
-        return x, out_logits, proj_states
+        return x, out_logits, additional
 
 
 TransformerDescription = tuple[LayerDescription, ...]
@@ -477,7 +491,8 @@ class MITransformer(nn.Module):
             masks: dict[str, torch.Tensor | None] | None = None,
             **kwargs
             ) -> tuple[
-                torch.Tensor, dict[str, torch.Tensor], None | torch.Tensor]:
+                torch.Tensor, dict[str, torch.Tensor],
+                AdditionalResults]:
         """
             Input:
             x : [B, S, E]
@@ -505,20 +520,27 @@ class MITransformer(nn.Module):
             x = x + self.ff(self.ln_2(x))
 
         att_logits = []
-        proj_states_list = []
+        additional_list: list[AdditionalResults] = []
         for layer in self.layers:
-            x, al, proj_states = layer(
+            x, al, additional = layer(
                 x, masks if self.use_input_mask else None)
             att_logits.append(al)
-            if proj_states is not None:
-                proj_states_list.append(proj_states)
+            additional_list.append(additional)
 
-        # TODO: stack the masks in the mask lists
-        proj_states_stacked: torch.Tensor | None = None
-        if len(proj_states_list) > 0:
-            proj_states_stacked = torch.stack(proj_states_list)
+        additional_stacked: AdditionalResults = {
+            "att": torch.stack(
+                    [additional["att"] for additional in additional_list])}
 
-        return x, combine_scores(att_logits), proj_states_stacked
+        if len(additional_list) > 0:
+            key: AdditionalKeys
+            for key in additional_list[0].keys():  # type: ignore
+                if key != "att":
+                    stacked = torch.stack(
+                        [additional[key]      # type: ignore
+                            for additional in additional_list])
+                    additional_stacked[key] = stacked
+
+        return x, combine_scores(att_logits), additional_stacked
 
 
 class MITransformerLM(nn.Module):
@@ -550,7 +572,8 @@ class MITransformerLM(nn.Module):
             self, input_ids: torch.Tensor,
             masks: dict[str, torch.Tensor | None] | None = None, **kwargs
             ) -> tuple[
-                torch.Tensor, dict[str, torch.Tensor], None | torch.Tensor]:
+                torch.Tensor, dict[str, torch.Tensor],
+                AdditionalResults]:
         """
             Input:
             x : [B, S, E]
@@ -562,7 +585,7 @@ class MITransformerLM(nn.Module):
             Output : Shape[B, S, E]
         """
 
-        x, att_logits, proj_states = self.mi_transformer(input_ids, masks)
+        x, att_logits, additional = self.mi_transformer(input_ids, masks)
 
         x = self.ln(x)
         logits = self.lm_head(x)
@@ -570,7 +593,7 @@ class MITransformerLM(nn.Module):
         # shape (B,T,C)  B : batch, T : sequence length, C : embedding dim
 
         # logits = x @ self.embds
-        return logits, att_logits, proj_states
+        return logits, att_logits, additional
 
     def generate(self, input_ids: torch.Tensor, max_new_tokens: int, **kwargs):
         """ given a context idx, generate max_new_tokens tokens

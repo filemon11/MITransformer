@@ -204,7 +204,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
 
         if isinstance(trainer, str):
             assert trainer[:4] == "hug:" and token_mapper_dir[:4] == "hug:"
-            
+
             tokeniser = AutoTokenizer.from_pretrained(token_mapper_dir[4:])
             model = AutoModelForCausalLM.from_pretrained(trainer[4:])
             tokeniser.pad_token_id = tokeniser.eos_token_id

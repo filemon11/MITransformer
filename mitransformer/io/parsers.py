@@ -705,5 +705,5 @@ def create_parser() -> argparse.ArgumentParser:
     data_group.add_argument(
         '--dataset_name', type=str, help='name of the dataset to load',
         default='Wikitext_processed')
-    
+
     return parser

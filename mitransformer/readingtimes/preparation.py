@@ -104,7 +104,7 @@ def process(
     orig_frame = UnsplitFrame(
         pd.read_csv(
             output_file, keep_default_na=False, na_values=['']),
-            {"word_col": token_col}, tokenised=False)
+        {"word_col": token_col}, tokenised=False)
     # print(orig_frame.df["word"].to_list()); raise Exception
 
     for metric in baseline_metrics:
