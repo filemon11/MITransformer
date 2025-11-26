@@ -508,9 +508,11 @@ class LMTrainer():
                         main_metric=self.config.early_stop_metric,
                         attention_entropy_loss=attention_entropy_loss,
                         distance_loss=distance_loss,
-                        w1=self.config.w1,
-                        w2=self.config.w2,
-                        w3=self.config.w3,
+                        weights=(
+                            self.config.w1,
+                            self.config.w2,
+                            self.config.w3,
+                        ),
                         att_entropy=att_entropy
                     )
 
@@ -534,9 +536,11 @@ class LMTrainer():
                     main_metric=self.config.early_stop_metric,
                     attention_entropy_loss=attention_entropy_loss,
                     distance_loss=distance_loss,
-                    w1=self.config.w1,
-                    w2=self.config.w2,
-                    w3=self.config.w3
+                    weights=(
+                        self.config.w1,
+                        self.config.w2,
+                        self.config.w3,
+                    ),
                 )
         else:
             assert num_arc_instances is not None

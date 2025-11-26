@@ -3,7 +3,7 @@ import math
 
 from dataclasses import dataclass
 
-from typing import Optional, Any, Callable
+from typing import Optional, Any, Callable, Literal
 
 # ------------------------- MetricField -------------------------------------
 
@@ -39,6 +39,20 @@ class MetricField:
     minimise: Optional[bool] = None
 
 
+@dataclass(frozen=True)
+class WeightField(MetricField):
+    """Descriptor for a loss weights.
+    """
+    default: None = None
+    reduce_by: None = None
+    converter: None = None
+    static: Literal[True] = True
+    include_in_loss: Literal[False] = False
+
+    # True → minimize; False → maximize; None → not a main metric
+    minimise: None = None
+
+
 # ------------------------- Important Fields ----------------------------------
 
 def main_metric(name: str) -> MetricField:
@@ -49,6 +63,10 @@ def loss(reduce_by: str = "num") -> MetricField:
     return MetricField(
         torch.tensor(0,), reduce_by=reduce_by,
         include_in_loss=True, minimise=True)
+
+
+def weights(num: int) -> MetricField:
+    return MetricField((1.0,)*num, static=True)
 
 
 num = MetricField(0)

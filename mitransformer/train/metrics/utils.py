@@ -96,3 +96,12 @@ minimise = {"lm_loss": True,
             "distance_loss": True,
             "attention_entropy_loss": True
             }
+
+
+def to_t(x: Any) -> torch.Tensor:
+    if isinstance(x, torch.Tensor):
+        return x
+    try:
+        return torch.tensor(float(x))
+    except Exception:
+        return torch.tensor(0.)

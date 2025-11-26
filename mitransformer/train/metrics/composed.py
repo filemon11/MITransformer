@@ -2,8 +2,6 @@ from . import base, field
 
 import torch
 
-from typing import Any
-
 # ---------------------- concrete metric classes ---------------------------
 
 
@@ -39,38 +37,15 @@ class SupervisedEvalMetric(SupervisedMetric, EvalMetric):
     }
 
 
-class CostsMetric(base.Metric):
+class CostsMetric(base.WeightedMetric):
     fields = {
-        **base.Metric.fields,
+        **base.WeightedMetric.fields,
         "attention_entropy_loss": field.attention_entropy_loss,
-        "distance_loss": field.distance_loss,
-        "w1": field.weight,
-        "w2": field.weight,
-        "w3": field.weight,
+        "distance_loss": field.distance_loss
     }
-
-    def _compute_loss(self) -> torch.Tensor:
-        # custom composition: w1*lm + w2*att + w3*distance
-
-        lm = getattr(self, "_lm_loss")
-        att = getattr(self, "_attention_entropy_loss")
-        dist = getattr(self, "_distance_loss")
-        w1 = getattr(self, "w1")
-        w2 = getattr(self, "w2")
-        w3 = getattr(self, "w3")
-        # coerce to tensors
-
-        def _to_t(x: Any) -> torch.Tensor:
-            if isinstance(x, torch.Tensor):
-                return x
-            try:
-                return torch.tensor(float(x))
-            except Exception:
-                return torch.tensor(0.)
-        return (w1 * _to_t(lm) + w2 * _to_t(att) + w3 * _to_t(dist))
 
 
 class CostsEvalMetric(CostsMetric, EvalMetric):
     fields: dict[str, field.MetricField] = {
         **CostsMetric.fields, **EvalMetric.fields,
-        "att_entropy": field.att_entropy}
+    }

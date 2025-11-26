@@ -2,14 +2,14 @@ from __future__ import annotations
 
 
 from typing import Any, Type, TypeVar, Self
-
+from collections.abc import Sequence
 
 import torch
 import math
 import numpy as np
 
 
-from . import field
+from . import field, utils
 from ...utils import params
 
 # ----------------------------- Metric --------------------------------------
@@ -37,8 +37,17 @@ class Metric(params.Params):
 
     def __init__(self, **kwargs: Any) -> None:
         # initialize all fields from fields, allowing overrides via kwargs
+        num_losses = len([mf.include_in_loss for mf in self.fields.values()])
         for name, mf in self.fields.items():
-            value = kwargs.get(name, mf.default)
+            if isinstance(mf, field.WeightField):
+                value = kwargs.get(name)
+                assert isinstance(value, Sequence), (
+                    "The weights must be provided in a sized object")
+                assert len(value) == num_losses, (
+                    f"Length of {name} weight field is not equal"
+                    f" to the number of losses of metric {self.__class__}")
+            else:
+                value = kwargs.get(name, mf.default)
             # copy tensors to avoid accidental sharing
             if isinstance(value, torch.Tensor):
                 value = value.clone()
@@ -229,19 +238,26 @@ class Metric(params.Params):
 
     # ---------------------- presentation / serialization -----------------
 
-    def _compute_loss(self) -> torch.Tensor:
-        parts: list[torch.Tensor] = []
+    @property
+    def loss_fields(self) -> tuple[str, ...]:
+        loss_field_list: list[str] = []
         for name, mf in self.fields.items():
             if mf.include_in_loss:
-                val = getattr(self, name)
-                if isinstance(val, torch.Tensor):
-                    parts.append(val)
-                else:
-                    # try convertable
-                    try:
-                        parts.append(torch.tensor(float(val)))
-                    except Exception:
-                        pass
+                loss_field_list.append(name)
+        return tuple(loss_field_list)
+
+    def _compute_loss(self) -> torch.Tensor:
+        parts: list[torch.Tensor] = []
+        for name in self.loss_fields:
+            val = getattr(self, name)
+            if isinstance(val, torch.Tensor):
+                parts.append(val)
+            else:
+                # try convertable
+                try:
+                    parts.append(torch.tensor(float(val)))
+                except Exception:
+                    pass
         if not parts:
             return torch.tensor(0.)
         return sum(parts)   # type: ignore
@@ -369,3 +385,22 @@ class Metric(params.Params):
             returns positive infinity.
         '''
         return -self.minval()
+
+
+class WeightedMetric(Metric):
+    fields = {
+        **Metric.fields,
+        "weights": field.WeightField()
+    }
+
+    def _compute_loss(self) -> torch.Tensor:
+        # custom composition
+
+        weights: Sequence[float] = getattr(self, "weights")
+        components: list[torch.Tensor] = [
+            weights[i]*utils.to_t(getattr(self, name))
+            for i, name in enumerate(self.loss_fields)]
+        summed: torch.Tensor = sum(
+            components, torch.zeros_like(components[0]))
+
+        return summed
