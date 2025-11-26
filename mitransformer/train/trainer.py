@@ -52,6 +52,11 @@ M = TypeVar("M", bound=Metric)
 N = TypeVar("N")
 
 
+class AdditionalPrediction(TypedDict):
+    proj_states: NotRequired[list[torch.Tensor]]
+    att: list[torch.Tensor]
+
+
 class Result(TypedDict):
     train: Metric
     eval: Metric
@@ -354,11 +359,20 @@ class LMTrainer():
             arc_distributions, to_ignore_mask, reduction=reduction)
 
     def arc_losses(
-            self, arc_logits: torch.Tensor,
+            self, additional: models.AdditionalResults,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
+            mode: Literal["attn", "attn-n"] = "attn",
             reduction: Literal["sum", "mean"] = "mean"
             ) -> tuple[torch.Tensor, torch.Tensor]:
-        arc_distribution = self.arc_distribution(arc_logits)
+        """proj_states cannot be none if mode is `attn_n`.
+        arc_logits have form (M, B, S, S)
+        TODO: restructure so that we have two modes of returning arcs;
+        one mode (item 2 returned) for alpha computation and second mode
+        (item 3 returned with dict of proj_states and att
+        for combined loss mode)"""
+
+        arc_distribution = self.arc_distribution(
+            arc_logits, proj_states, mode)
         return (
             self.attention_entropy_loss(
                 arc_distribution, to_ignore_mask, reduction),
@@ -367,11 +381,21 @@ class LMTrainer():
 
     def arc_distribution(
             self, arc_logits: torch.Tensor,
+            proj_states: bool | torch.Tensor,
+            mode: Literal["attn", "attn-n"]
             ) -> torch.Tensor:
+        """arc_logits:
+        
+        """
         # TODO: implement other options
 
-        probs = arc_logits.softmax(-1)
-        return probs
+        match mode:
+            case "attn":
+                return arc_logits.softmax(-1)
+
+            case "attn-n":
+                assert proj_states is not None
+                return torch.Tensor()
 
     @staticmethod
     def filter_arc_scores(
@@ -560,7 +584,10 @@ class LMTrainer():
         assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
         self.batch_to(batch, device=self.config.device)  # type: ignore
-        logits, arc_logits = self.transformerlm(**batch)
+
+        additional: models.AdditionalResults
+        arc_logits: dict[str, torch.Tensor]
+        logits, arc_logits, additional = self.transformerlm(**batch)
         self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
         lm_loss = self.loss(
@@ -568,6 +595,8 @@ class LMTrainer():
             ignore_index=ignore_index,
             reduction="sum")
         arc_loss: torch.Tensor | None = None
+        attention_entropy_loss: torch.Tensor | None = None
+        distance_loss: torch.Tensor | None = None
 
         num_arc_instances: int | None = None
         if self.train_config.dependency_mode == "supervised":
@@ -600,7 +629,8 @@ class LMTrainer():
 
         elif self.config.combined_loss:
             attention_entropy_loss, distance_loss = self.arc_losses(
-                arc_logits, to_ignore_mask="triangular", reduction="sum")
+                additional, to_ignore_mask="triangular",
+                reduction="sum")
 
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
 
@@ -628,7 +658,8 @@ class LMTrainer():
             ignore_index: int) -> Metric:
         self.batch_to(batch, device=self.config.device)  # type: ignore
 
-        logits, arc_logits = self.transformerlm(**batch)
+        additional: models.AdditionalResults
+        logits, arc_logits, additional = self.transformerlm(**batch)
         self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
 
@@ -714,7 +745,8 @@ class LMTrainer():
                 # can make separate list of heads
         elif self.config.combined_loss:
             attention_entropy_loss, distance_loss = self.arc_losses(
-                arc_logits, to_ignore_mask="triangular", reduction="sum")
+                additional,
+                to_ignore_mask="triangular", reduction="sum")
 
         metric = self.get_metric(
             num_instances,
@@ -960,7 +992,9 @@ class LMTrainer():
             only_true: bool = False,
             dataset_name: str | None = None,
             token_mapper: data.TokenMapper | None = None
-            ) -> tuple[list[torch.Tensor], dict[str, list[torch.Tensor]]]:
+            ) -> tuple[
+                list[torch.Tensor], dict[str, list[torch.Tensor]],
+                AdditionalPrediction]:
         """Returns logits and arc scores"""
         # TODO: Does this work with ddp? Batches are distributed but not
         # joined back together.
@@ -978,15 +1012,20 @@ class LMTrainer():
         unpadded_logits: list[torch.Tensor] = []
         unpadded_arc_logits: defaultdict[str, list[torch.Tensor]]
         unpadded_arc_logits = defaultdict(list)
+        unpadded_additional: defaultdict[str, list[torch.Tensor]]
+        unpadded_additional = defaultdict(list)
+
         self.transformerlm.eval()
         with torch.no_grad():
             # eval loop: no backprop on this data, to avoid storing
             # all intermediate variable
             logits: torch.Tensor
             arc_logits: dict[str, torch.Tensor]
+            additional: models.AdditionalResults
             for batch in tqdm(loader, desc="Batches"):
                 self.batch_to(batch, device=self.config.device)  # type: ignore
-                logits, arc_logits = self.transformerlm(**batch)
+
+                logits, arc_logits, additional = self.transformerlm(**batch)
                 self.run_hooks(batch, (logits, arc_logits))
                 labels = batch["label_ids"]
 
@@ -1006,7 +1045,17 @@ class LMTrainer():
                         unpad_masks(
                             arc_logits[key].swapaxes(0, 1),
                             labels, ignore_index))
-        return unpadded_logits, dict(unpadded_arc_logits)
+
+                additional_key: models.AdditionalKeys
+                for additional_key in ("proj_states", "att"):
+                    if key in additional:
+                        unpadded_additional[additional_key].extend(
+                            unpad_masks(
+                                additional[additional_key].swapaxes(0, 1),
+                                labels, ignore_index))
+        return (
+            unpadded_logits, dict(unpadded_arc_logits),
+            cast(AdditionalPrediction, unpadded_additional))
 
     def generate(
             self, token_mapper: data.TokenMapper,

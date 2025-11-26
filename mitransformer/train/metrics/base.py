@@ -277,7 +277,6 @@ class Metric(params.Params):
     def _main_direction(self) -> bool:
         name = self.main_metric
         if name in self.fields:
-            print(name)
             assert self.fields[name].minimise is not None
             return self.fields[name].minimise  # type: ignore
         elif name == "loss":
