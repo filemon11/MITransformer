@@ -85,6 +85,7 @@ class GeneralConfig(utils.Params):
     discriminative: bool = False
     masks_setting: data.MasksSetting = "current"
     combined_loss: bool = False
+    distr_mode: Literal["att", "att-n"] = "att"
     w1: float | None = None
     w2: float | None = None
     w3: float | None = None
@@ -361,16 +362,15 @@ class LMTrainer():
     def arc_losses(
             self, additional: models.AdditionalResults,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
-            mode: Literal["attn", "attn-n"] = "attn",
+            mode: Literal["att", "att-n"] = "att",
             reduction: Literal["sum", "mean"] = "mean"
             ) -> tuple[torch.Tensor, torch.Tensor]:
-        """proj_states cannot be none if mode is `attn_n`.
+        """proj_states cannot be none if mode is `att_n`.
         arc_logits have form (M, B, S, S)
         TODO: restructure so that we have two modes of returning arcs;
         one mode (item 2 returned) for alpha computation and second mode
         (item 3 returned with dict of proj_states and att
         for combined loss mode)"""
-
         arc_distribution = attdistr.arc_distribution(
             additional, mode)
         del additional
@@ -614,7 +614,7 @@ class LMTrainer():
         elif self.config.combined_loss:
             attention_entropy_loss, distance_loss = self.arc_losses(
                 additional, to_ignore_mask="triangular",
-                reduction="sum")
+                reduction="sum", mode=self.config.distr_mode)
 
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
 
@@ -730,7 +730,8 @@ class LMTrainer():
         elif self.config.combined_loss:
             attention_entropy_loss, distance_loss = self.arc_losses(
                 additional,
-                to_ignore_mask="triangular", reduction="sum")
+                to_ignore_mask="triangular", reduction="sum",
+                mode=self.config.distr_mode)
 
         metric = self.get_metric(
             num_instances,

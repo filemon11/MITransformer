@@ -5,14 +5,14 @@ import torch
 from typing import Literal
 
 
-def normalize_by_norms(tensor):
+def normalize_by_norms(tensor: torch.Tensor) -> torch.Tensor:
     norms = torch.norm(tensor, dim=-1)
     return norms/norms.sum(dim=-1, keepdims=True)
 
 
 def arc_distribution(
         additional: models.AdditionalResults,
-        mode: Literal["attn", "attn-n"]
+        mode: Literal["att", "att-n"]
         ) -> torch.Tensor:
     """additional can contain:
     att (required): (l b mh s s mhe)
@@ -31,12 +31,15 @@ def arc_distribution(
         return stack
 
     match mode:
-        case "attn":
+        case "att":
             att = merge_layer_heads(additional["att"])
             return att
 
-        case "attn-n":
+        case "att-n":
             assert "proj_states" in additional.keys()
             proj_states = merge_layer_heads(additional["proj_states"])
+            att = normalize_by_norms(proj_states)
+            return att
 
-            return proj_states
+        case _:
+            raise Exception
