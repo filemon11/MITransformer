@@ -1,5 +1,5 @@
 from .. import models, data, utils
-from . import hooks, losses
+from . import hooks, losses, attdistr
 from ..data.dataloader import (
     IDBatch, D)
 from ..data.dataset import (
@@ -371,31 +371,15 @@ class LMTrainer():
         (item 3 returned with dict of proj_states and att
         for combined loss mode)"""
 
-        arc_distribution = self.arc_distribution(
-            arc_logits, proj_states, mode)
+        arc_distribution = attdistr.arc_distribution(
+            additional, mode)
+        del additional
+
         return (
             self.attention_entropy_loss(
                 arc_distribution, to_ignore_mask, reduction),
             self.distance_loss(
                 arc_distribution, to_ignore_mask, reduction))
-
-    def arc_distribution(
-            self, arc_logits: torch.Tensor,
-            proj_states: bool | torch.Tensor,
-            mode: Literal["attn", "attn-n"]
-            ) -> torch.Tensor:
-        """arc_logits:
-        
-        """
-        # TODO: implement other options
-
-        match mode:
-            case "attn":
-                return arc_logits.softmax(-1)
-
-            case "attn-n":
-                assert proj_states is not None
-                return torch.Tensor()
 
     @staticmethod
     def filter_arc_scores(
@@ -800,7 +784,7 @@ class LMTrainer():
 
         self.transformerlm.train()
 
-        best: float | Metric | None = None
+        best: float | LMMetric | None = None
         evals_without_improvement: int = 0
         total_steps: int = 0
         break_training: bool = False
