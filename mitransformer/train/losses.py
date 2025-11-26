@@ -129,7 +129,7 @@ def attention_entropy_loss(
         reduction: Literal["sum", "mean", "none"] = "mean",
         global_distr: bool = True
         ) -> torch.Tensor:
-    """input shape [H, B, S, S] with
+    """input shape [B, H, S, S] with
     H: number of heads,
     B: batch size,
     S: sequence length.
@@ -145,7 +145,7 @@ def attention_entropy_loss(
 
     if global_distr:
         probs = get_head_averaged_distribution(probs)
-        # [H, B, S, S] -> [B, S, S]
+        # [B, H, S, S] -> [B, S, S]
 
     entropy = get_attention_entropy(
         probs, to_ignore_mask, reduction="none")  # -> [B, S] or [H, B, S]
@@ -168,7 +168,7 @@ def distance_loss(
         reduction: Literal["sum", "mean", "none"] = "mean",
         global_distr: bool = True
         ) -> torch.Tensor:
-    """input shape [H, B, S, S] with
+    """input shape [B, H, S, S] with
     H: number of heads,
     B: batch size,
     S: sequence length.
@@ -189,7 +189,7 @@ def distance_loss(
 
     if global_distr:
         probs = get_head_averaged_distribution(probs)
-        # [H, B, S, S] -> [B, S, S]
+        # [B, H, S, S] -> [B, S, S]
 
     s = probs.shape[-1]
     r = torch.arange(1, s+1, device=probs.device)
@@ -197,7 +197,8 @@ def distance_loss(
     dist_mat = torch.tril(-1 * (r.repeat(s, 1) - r.reshape(-1, 1)))
     dist_mat = dist_mat.unsqueeze(0)  # -> [B, S, S] or [H, B, S, S]
 
-    cost = (dist_mat*probs).sum(-1)  # -> [B, S] or [H, B, S]
+    distances = dist_mat*probs
+    cost = (distances).sum(-1)  # -> [B, S] or [H, B, S]
 
     if not global_distr:
         cost = cost.mean(0)  # [H, B, S] -> [B, S]
@@ -214,9 +215,8 @@ def distance_loss(
 def get_head_averaged_distribution(
         probs: torch.Tensor
         ) -> torch.Tensor:
-    """input: [H, B, S, S]"""
-    probs = probs.mean(0)  # [B, S, S]
-    probs = probs.softmax(-1)  # [B, S, S]
+    """input: [B, H, S, S]"""
+    probs = probs.mean(1)  # [B, S, S]
     return probs
 
 
@@ -235,8 +235,7 @@ def get_attention_entropy(
                 torch.tril(
                     torch.ones(
                         *entropy.shape,
-                        device=probs.device),
-                    diagonal=-1) == 0, torch.nan)
+                        device=probs.device)) == 0, torch.nan)
         else:
             entropy[to_ignore] = torch.nan  # type: ignore
     entropy[entropy.isnan()] = 0

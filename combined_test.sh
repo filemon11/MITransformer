@@ -27,7 +27,7 @@ export OMP_NUM_THREADS=$THREADS_PER_GPU
 prefix="--standalone --nnodes=1 --nproc-per-node=${N_GPUS} -m mitransformer.__main__"
 
 general_params="--n_workers ${THREADS_PER_GPU} --device ${DEVICE} --use_ddp ${USE_DDP}"
-general_hyperopt_params='--first_k_eval_test 20 --combined_loss True --distr_mode att-n --w1 0.33 --w2 0.33 --w3 0.33 --batch_size 20 --epochs 1  --early_stop_after none --eval_interval 20 --use_steps 1 --max_steps none --masks_setting current --use_dual_fixed 0'
+general_hyperopt_params='--first_k_eval_test 20 --combined_loss True --distr_mode att --w1 0.33 --w2 0.33 --w3 0.33 --batch_size 20 --epochs 1  --early_stop_after none --eval_interval 20 --use_steps 1 --max_steps none --masks_setting current --use_dual_fixed 0'
 hyperopt_selection='--n_embd 200 --dropout_attn 0.0 --dropout_resid 0.219 --dropout_ff 0.026 --dropout_embd 0.083 --dropout_lstm 0.305 --learning_rate 1.21e-3 --d_ff_factor 7 --bias 0'
 
 core="${general_params} train ${hyperopt_selection} ${general_hyperopt_params}"

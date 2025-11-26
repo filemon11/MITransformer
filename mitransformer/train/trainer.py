@@ -374,7 +374,14 @@ class LMTrainer():
         arc_distribution = attdistr.arc_distribution(
             additional, mode)
         del additional
-
+        # return torch.tensor(0, device="cpu"), torch.tensor(0, device="cpu")
+        output = (
+            self.attention_entropy_loss(
+                arc_distribution, to_ignore_mask, reduction),
+            self.distance_loss(
+                arc_distribution, to_ignore_mask, reduction))
+        print("entropy nan", output[0].isnan().any())
+        print("distance nan", output[1].isnan().any())
         return (
             self.attention_entropy_loss(
                 arc_distribution, to_ignore_mask, reduction),

@@ -17,6 +17,8 @@ def arc_distribution(
     """additional can contain:
     att (required): (l b mh s s mhe)
     proj_states: (l b mh s s mhe)
+
+    returns: (b lmh s s)
     """
 
     def merge_layer_heads(stack: torch.Tensor) -> torch.Tensor:
