@@ -5,9 +5,16 @@ import torch
 # ---------------------- concrete metric classes ---------------------------
 
 
-class SupervisedMetric(base.Metric):
+class LMMetric(base.Metric):
     fields = {
         **base.Metric.fields,
+        "lm_loss": field.loss("num")
+    }
+
+
+class SupervisedMetric(LMMetric):
+    fields = {
+        **LMMetric.fields,
         "arc_num": field.num,
         "arc_loss": field.loss("arc_num"),
         "alpha": field.MetricField(None, static=True),
@@ -21,9 +28,9 @@ class SupervisedMetric(base.Metric):
         return (alpha*lm_loss + (1-alpha)*arc_loss)
 
 
-class EvalMetric(base.Metric):
+class EvalMetric(LMMetric):
     fields = {
-        **base.Metric.fields,
+        **LMMetric.fields,
         "perplexity": field.perplexity,
     }
 
@@ -37,7 +44,7 @@ class SupervisedEvalMetric(SupervisedMetric, EvalMetric):
     }
 
 
-class CostsMetric(base.WeightedMetric):
+class CostsMetric(LMMetric, base.WeightedMetric):
     fields = {
         **base.WeightedMetric.fields,
         "attention_entropy_loss": field.attention_entropy_loss,

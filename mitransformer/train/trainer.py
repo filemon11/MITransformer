@@ -6,7 +6,7 @@ from ..data.dataset import (
     IDSen, TransformMaskHeadChild)
 from .metrics import (
     sum_metrics, SupervisedEvalMetric,
-    SupervisedMetric, Metric, EvalMetric,
+    SupervisedMetric, LMMetric, EvalMetric,
     CostsMetric, CostsEvalMetric,
     MetricWriter)
 
@@ -48,7 +48,7 @@ from ..utils.logmaker import getLogger, info, get_timestr, warning
 logger = getLogger(__name__)
 
 
-M = TypeVar("M", bound=Metric)
+M = TypeVar("M", bound=LMMetric)
 N = TypeVar("N")
 
 
@@ -58,12 +58,12 @@ class AdditionalPrediction(TypedDict):
 
 
 class Result(TypedDict):
-    train: Metric
-    eval: Metric
+    train: LMMetric
+    eval: LMMetric
 
 
 class TestResult(Result):
-    test: NotRequired[Metric]
+    test: NotRequired[LMMetric]
 
 
 Mode = Literal["standard", "input", "supervised"]
@@ -495,7 +495,7 @@ class LMTrainer():
             att_entropy: pd.DataFrame | None = None,
             attention_entropy_loss: torch.Tensor | None = None,
             distance_loss: torch.Tensor | None = None,
-            ) -> Metric:
+            ) -> LMMetric:
         if perplexity is not None:
             if arc_loss is not None:
                 assert uas is not None
@@ -542,7 +542,7 @@ class LMTrainer():
 
         if arc_loss is None:
             if self.config.combined_loss is False:
-                return Metric(
+                return LMMetric(
                     num=num_instances,
                     lm_loss=lm_loss,
                     main_metric=self.config.early_stop_metric)
@@ -580,7 +580,7 @@ class LMTrainer():
             self,
             batch: CoNLLUTokenisedBatch | EssentialBatch,
             ignore_index: int,
-            perform_opt: bool = True) -> Metric:
+            perform_opt: bool = True) -> LMMetric:
         assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
         self.batch_to(batch, device=self.config.device)  # type: ignore
@@ -647,7 +647,7 @@ class LMTrainer():
             self.optimiser.step()   # update parameters
             self.optimiser.zero_grad(set_to_none=True)
 
-        metric.detach()
+        metric.detach_()
         metric.to_("cpu")
         return metric
 
@@ -655,7 +655,7 @@ class LMTrainer():
             self,
             batch: CoNLLUTokenisedBatch | EssentialBatch,
             mode: Mode,
-            ignore_index: int) -> Metric:
+            ignore_index: int) -> LMMetric:
         self.batch_to(batch, device=self.config.device)  # type: ignore
 
         additional: models.AdditionalResults
@@ -759,7 +759,7 @@ class LMTrainer():
             attention_entropy_loss=attention_entropy_loss,
             distance_loss=distance_loss)
         metric.to_("cpu")
-        metric.detach()
+        metric.detach_()
         return metric
 
     def check_early_stop(
@@ -934,14 +934,14 @@ class LMTrainer():
             eval=eval,
             test=test)
 
-    def _train(self, loader: DataLoader[IDBatch, D]) -> Iterable[Metric]:
+    def _train(self, loader: DataLoader[IDBatch, D]) -> Iterable[LMMetric]:
         assert self.train_config is not None, "Config missing training params."
         self.transformerlm.train()
 
         def iterate():
             assert self.train_config is not None, (
                 "Config missing training params.")
-            metrics: list[Metric] = list()
+            metrics: list[LMMetric] = list()
             for i, batch in tqdm(enumerate(loader), desc="Batches"):
                 metrics.append(self.train_step(
                     batch,
@@ -958,7 +958,7 @@ class LMTrainer():
         else:
             yield self.gather_metrics(sum_metrics(list(iterate())))
 
-    def _eval(self, loader: DataLoader[IDBatch, D]) -> Metric:
+    def _eval(self, loader: DataLoader[IDBatch, D]) -> LMMetric:
         self.transformerlm.eval()
         with torch.no_grad():
             # eval loop: no backprop on this data, to avoid storing
@@ -974,8 +974,8 @@ class LMTrainer():
     def test(
             self, token_mapper: data.TokenMapper | None = None,
             **datasets: DepDataset | DataLoader | Any
-            ) -> dict[str, Metric]:
-        metrics: dict[str, Metric] = {}
+            ) -> dict[str, LMMetric]:
+        metrics: dict[str, LMMetric] = {}
         for n, ds in datasets.items():
             if isinstance(ds, (DataLoader, DepDataset)):
                 ds = self.get_loader(ds)
@@ -1124,7 +1124,7 @@ class LMTrainer():
         if self.use_ddp:
             outputs: list[N] = [data]*self.config.world_size
             dist.all_gather_object(outputs, data)
-            if isinstance(data, (torch.Tensor, Metric)) and data.is_cuda:
+            if isinstance(data, (torch.Tensor, LMMetric)) and data.is_cuda:
                 outputs = [t.to(data.device) for t in outputs]  # type: ignore
             return outputs
         return [data]
@@ -1136,7 +1136,7 @@ class LMTrainer():
             return metric
 
     def log_metric(
-            self, metric: Metric,
+            self, metric: LMMetric,
             epoch: int,
             split: Literal["train", "eval", "test"]) -> None:
         if not self.use_ddp or self.config.rank == 0:

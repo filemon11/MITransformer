@@ -4,7 +4,7 @@ import torch.distributed as dist
 from ..data import (
     get_loader, MasksSetting, DataProvider, DataConfig)
 from ..train import (
-    Metric, Result, LMTrainer, TrainConfig)
+    LMMetric, Result, LMTrainer, TrainConfig)
 from ..models import (
     TransformerDescription, description_builder, MITransformerConfig)
 from ..train.metrics import (
@@ -309,8 +309,8 @@ def main_train_multiple(
     assert args.n_runs != 0, "--n_runs cannot be 0"
 
     metrics_list: (
-        list[tuple[Metric, Metric]]
-        | list[tuple[Metric, Metric, Metric]]) = []
+        list[tuple[LMMetric, LMMetric]]
+        | list[tuple[LMMetric, LMMetric, LMMetric]]) = []
     for n_run in tqdm(range(args.n_runs), desc="Runs"):
         run_args = copy(args)
         run_args.model_name = f"{args.name}_{n_run}"
@@ -351,7 +351,7 @@ def main_test(
         args: "TestParserArgs",
         world_size: int,
         data_provider: DataProvider | None = None
-        ) -> tuple[Metric, Metric, Metric]:
+        ) -> tuple[LMMetric, LMMetric, LMMetric]:
     """Calculates the mean and standard deviation of several
     runs."""
 

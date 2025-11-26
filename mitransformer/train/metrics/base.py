@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Type, TypeVar, Self
 from collections.abc import Sequence
+from abc import ABC
 
 import torch
 import math
@@ -17,7 +18,7 @@ from ...utils import params
 M = TypeVar("M", bound="Metric")
 
 
-class Metric(params.Params):
+class Metric(params.Params, ABC):
     """Base class for metrics using a declarative fields table.
 
     Subclasses should declare a class-level `fields: dict[str, MetricField]`.
@@ -31,7 +32,6 @@ class Metric(params.Params):
     # `fields = {**Metric.fields, **{"_new": MetricField(...)}}`.
     fields: dict[str, field.MetricField] = {
         "num": field.num,
-        "lm_loss": field.loss(),
         "main_metric": field.main_metric("loss"),
     }
 
@@ -51,7 +51,7 @@ class Metric(params.Params):
             # copy tensors to avoid accidental sharing
             if isinstance(value, torch.Tensor):
                 value = value.clone()
-            setattr(self, f"_{name}", value)
+            self._set_raw(name, value)
 
     # ---------------------- attribute access / presentation -----------------
 
@@ -213,11 +213,11 @@ class Metric(params.Params):
                 return v.device
         return torch.device("cpu")
 
-    def detach(self) -> None:
+    def detach_(self) -> None:
         for name in self.fields.keys():
             v = self._get_raw(name)
             if isinstance(v, torch.Tensor):
-                setattr(self, name, v.detach())
+                self._set_raw(name, v.detach())
 
     def to(self, device: torch.device | str) -> Self:
         Factory: Type[Self] = type(self)
