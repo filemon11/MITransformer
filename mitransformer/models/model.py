@@ -167,7 +167,8 @@ class MIAttention(nn.Module):
             self, n_embd: int, layer_description: LayerDescription,
             block_size: int, attn_dropout: float,
             resid_dropout: float, overlay_causal: bool = False,
-            use_dual_fixed: bool = False, bias: bool = False):
+            use_dual_fixed: bool = False, bias: bool = False,
+            return_proj_states: bool = False):
         """Initialise mask-informed attention module.
 
         Parameters
@@ -189,6 +190,8 @@ class MIAttention(nn.Module):
             transformer.
         bias : bool, default=False
             Include bias in linear layers.
+        return_proj_states: bool, default=False
+            Return projected states.
         """
         # n_embd: embedding dimensionType[DependencyMultiHeadAttention]
         # n_heads : the number of heads we'd like to use
@@ -212,6 +215,8 @@ class MIAttention(nn.Module):
 
         self.attn_dropout = attn_dropout
         self.resid_dropout = nn.Dropout(resid_dropout)
+
+        self.return_proj_states: bool = return_proj_states
 
         self.overlay_causal: bool = overlay_causal
         if overlay_causal:
@@ -327,7 +332,7 @@ class MIAttention(nn.Module):
         additional_output: AdditionalResults = {
             "att": att
         }
-        if True:
+        if self.return_proj_states:
             # adapted from Goro Kobayashi
             # (https://github.com/gorokoba560/norm-analysis-of-transformer)
             v_layer = v.permute(0, 2, 1, 3).contiguous().unsqueeze(3)
@@ -369,7 +374,8 @@ class MILayer(nn.Module):
             d_ff_factor: int, block_size: int, attn_dropout: float,
             resid_dropout: float,
             dropout_ff: float, overlay_causal: bool = False,
-            use_dual_fixed: bool = False, bias: bool = False):
+            use_dual_fixed: bool = False, bias: bool = False,
+            return_proj_states: bool = False):
         # n_embd: embedding dimensionType[DependencyMultiHeadAttention]
         # n_heads : the number of heads we'd like to use
         super().__init__()
@@ -378,7 +384,7 @@ class MILayer(nn.Module):
         self.attn = MIAttention(n_embd, layer_description,
                                 block_size, attn_dropout,
                                 resid_dropout, overlay_causal,
-                                use_dual_fixed)
+                                use_dual_fixed, return_proj_states)
         self.ln_2 = nn.LayerNorm(n_embd, bias=bias)
         self.ff = FeedForward(n_embd, d_ff_factor, dropout_ff, bias)
 
@@ -423,6 +429,7 @@ class MITransformerConfig(utils.Params):
     bias: bool = False
     use_lstm: bool = True
     pos_enc: Literal["embedding", "sinusoidal"] = "embedding"
+    return_proj_states: bool = False
 
 
 class MITransformer(nn.Module):
@@ -437,8 +444,10 @@ class MITransformer(nn.Module):
             config.block_size, config.dropout_attn,
             config.dropout_resid, config.dropout_ff,
             config.overlay_causal, config.use_dual_fixed,
-            config.bias)
+            config.bias, config.return_proj_states)
             for layer_description in transformer_description])
+        self.return_projected_states: bool = config.return_proj_states
+
         self.block_size = config.block_size
 
         self.vocab_size = config.vocab_size
@@ -531,7 +540,7 @@ class MITransformer(nn.Module):
             "att": torch.stack(
                     [additional["att"] for additional in additional_list])}
 
-        if len(additional_list) > 0:
+        if self.return_projected_states and len(additional_list) > 0:
             key: AdditionalKeys
             for key in additional_list[0].keys():  # type: ignore
                 if key != "att":

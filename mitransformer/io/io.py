@@ -256,7 +256,8 @@ def main_train(
 
     transformer_config = MITransformerConfig.from_kwargs(
         **args.to_dict(),
-        use_input_mask=(args.dependency_mode == "input"))
+        use_input_mask=(args.dependency_mode == "input"),
+        return_proj_states=args.combined_loss)
 
     trainer = LMTrainer.new(transformer_config, train_config)
     if isinstance(data_provider, DataProvider):
