@@ -37,7 +37,8 @@ class Metric(params.Params, ABC):
 
     def __init__(self, **kwargs: Any) -> None:
         # initialize all fields from fields, allowing overrides via kwargs
-        num_losses = len([mf.include_in_loss for mf in self.fields.values()])
+        num_losses = len(
+            [mf for mf in self.fields.values() if mf.include_in_loss])
         for name, mf in self.fields.items():
             if isinstance(mf, field.WeightField):
                 value = kwargs.get(name)

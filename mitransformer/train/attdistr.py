@@ -22,10 +22,9 @@ def arc_distribution(
     def merge_layer_heads(stack: torch.Tensor) -> torch.Tensor:
         # input: (l b mh ...)
 
-        # TODO: implement other options
-        print(stack.shape)
         stack = stack.transpose(0, 1)
         # (l b mh ...) -> (b l mh ...)
+
         stack = stack.view(
             stack.shape[0], stack.shape[1]*stack.shape[2], *stack.shape[3:])
         # (b l mh ...) -> (b lmh ...)
@@ -39,6 +38,5 @@ def arc_distribution(
         case "attn-n":
             assert "proj_states" in additional.keys()
             proj_states = merge_layer_heads(additional["proj_states"])
-            print(proj_states.shape)  # TODO: check whether view is correct...
-            # TODO
+
             return proj_states

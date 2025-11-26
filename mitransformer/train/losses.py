@@ -195,7 +195,7 @@ def distance_loss(
     r = torch.arange(1, s+1, device=probs.device)
 
     dist_mat = torch.tril(-1 * (r.repeat(s, 1) - r.reshape(-1, 1)))
-    dist_mat = dist_mat.unsqueeze(-1)  # -> [B, S, S] or [H, B, S, S]
+    dist_mat = dist_mat.unsqueeze(0)  # -> [B, S, S] or [H, B, S, S]
 
     cost = (dist_mat*probs).sum(-1)  # -> [B, S] or [H, B, S]
 

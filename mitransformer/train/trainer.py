@@ -521,7 +521,7 @@ class LMTrainer():
                             self.config.w2,
                             self.config.w3,
                         ),
-                        att_entropy=att_entropy
+                        perplexity=perplexity
                     )
 
         if arc_loss is None:

@@ -46,6 +46,7 @@ class SupervisedEvalMetric(SupervisedMetric, EvalMetric):
 
 class CostsMetric(LMMetric, base.WeightedMetric):
     fields = {
+        **LMMetric.fields,
         **base.WeightedMetric.fields,
         "attention_entropy_loss": field.attention_entropy_loss,
         "distance_loss": field.distance_loss
