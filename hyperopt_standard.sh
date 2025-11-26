@@ -3,11 +3,6 @@
 N_GPUS=$(lspci|grep -i nvidia | grep -e VGA -e 3D | wc -l)
 # if not using nvidia gpus, need to set manually
 
-N_THREADS=$(nproc --all)
-THREADS_PER_GPU=$((N_THREADS / N_GPUS))
-export NUMEXPR_MAX_THREADS=$THREADS_PER_GPU
-export OMP_NUM_THREADS=$THREADS_PER_GPU
-
 if [ $N_GPUS -gt 1 ]
 then
     USE_DDP=1
@@ -18,11 +13,16 @@ fi
 if [ $N_GPUS = 0 ]
 then
     DEVICE=cpu
-    NGPUS=1
+    N_GPUS=1
     # used as number of devices
 else
     DEVICE=cuda
 fi
+
+N_THREADS=$(nproc --all)
+THREADS_PER_GPU=$((N_THREADS / N_GPUS))
+export NUMEXPR_MAX_THREADS=$THREADS_PER_GPU
+export OMP_NUM_THREADS=$THREADS_PER_GPU
 
 
 prefix="--standalone --nnodes=1 --nproc-per-node=${N_GPUS} -m mitransformer.__main__"
