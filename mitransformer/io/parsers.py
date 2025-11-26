@@ -101,7 +101,7 @@ def create_parser() -> argparse.ArgumentParser:
         default="supervised",
         help="how to use dependency information")
     trainer_group.add_argument(
-        '--combined_loss', type=bool,
+        '--combined_loss', type=io.str_to_bool,
         default=False,
         help=(
             "whether to use combined loss for"
@@ -359,7 +359,7 @@ def create_parser() -> argparse.ArgumentParser:
         default="supervised",
         help="how to use dependency information")
     hyperopt_fixed_trainer_group.add_argument(
-        '--combined_loss', type=bool,
+        '--combined_loss', type=io.str_to_bool,
         default=False,
         help=(
             "whether to use combined loss"
@@ -657,7 +657,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=io.Undefined,
         help="how to use dependency information")
     trainer_group.add_argument(
-        '--combined_loss', type=bool,
+        '--combined_loss', type=io.str_to_bool,
         default=False,
         help=(
             "whether to use combined loss for unsupervised"
