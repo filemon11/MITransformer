@@ -232,8 +232,11 @@ def get_attention_entropy(
     if to_ignore is not None:
         if to_ignore == "triangular":
             entropy = entropy.masked_fill(
-                torch.tril(torch.ones(
-                    *entropy.shape, device=probs.device)), torch.nan)
+                torch.tril(
+                    torch.ones(
+                        *entropy.shape,
+                        device=probs.device),
+                    diagonal=-1) == 0, torch.nan)
         else:
             entropy[to_ignore] = torch.nan  # type: ignore
     entropy[entropy.isnan()] = 0

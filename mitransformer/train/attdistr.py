@@ -20,14 +20,15 @@ def arc_distribution(
     """
 
     def merge_layer_heads(stack: torch.Tensor) -> torch.Tensor:
-        # input: (l b mh s s mhe)
+        # input: (l b mh ...)
 
         # TODO: implement other options
-        stack = stack.permute(1, 0, 2, 3, 4, 5)
-        # (l b mh s s mhe) -> (b l mh s s mhe)
+        print(stack.shape)
+        stack = stack.transpose(0, 1)
+        # (l b mh ...) -> (b l mh ...)
         stack = stack.view(
             stack.shape[0], stack.shape[1]*stack.shape[2], *stack.shape[3:])
-        # (b l mh s s mhe) -> (b lmh s s mhe)
+        # (b l mh ...) -> (b lmh ...)
         return stack
 
     match mode:
