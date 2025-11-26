@@ -215,7 +215,6 @@ class MIAttention(nn.Module):
 
         self.attn_dropout = attn_dropout
         self.resid_dropout = nn.Dropout(resid_dropout)
-
         self.return_proj_states: bool = return_proj_states
 
         self.overlay_causal: bool = overlay_causal
@@ -384,7 +383,8 @@ class MILayer(nn.Module):
         self.attn = MIAttention(n_embd, layer_description,
                                 block_size, attn_dropout,
                                 resid_dropout, overlay_causal,
-                                use_dual_fixed, return_proj_states)
+                                use_dual_fixed,
+                                return_proj_states=return_proj_states)
         self.ln_2 = nn.LayerNorm(n_embd, bias=bias)
         self.ff = FeedForward(n_embd, d_ff_factor, dropout_ff, bias)
 
@@ -444,7 +444,7 @@ class MITransformer(nn.Module):
             config.block_size, config.dropout_attn,
             config.dropout_resid, config.dropout_ff,
             config.overlay_causal, config.use_dual_fixed,
-            config.bias, config.return_proj_states)
+            config.bias, return_proj_states=config.return_proj_states)
             for layer_description in transformer_description])
         self.return_projected_states: bool = config.return_proj_states
 
