@@ -374,14 +374,7 @@ class LMTrainer():
         arc_distribution = attdistr.arc_distribution(
             additional, mode)
         del additional
-        # return torch.tensor(0, device="cpu"), torch.tensor(0, device="cpu")
-        output = (
-            self.attention_entropy_loss(
-                arc_distribution, to_ignore_mask, reduction),
-            self.distance_loss(
-                arc_distribution, to_ignore_mask, reduction))
-        print("entropy nan", output[0].isnan().any())
-        print("distance nan", output[1].isnan().any())
+
         return (
             self.attention_entropy_loss(
                 arc_distribution, to_ignore_mask, reduction),
@@ -622,7 +615,10 @@ class LMTrainer():
             attention_entropy_loss, distance_loss = self.arc_losses(
                 additional, to_ignore_mask="triangular",
                 reduction="sum", mode=self.config.distr_mode)
+            attention_entropy_loss.retain_grad()
+            distance_loss.retain_grad()
 
+        lm_loss.retain_grad()
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
 
         metric = self.get_metric(
@@ -633,10 +629,11 @@ class LMTrainer():
             attention_entropy_loss=attention_entropy_loss,
             distance_loss=distance_loss)
 
+        metric.loss.retain_grad()
         metric.loss.backward()   # backward pass
         if perform_opt:
             self.optimiser.step()   # update parameters
-            self.optimiser.zero_grad(set_to_none=True)
+            # self.optimiser.zero_grad(set_to_none=True)
 
         metric.detach_()
         metric.to_("cpu")
@@ -1040,7 +1037,7 @@ class LMTrainer():
 
                 additional_key: models.AdditionalKeys
                 for additional_key in ("proj_states", "att"):
-                    if key in additional:
+                    if additional_key in additional:  # type: ignore
                         unpadded_additional[additional_key].extend(
                             unpad_masks(
                                 additional[additional_key].swapaxes(0, 1),

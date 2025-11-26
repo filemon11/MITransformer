@@ -26,8 +26,7 @@ def arc_distribution(
 
         stack = stack.transpose(0, 1)
         # (l b mh ...) -> (b l mh ...)
-
-        stack = stack.view(
+        stack = stack.contiguous().view(
             stack.shape[0], stack.shape[1]*stack.shape[2], *stack.shape[3:])
         # (b l mh ...) -> (b lmh ...)
         return stack

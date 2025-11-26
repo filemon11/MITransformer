@@ -194,7 +194,8 @@ def distance_loss(
     s = probs.shape[-1]
     r = torch.arange(1, s+1, device=probs.device)
 
-    dist_mat = torch.tril(-1 * (r.repeat(s, 1) - r.reshape(-1, 1)))
+    dist_mat = -1 * (r.repeat(s, 1) - r.reshape(-1, 1))     # + 1
+    dist_mat = torch.tril(dist_mat)      # dist_mat.log())
     dist_mat = dist_mat.unsqueeze(0)  # -> [B, S, S] or [H, B, S, S]
 
     distances = dist_mat*probs
@@ -227,7 +228,9 @@ def get_attention_entropy(
     """input shape [..., S, S]
     with S: sequence length.
     output shape: scalar if reduction is 'mean' or 'sum', else [..., S]"""
-    entropy = -(probs*torch.log(probs))
+
+    logprobs = torch.log(probs.clamp(min=1e-4))
+    entropy = -(probs*logprobs)
 
     if to_ignore is not None:
         if to_ignore == "triangular":
@@ -235,10 +238,9 @@ def get_attention_entropy(
                 torch.tril(
                     torch.ones(
                         *entropy.shape,
-                        device=probs.device)) == 0, torch.nan)
+                        device=probs.device)) == 0, 0)
         else:
-            entropy[to_ignore] = torch.nan  # type: ignore
-    entropy[entropy.isnan()] = 0
+            entropy[to_ignore] = 0  # type: ignore
 
     entropy = entropy.sum(-1)
 

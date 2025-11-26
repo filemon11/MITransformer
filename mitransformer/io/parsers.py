@@ -11,6 +11,8 @@ logger = logmaker.getLogger(__name__)
 optuna.logging.enable_propagation()  # Propagate logs to the root logger.
 optuna.logging.disable_default_handler()  # Stop showing logs in sys.stderr.
 
+torch.autograd.set_detect_anomaly(True)
+
 
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
