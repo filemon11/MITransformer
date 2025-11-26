@@ -229,7 +229,7 @@ def main_train(
     # make proper transformer description
     if args.transformer_description is None and args.masks_setting == "both":
         args.transformer_description = (
-            (('head_current', 'child_current'), 1), 
+            (('head_current', 'child_current'), 1),
             (('head_next', 'child_next'), 1))
     elif args.transformer_description is None:
         if args.layer_design is None:
@@ -257,7 +257,7 @@ def main_train(
     transformer_config = MITransformerConfig.from_kwargs(
         **args.to_dict(),
         use_input_mask=(args.dependency_mode == "input"),
-        return_proj_states=args.combined_loss)
+        return_proj_states=args.distr_mode == "att-n")
 
     trainer = LMTrainer.new(transformer_config, train_config)
     if isinstance(data_provider, DataProvider):
@@ -447,7 +447,7 @@ def main_compare(
     dataset = data_provider.datasets["eval"]
     token_mapper = data_provider.datasets["token_mapper"]
 
-    logprobs1, _ = trainer.predict(
+    logprobs1, _, _ = trainer.predict(
         dataset,
         make_prob=True,
         only_true=True)
@@ -465,7 +465,7 @@ def main_compare(
             memmaped=True,
             model_num=2)
 
-    logprobs2, _ = trainer.predict(
+    logprobs2, _, _ = trainer.predict(
         dataset,
         make_prob=True,
         only_true=True)
@@ -710,7 +710,9 @@ class Objective:
 def main_hyperopt(
         args: "HyperoptParserArgs",
         world_size: int) -> None:
-    direction = "minimize" if minimise[args.optimise.lower().split(":")[0]] else "maximize"
+    direction = (
+        "minimize" if minimise[args.optimise.lower().split(":")[0]]
+        else "maximize")
 
     ld = os.path.join("./runs", f"{args.name}_hyperopt")
     with new_pg(world_size, "gloo") as pg, metric_writer(log_dir=ld) as writer:
@@ -902,6 +904,7 @@ class TrainParserArgs(ParserArgs):
     learning_rate: float
     loss_alpha: float | None
     combined_loss: bool
+    distr_mode: Literal["att", "att-n"]
     w1: float | None
     w2: float | None
     w3: float | None
@@ -949,12 +952,13 @@ class HyperoptParserArgs(ParserArgs):
     epochs: int
     gradient_acc: int | None
 
+    distr_mode: Literal["att", "att-n"] | list[Literal["att", "att-n"]]
     learning_rate: float | tuple[float, float] | list[float]
     loss_alpha: float | tuple[float, float] | list[float | None] | None
     w1: float | tuple[float, float] | list[float] | None
     w2: float | tuple[float, float] | list[float] | None
     w3: float | tuple[float, float] | list[float] | None
-    
+
     arc_loss_weighted: bool | list[bool]
     discriminative: bool | list[bool]
 
@@ -991,6 +995,7 @@ class TestParserArgs(ParserArgs):
     model_name: str
     dependency_mode: Literal["supervised", "input", "standard"] | Undefined
     combined_loss: bool | Undefined
+    distr_mode: Literal["att", "att-n"]
     batch_size: int | Undefined
     loss_alpha: float | None | Undefined
     w1: float | None | Undefined

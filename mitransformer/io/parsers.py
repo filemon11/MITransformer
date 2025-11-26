@@ -1,7 +1,6 @@
 import torch
 
 import optuna
-import sys
 import argparse
 from ast import literal_eval as make_tuple
 
@@ -104,7 +103,13 @@ def create_parser() -> argparse.ArgumentParser:
     trainer_group.add_argument(
         '--combined_loss', type=bool,
         default=False,
-        help="whether to use combined loss for unsupervised memory cost learning")
+        help=(
+            "whether to use combined loss for"
+            "unsupervised memory cost learning"))
+    trainer_group.add_argument(
+        '--distr_mode', type=str,
+        default="att", choices=("att", "att-n"),
+        help="mode for calculation attention distribution for combined loss")
     trainer_group.add_argument(
         '--batch_size', type=int, default=32,
         help=(
@@ -356,7 +361,9 @@ def create_parser() -> argparse.ArgumentParser:
     hyperopt_fixed_trainer_group.add_argument(
         '--combined_loss', type=bool,
         default=False,
-        help="whether to use combined loss for unsupervised memory cost learning")
+        help=(
+            "whether to use combined loss"
+            " for unsupervised memory cost learning"))
     hyperopt_fixed_trainer_group.add_argument(
         '--batch_size', type=int, default=32,
         help=(
@@ -403,6 +410,11 @@ def create_parser() -> argparse.ArgumentParser:
         help=(
             "loss weight for supervised learning; 1.0 is only"
             "language model training while 0.0 is only arc training"))
+    hyperopt_flexible_trainer_group.add_argument(
+        '--distr_mode', type=io.HyperoptSpace(
+            io.StrToLiteral("att", "att-n")),
+        default="att", choices=("att", "att-n"),
+        help="mode for calculation attention distribution for combined loss")
     hyperopt_flexible_trainer_group.add_argument(
         '--w1', type=io.HyperoptSpace(io.OptNone(float)), default=None,
         help=(
@@ -647,7 +659,13 @@ def create_parser() -> argparse.ArgumentParser:
     trainer_group.add_argument(
         '--combined_loss', type=bool,
         default=False,
-        help="whether to use combined loss for unsupervised memory cost learning")
+        help=(
+            "whether to use combined loss for unsupervised"
+            " memory cost learning"))
+    trainer_group.add_argument(
+        '--distr_mode', type=str,
+        default="att", choices=("att", "att-n"),
+        help="mode for calculation attention distribution for combined loss")
     trainer_group.add_argument(
         '--batch_size', type=int, default=io.Undefined,
         help=(
