@@ -1128,7 +1128,8 @@ def generate_attention_entropy(
     mask_dep = attention_matrices[dep_name][0].clone().softmax(-1)
     masks = torch.stack((mask_gov, mask_dep))
 
-    entropy = -(masks*torch.log(masks))
+    entropy = -(masks*torch.log2(masks))
+    # attention: this was originally log_e
     entropy = torch.tril(entropy, 0)
     entropy[torch.isnan(entropy)] = 0
 

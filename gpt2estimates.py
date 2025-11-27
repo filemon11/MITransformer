@@ -44,7 +44,8 @@ def get_attention_entropy(
     """input shape [..., S, S]
     with S: sequence length.
     output shape: scalar if reduction is 'mean' or 'sum', else [..., S]"""
-    entropy = -(probs*torch.log(probs))
+    entropy = -(probs*torch.log2(probs))
+    # attention: this was originally the natural log
 
     entropy[entropy.isnan()] = 0
 

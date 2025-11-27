@@ -4,6 +4,22 @@ import torch.nn.functional as F
 from typing import Literal
 
 
+def reduce(
+        x: torch.Tensor,
+        reduction: Literal["sum", "mean", "none"]) -> torch.Tensor:
+    match reduction:
+        case "none":
+            return x
+        case "mean":
+            return x.mean()
+        case "sum":
+            return x.sum()
+        case _:
+            raise Exception(
+                "Parameter 'reduction' must be one of "
+                f"{locals()['__annotations__']['reduction']}.")
+
+
 def arc_loss(
         score_preds: torch.Tensor,
         score_gold: torch.BoolTensor,
@@ -148,18 +164,13 @@ def attention_entropy_loss(
         # [B, H, S, S] -> [B, S, S]
 
     entropy = get_attention_entropy(
-        probs, to_ignore_mask, reduction="none")  # -> [B, S] or [H, B, S]
+        probs, to_ignore_mask, reduction="none",
+        include_current=False, length_weighted=True)  # -> [B, S] or [H, B, S]
 
     if not global_distr:
         entropy = entropy.mean(0)  # [H, B, S] -> [B, S]
 
-    match reduction:
-        case "none":
-            return entropy
-        case "mean":
-            return entropy.mean()
-        case "sum":
-            return entropy.sum()
+    return reduce(entropy, reduction)
 
 
 def distance_loss(
@@ -204,13 +215,7 @@ def distance_loss(
     if not global_distr:
         cost = cost.mean(0)  # [H, B, S] -> [B, S]
 
-    match reduction:
-        case "sum":
-            return cost.sum()
-        case "mean":
-            return cost.mean()
-        case "none":
-            return cost
+    return reduce(cost, reduction)
 
 
 def get_head_averaged_distribution(
@@ -221,16 +226,33 @@ def get_head_averaged_distribution(
     return probs
 
 
+def normalise_without_diagonal(
+        probs: torch.Tensor) -> torch.Tensor:
+    probs = torch.tril(probs, diagonal=-1)
+    probs = probs / probs.sum(dim=-1, keepdim=True).clamp(min=1e-4)
+    return torch.tril(probs, diagonal=-1)
+
+
 def get_attention_entropy(
         probs: torch.Tensor,
         to_ignore: torch.Tensor | Literal["triangular"] | None = None,
-        reduction: Literal["sum", "mean", "none"] = "mean") -> torch.Tensor:
+        reduction: Literal["sum", "mean", "none"] = "mean",
+        include_current: bool = True,
+        length_weighted: bool = False) -> torch.Tensor:
     """input shape [..., S, S]
     with S: sequence length.
-    output shape: scalar if reduction is 'mean' or 'sum', else [..., S]"""
+    output shape: scalar if reduction is 'mean' or 'sum', else [..., S].
 
-    logprobs = torch.log(probs.clamp(min=1e-4))
+    Assumes normalised distribution."""
+
+    if not include_current:
+        probs = normalise_without_diagonal(probs)
+
+    logprobs = torch.log2(probs.clamp(min=1e-4))
+    # attention: this was originally log_e
     entropy = -(probs*logprobs)
+    del probs
+    del logprobs
 
     if to_ignore is not None:
         if to_ignore == "triangular":
@@ -238,18 +260,33 @@ def get_attention_entropy(
                 torch.tril(
                     torch.ones(
                         *entropy.shape,
-                        device=probs.device)) == 0, 0)
+                        device=entropy.device)) == 0, 0)
         else:
             entropy[to_ignore] = 0  # type: ignore
 
+    if length_weighted:
+        if include_current:
+            norm_vector = torch.arange(
+                1, entropy.shape[-2]+1, dtype=torch.float,
+                device=entropy.device).unsqueeze(0).t()
+            # [S, S] ([[1], [2], [3], ...])
+        else:
+            norm_vector = torch.arange(
+                0, entropy.shape[-2], dtype=torch.float,
+                device=entropy.device).unsqueeze(0).t()
+            # [S, S] ([[0], [1], [2], ...])
+
+            norm_vector = norm_vector.clamp(min=1e-4)
+
+        norm_vector.repeat(1, entropy.shape[-2])
+        # [S, S] ([[0, 0, ...], [1, 1, ..], [2, 2, ...], ...])
+        # OR ([[1, 1, ...], [2, 2, ..], [3, 3, ...], ...])
+
+        norm_vector = torch.log2(norm_vector).clamp(min=1e-4)
+
+        entropy = torch.div(entropy, norm_vector)
+        del norm_vector
+
     entropy = entropy.sum(-1)
 
-    match reduction:
-        case "sum":
-            entropy = entropy.sum()
-        case "mean":
-            entropy = entropy.mean()
-        case "none":
-            pass
-
-    return entropy
+    return reduce(entropy, reduction)
