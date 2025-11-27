@@ -87,6 +87,7 @@ class GeneralConfig(utils.Params):
     masks_setting: data.MasksSetting = "current"
     combined_loss: bool = False
     distr_mode: Literal["att", "att-n"] = "att"
+    global_distr: bool = True
     w1: float | None = None
     w2: float | None = None
     w3: float | None = None
@@ -347,24 +348,29 @@ class LMTrainer():
     def attention_entropy_loss(
             self, arc_distributions: torch.Tensor,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
-            reduction: Literal["sum", "mean"] = "mean"
+            reduction: Literal["sum", "mean"] = "mean",
+            global_distr: bool = True
             ) -> torch.Tensor:
         return losses.attention_entropy_loss(
-            arc_distributions, to_ignore_mask, reduction=reduction)
+            arc_distributions, to_ignore_mask, reduction=reduction,
+            global_distr=global_distr)
 
     def distance_loss(
             self, arc_distributions: torch.Tensor,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
-            reduction: Literal["sum", "mean"] = "mean"
+            reduction: Literal["sum", "mean"] = "mean",
+            global_distr: bool = True
             ) -> torch.Tensor:
         return losses.distance_loss(
-            arc_distributions, to_ignore_mask, reduction=reduction)
+            arc_distributions, to_ignore_mask, reduction=reduction,
+            global_distr=global_distr)
 
     def arc_losses(
             self, additional: models.AdditionalResults,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             mode: Literal["att", "att-n"] = "att",
-            reduction: Literal["sum", "mean"] = "mean"
+            reduction: Literal["sum", "mean"] = "mean",
+            global_distr: bool = True
             ) -> tuple[torch.Tensor, torch.Tensor]:
         """proj_states cannot be none if mode is `att_n`.
         arc_logits have form (M, B, S, S)
@@ -378,9 +384,11 @@ class LMTrainer():
 
         return (
             self.attention_entropy_loss(
-                arc_distribution, to_ignore_mask, reduction),
+                arc_distribution, to_ignore_mask, reduction,
+                global_distr=global_distr),
             self.distance_loss(
-                arc_distribution, to_ignore_mask, reduction))
+                arc_distribution, to_ignore_mask, reduction,
+                global_distr=global_distr))
 
     @staticmethod
     def filter_arc_scores(
@@ -605,7 +613,8 @@ class LMTrainer():
         elif self.config.combined_loss:
             attention_entropy_loss, distance_loss = self.arc_losses(
                 additional, to_ignore_mask="triangular",
-                reduction="sum", mode=self.config.distr_mode)
+                reduction="sum", mode=self.config.distr_mode,
+                global_distr=self.config.global_distr)
 
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
 
@@ -736,7 +745,8 @@ class LMTrainer():
             attention_entropy_loss, distance_loss = self.arc_losses(
                 additional,
                 to_ignore_mask="triangular", reduction="sum",
-                mode=self.config.distr_mode)
+                mode=self.config.distr_mode,
+                global_distr=self.config.global_distr)
 
         metric = self.get_metric(
             num_instances,

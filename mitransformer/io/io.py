@@ -905,6 +905,7 @@ class TrainParserArgs(ParserArgs):
     loss_alpha: float | None
     combined_loss: bool
     distr_mode: Literal["att", "att-n"]
+    global_distr: bool
     w1: float | None
     w2: float | None
     w3: float | None
@@ -953,6 +954,7 @@ class HyperoptParserArgs(ParserArgs):
     gradient_acc: int | None
 
     distr_mode: Literal["att", "att-n"] | list[Literal["att", "att-n"]]
+    global_distr: bool | list[bool]
     learning_rate: float | tuple[float, float] | list[float]
     loss_alpha: float | tuple[float, float] | list[float | None] | None
     w1: float | tuple[float, float] | list[float] | None
@@ -996,6 +998,7 @@ class TestParserArgs(ParserArgs):
     dependency_mode: Literal["supervised", "input", "standard"] | Undefined
     combined_loss: bool | Undefined
     distr_mode: Literal["att", "att-n"]
+    global_distr: bool
     batch_size: int | Undefined
     loss_alpha: float | None | Undefined
     w1: float | None | Undefined

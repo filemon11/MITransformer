@@ -113,6 +113,12 @@ def create_parser() -> argparse.ArgumentParser:
         default="att", choices=("att", "att-n"),
         help="mode for calculation attention distribution for combined loss")
     trainer_group.add_argument(
+        '--global_distr', type=io.str_to_bool,
+        default=True,
+        help=(
+            "Whether to compute the distribution for the combined loss"
+            " globally or as an average of per-head distributions."))
+    trainer_group.add_argument(
         '--batch_size', type=int, default=32,
         help=(
             "batch size; in case of multiple GPUs it is "
@@ -418,6 +424,13 @@ def create_parser() -> argparse.ArgumentParser:
         default="att", choices=("att", "att-n"),
         help="mode for calculation attention distribution for combined loss")
     hyperopt_flexible_trainer_group.add_argument(
+        '--global_distr', type=io.HyperoptSpace(
+            io.str_to_bool),
+        default=True,
+        help=(
+            "Whether to compute the distribution for the combined loss"
+            " globally or as an average of per-head distributions."))
+    hyperopt_flexible_trainer_group.add_argument(
         '--w1', type=io.HyperoptSpace(io.OptNone(float)), default=None,
         help=(
             "Factor for language modelling loss in combined cost"))
@@ -668,6 +681,12 @@ def create_parser() -> argparse.ArgumentParser:
         '--distr_mode', type=str,
         default="att", choices=("att", "att-n"),
         help="mode for calculation attention distribution for combined loss")
+    trainer_group.add_argument(
+        '--global_distr', type=io.str_to_bool,
+        default=True,
+        help=(
+            "Whether to compute the distribution for the combined loss"
+            " globally or as an average of per-head distributions."))
     trainer_group.add_argument(
         '--batch_size', type=int, default=io.Undefined,
         help=(
