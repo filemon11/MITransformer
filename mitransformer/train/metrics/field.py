@@ -34,9 +34,17 @@ class MetricField:
     converter: Optional[Callable[[Any], Any]] = None
     static: bool = False
     include_in_loss: bool = False
+    counter: bool = False
 
     # True → minimize; False → maximize; None → not a main metric
     minimise: Optional[bool] = None
+
+
+@dataclass(frozen=True)
+class CounterField(MetricField):
+    """Descriptor for a loss weights.
+    """
+    counter: Literal[True] = True
 
 
 @dataclass(frozen=True)
@@ -69,7 +77,7 @@ def weights(num: int) -> MetricField:
     return MetricField((1.0,)*num, static=True)
 
 
-num = MetricField(0)
+num = CounterField(0)
 
 perplexity = MetricField(
     0.0, reduce_by="num", converter=math.exp, minimise=True)

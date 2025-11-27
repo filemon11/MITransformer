@@ -186,21 +186,11 @@ class Metric(params.Params, ABC):
         out = Factory()
         for name, mf in self.fields.items():
             val = self._get_raw(name)
-            # counters themselves should be scaled
-            if name == mf.reduce_by:  # counter field -> scale
-                if isinstance(val, (int, float)):
-                    out._set_raw(name, val / scalar)
-                elif isinstance(val, torch.Tensor):
-                    out._set_raw(name, val / scalar)
-                else:
-                    out._set_raw(name, val)
+            if mf.counter:
+                out._set_raw(name, val*scalar)
             else:
-                # other fields: do not perform normalization here;
-                # we keep raw sums
-                if isinstance(val, torch.Tensor):
-                    out._set_raw(name, val.clone())
-                else:
-                    out._set_raw(name, val)
+                out._set_raw(name, val)
+            val = self._get_raw(name)
         return out
 
     # ---------------------- device / detach helpers -----------------------

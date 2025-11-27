@@ -574,6 +574,7 @@ class LMTrainer():
         logits, arc_logits, additional = self.transformerlm(**batch)
         self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
+
         lm_loss = self.loss(
             logits, batch["label_ids"],
             ignore_index=ignore_index,
@@ -626,7 +627,20 @@ class LMTrainer():
             attention_entropy_loss=attention_entropy_loss,
             distance_loss=distance_loss)
 
-        metric.loss.backward()   # backward pass
+        loss = metric.loss
+        if self.train_config.gradient_acc is not None:
+            (loss / self.train_config.gradient_acc).backward()
+            # divide the per-instance avg loss by the number of gradient_acc.
+            # Otherwise the gradient would be gradient_acc-times as high
+            # as in the non-accumulating setting.
+            # Note that the loss is different in the two settings due to
+            # the per-instance averaging: the num_instances that the
+            # loss is divided by can be different for the items of an
+            # accumulating batch. I.e. we are taking an average of averages
+            # which can be different from a gloal average.
+        else:
+            loss.backward()
+
         if perform_opt:
             self.optimiser.step()   # update parameters
             self.optimiser.zero_grad(set_to_none=True)
@@ -1036,7 +1050,9 @@ class LMTrainer():
                     if additional_key in additional:  # type: ignore
                         unpadded_additional[additional_key].extend(
                             unpad_masks(
-                                additional[additional_key].swapaxes(0, 1),
+                                additional[
+                                    additional_key].swapaxes(  # type: ignore
+                                        0, 1),
                                 labels, ignore_index))
         return (
             unpadded_logits, dict(unpadded_arc_logits),
