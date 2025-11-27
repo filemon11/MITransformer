@@ -7,7 +7,7 @@ from typing import Literal
 
 def normalize_by_norms(tensor: torch.Tensor) -> torch.Tensor:
     norms = torch.norm(tensor, dim=-1)
-    return norms/norms.sum(dim=-1, keepdims=True)
+    return norms/norms.sum(dim=-1, keepdim=True)
 
 
 def arc_distribution(
@@ -38,7 +38,8 @@ def arc_distribution(
 
         case "att-n":
             assert "proj_states" in additional.keys()
-            proj_states = merge_layer_heads(additional["proj_states"])
+            proj_states = merge_layer_heads(
+                additional["proj_states"])  # type: ignore
             att = normalize_by_norms(proj_states)
             return att
 

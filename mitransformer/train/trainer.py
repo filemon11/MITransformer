@@ -35,6 +35,7 @@ import os
 
 from dataclasses import dataclass, field
 from collections import defaultdict
+from collections.abc import Sequence
 
 from ..utils import pickle
 
@@ -479,6 +480,7 @@ class LMTrainer():
             att_entropy: pd.DataFrame | None = None,
             attention_entropy_loss: torch.Tensor | None = None,
             distance_loss: torch.Tensor | None = None,
+            weights: Sequence | None = None
             ) -> LMMetric:
         if perplexity is not None:
             if arc_loss is not None:
@@ -506,9 +508,7 @@ class LMTrainer():
                     assert (
                         attention_entropy_loss is not None
                         and distance_loss is not None
-                        and self.config.w1 is not None
-                        and self.config.w2 is not None
-                        and self.config.w3 is not None
+                        and weights is not None
                     )
                     return CostsEvalMetric(
                         num=num_instances,
@@ -516,11 +516,7 @@ class LMTrainer():
                         main_metric=self.config.early_stop_metric,
                         attention_entropy_loss=attention_entropy_loss,
                         distance_loss=distance_loss,
-                        weights=(
-                            self.config.w1,
-                            self.config.w2,
-                            self.config.w3,
-                        ),
+                        weights=weights,
                         perplexity=perplexity
                     )
 
@@ -534,9 +530,7 @@ class LMTrainer():
                 assert (
                     attention_entropy_loss is not None
                     and distance_loss is not None
-                    and self.config.w1 is not None
-                    and self.config.w2 is not None
-                    and self.config.w3 is not None
+                    and weights is not None
                 )
                 return CostsMetric(
                     num=num_instances,
@@ -544,11 +538,7 @@ class LMTrainer():
                     main_metric=self.config.early_stop_metric,
                     attention_entropy_loss=attention_entropy_loss,
                     distance_loss=distance_loss,
-                    weights=(
-                        self.config.w1,
-                        self.config.w2,
-                        self.config.w3,
-                    ),
+                    weights=weights,
                 )
         else:
             assert num_arc_instances is not None
@@ -625,7 +615,8 @@ class LMTrainer():
             lm_loss=lm_loss,
             arc_loss=arc_loss,
             attention_entropy_loss=attention_entropy_loss,
-            distance_loss=distance_loss)
+            distance_loss=distance_loss,
+            weights=(self.config.w1, self.config.w2, self.config.w3))
 
         loss = metric.loss
         if self.train_config.gradient_acc is not None:
@@ -756,7 +747,8 @@ class LMTrainer():
             uas=uas_abs,
             att_entropy=att_entropy,
             attention_entropy_loss=attention_entropy_loss,
-            distance_loss=distance_loss)
+            distance_loss=distance_loss,
+            weights=(self.config.w1, self.config.w2, self.config.w3))
         metric.to_("cpu")
         metric.detach_()
         return metric

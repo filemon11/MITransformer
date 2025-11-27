@@ -40,15 +40,16 @@ class Metric(params.Params, ABC):
         num_losses = len(
             [mf for mf in self.fields.values() if mf.include_in_loss])
         for name, mf in self.fields.items():
+            value = kwargs.get(name, mf.default)
             if isinstance(mf, field.WeightField):
-                value = kwargs.get(name)
+                if value is None:
+                    value = [1.0]*num_losses
                 assert isinstance(value, Sequence), (
                     "The weights must be provided in a sized object")
                 assert len(value) == num_losses, (
                     f"Length of {name} weight field is not equal"
                     f" to the number of losses of metric {self.__class__}")
-            else:
-                value = kwargs.get(name, mf.default)
+
             # copy tensors to avoid accidental sharing
             if isinstance(value, torch.Tensor):
                 value = value.clone()
