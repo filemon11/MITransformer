@@ -1,22 +1,7 @@
 import torch
+from . import utils
 
 from typing import Literal
-
-
-def reduce(
-        x: torch.Tensor,
-        reduction: Literal["sum", "mean", "none"]) -> torch.Tensor:
-    match reduction:
-        case "none":
-            return x
-        case "mean":
-            return x.mean()
-        case "sum":
-            return x.sum()
-        case _:
-            raise Exception(
-                "Parameter 'reduction' must be one of "
-                f"{locals()['__annotations__']['reduction']}.")
 
 
 def attention_entropy_loss(
@@ -59,7 +44,7 @@ def attention_entropy_loss(
     if input_ids is not None:
         entropy[input_ids == ignore_index] = 0
 
-    reduced = reduce(entropy, reduction)
+    reduced = utils.reduce(entropy, reduction)
     return reduced
 
 
@@ -118,7 +103,7 @@ def distance_loss(
     if input_ids is not None:
         cost[input_ids == ignore_index] = 0
 
-    return reduce(cost, reduction)
+    return utils.reduce(cost, reduction)
 
 
 def get_head_averaged_distribution(
@@ -169,13 +154,8 @@ def get_attention_entropy(
 
     Assumes normalised distribution."""
 
-    probs = normalise(probs, not include_current, prefix_dummies > 0)
-
-    logprobs = torch.log2(probs.clamp(min=1e-4))
-    # attention: this was originally log_e
-    entropy = -(probs*logprobs)
+    entropy = utils.entropy(probs, "none")
     del probs
-    del logprobs
 
     if to_ignore is not None:
         if to_ignore == "triangular":
@@ -214,5 +194,5 @@ def get_attention_entropy(
 
     # TODO: ignore padding tokens
 
-    reduced = reduce(entropy, reduction)
+    reduced = utils.reduce(entropy, reduction)
     return reduced

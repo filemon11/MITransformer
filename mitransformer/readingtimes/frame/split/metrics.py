@@ -4,6 +4,7 @@ import numpy as np
 import numpy.typing as npt
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from ....train.losses import entropy
 
 
 from ...lingutils import (
@@ -210,17 +211,20 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             tokeniser.pad_token_id = tokeniser.eos_token_id
 
             joined_sentences = [" ".join(sen[2:-1]) for sen in dataset.tokens]
-            inputs = tokeniser(joined_sentences, return_tensors="pt", padding=True)
-            labels = inputs.input_ids[:,1:]
+            inputs = tokeniser(
+                joined_sentences, return_tensors="pt",
+                padding=True)
+            labels = inputs.input_ids[:, 1:]
 
             model_outputs = model(inputs.input_ids).logits.softmax(-1)
 
             model_outputs = select_true(
-                model_outputs[:,:-1],
+                model_outputs[:, :-1],
                 labels,
                 tokeniser.pad_token_id)
 
-            unpadded_output = unpad(-model_outputs.log(), labels, tokeniser.pad_token_id)
+            unpadded_output = unpad(
+                -model_outputs.log(), labels, tokeniser.pad_token_id)
 
             surprisals = []
             for i, out_sen in enumerate(unpadded_output):
@@ -228,8 +232,10 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 ids_sen = np.array(inputs.word_ids(i)[:num_toks+1])
                 space_after = (ids_sen[:-1] != ids_sen[1:])
 
-                untokenised = untokenise(out_sen.tolist(), space_after.tolist(), "add")
-                surprisals.append([1] + list(untokenised))    # first token probability?
+                untokenised = untokenise(
+                    out_sen.tolist(), space_after.tolist(), "add")
+                surprisals.append([1] + list(untokenised))
+                # first token probability?
 
             return pd.Series(surprisals), {
                 "dataset": dataset,
@@ -242,7 +248,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             token_mapper: TokenMapper = TokenMapper.load(token_mapper_dir)
             dataset.map_to_ids(token_mapper)
 
-            pred_probs, attention_logits = trainer.predict(
+            pred_probs, attention_logits, _ = trainer.predict(
                 dataset,
                 make_prob=True,
                 only_true=True)
@@ -1128,14 +1134,10 @@ def generate_attention_entropy(
     mask_dep = attention_matrices[dep_name][0].clone().softmax(-1)
     masks = torch.stack((mask_gov, mask_dep))
 
-    entropy = -(masks*torch.log2(masks))
-    # attention: this was originally log_e
-    entropy = torch.tril(entropy, 0)
-    entropy[torch.isnan(entropy)] = 0
+    masks = torch.tril(masks, 0)
+    _entropy = entropy(masks).mean(0)
 
-    entropy = entropy.sum(-1).mean(0)
-
-    return entropy[2:].numpy()
+    return _entropy[2:].numpy()
 
 
 def generate_kl_divergence(

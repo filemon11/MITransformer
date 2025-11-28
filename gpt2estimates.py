@@ -2,6 +2,7 @@ import numpy as np
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from mitransformer.train.trainer import select_true, unpad
 from mitransformer.data.parse import remove_at_symbols, remove_lines, remove_newlines
+from mitransformer.train.losses import entropy
 from datasets import load_dataset
 import torch
 import spacy
@@ -37,29 +38,6 @@ def split_line(entries: dict[str, list[str]]) -> dict[str, list[str]]:
         doc = nlp(line)
         sents.extend([sent.text for sent in doc.sents if len(sent) > 4 and len(sent) <= max_len_train])
     return {"text": sents}
-
-def get_attention_entropy(
-        probs,
-        reduction = "none") -> torch.Tensor:
-    """input shape [..., S, S]
-    with S: sequence length.
-    output shape: scalar if reduction is 'mean' or 'sum', else [..., S]"""
-    entropy = -(probs*torch.log2(probs))
-    # attention: this was originally the natural log
-
-    entropy[entropy.isnan()] = 0
-
-    entropy = entropy.sum(-1)
-
-    match reduction:
-        case "sum":
-            entropy = entropy.sum()
-        case "mean":
-            entropy = entropy.mean()
-        case "none":
-            pass
-
-    return entropy
 
 
 dataset = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1")
@@ -107,7 +85,7 @@ for j, batch in enumerate(tqdm(dataloader)):
         surprisals.append(out_sen.detach().cpu().numpy())    # first token probability?
 
         sen_att = torch.stack([att[i, :, :num_toks, :num_toks] for att in attentions])  # [layer, head, seq, seq]
-        entr = get_attention_entropy(sen_att).detach().cpu().numpy().mean(0).mean(0)
+        entr = entropy(sen_att).detach().cpu().numpy().mean(0).mean(0)
         # [layer, head, seq]
         entropies.append(entr)
 
