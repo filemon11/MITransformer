@@ -770,7 +770,6 @@ class LMTrainer():
                 input_ids=batch["input_ids"],
                 ignore_index=ignore_index)
 
-        print(arc_loss)
         metric = self.get_metric(
             num_instances,
             lm_loss=lm_loss,
