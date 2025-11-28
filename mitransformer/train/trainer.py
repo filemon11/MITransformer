@@ -373,7 +373,7 @@ class LMTrainer():
             prefix_dummies=2,
             input_ids=input_ids, ignore_index=ignore_index)
 
-    def arc_losses(
+    def attention_losses(
             self, additional: models.AdditionalResults,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             input_ids: torch.Tensor | None = None,
@@ -623,7 +623,7 @@ class LMTrainer():
                     "Scores did not align. Check keys.")
 
         elif self.config.combined_loss:
-            attention_entropy_loss, distance_loss = self.arc_losses(
+            attention_entropy_loss, distance_loss = self.attention_losses(
                 additional, to_ignore_mask="triangular",
                 reduction="sum", mode=self.config.distr_mode,
                 global_distr=self.config.global_distr,
@@ -755,7 +755,7 @@ class LMTrainer():
                     for key, logits_preds in score_logits.items()})
                 # can make separate list of heads
         elif self.config.combined_loss:
-            attention_entropy_loss, distance_loss = self.arc_losses(
+            attention_entropy_loss, distance_loss = self.attention_losses(
                 additional,
                 to_ignore_mask="triangular", reduction="sum",
                 mode=self.config.distr_mode,
