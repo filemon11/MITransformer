@@ -6,6 +6,7 @@ from ast import literal_eval as make_tuple
 
 from . import io
 from ..utils import logmaker
+from ..utils.params import Undefined
 
 logger = logmaker.getLogger(__name__)
 optuna.logging.enable_propagation()  # Propagate logs to the root logger.
@@ -118,6 +119,19 @@ def create_parser() -> argparse.ArgumentParser:
         help=(
             "Whether to compute the distribution for the combined loss"
             " globally or as an average of per-head distributions."))
+    trainer_group.add_argument(
+        '--include_current', type=io.str_to_bool,
+        default=False,
+        help=(
+            "Include attention to current item (diagonal) when computing"
+            "the attention distribution for attention losses."))
+    trainer_group.add_argument(
+        '--length_weighted', type=io.str_to_bool,
+        default=False,
+        help=(
+            "Normalise attention entropy loss by length of left "
+            "context (maximum entropy). The scores are mapped to an "
+            "the interval [0, 1]."))
     trainer_group.add_argument(
         '--batch_size', type=int, default=32,
         help=(
@@ -431,6 +445,21 @@ def create_parser() -> argparse.ArgumentParser:
             "Whether to compute the distribution for the combined loss"
             " globally or as an average of per-head distributions."))
     hyperopt_flexible_trainer_group.add_argument(
+        '--include_current', type=io.HyperoptSpace(
+            io.str_to_bool),
+        default=False,
+        help=(
+            "Include attention to current item (diagonal) when computing"
+            "the attention distribution for attention losses."))
+    hyperopt_flexible_trainer_group.add_argument(
+        '--length_weighted', type=io.HyperoptSpace(
+            io.str_to_bool),
+        default=False,
+        help=(
+            "Normalise attention entropy loss by length of left "
+            "context (maximum entropy). The scores are mapped to an "
+            "the interval [0, 1]."))
+    hyperopt_flexible_trainer_group.add_argument(
         '--w1', type=io.HyperoptSpace(io.OptNone(float)), default=None,
         help=(
             "Factor for language modelling loss in combined cost"))
@@ -622,42 +651,42 @@ def create_parser() -> argparse.ArgumentParser:
     data_group = test_parser.add_argument_group('data')
     data_group.add_argument(
         '--dataset_name', type=str, help='name of the dataset to load',
-        default=io.Undefined)
+        default=Undefined)
     data_group.add_argument(
-        '--max_len_train', type=io.OptNone(int), default=io.Undefined,
+        '--max_len_train', type=io.OptNone(int), default=Undefined,
         help='maximum number of tokens in training set')
     data_group.add_argument(
-        '--max_len_eval_test', type=io.OptNone(int), default=io.Undefined,
+        '--max_len_eval_test', type=io.OptNone(int), default=Undefined,
         help='maximum number of tokens in eval set')
     data_group.add_argument(
-        '--triangulate', type=int, default=io.Undefined,
+        '--triangulate', type=int, default=Undefined,
         help='TODO')
     data_group.add_argument(
-        '--vocab_size', type=io.OptNone(int), default=io.Undefined,
+        '--vocab_size', type=io.OptNone(int), default=Undefined,
         help=(
             'number of most frequent tokens to embed; all other '
             'tokens are replaced with an UNK token;'
             'can be None when loading existing token_mapper'))
     data_group.add_argument(
-        '--first_k', type=io.OptNone(int), default=io.Undefined,
+        '--first_k', type=io.OptNone(int), default=Undefined,
         help='only load first k sentences of the training set')
     data_group.add_argument(
-        '--first_k_eval_test', type=io.OptNone(int), default=io.Undefined,
+        '--first_k_eval_test', type=io.OptNone(int), default=Undefined,
         help='only load first k sentences of the eval and test sets')
     data_group.add_argument(
-        '--connect_with_dummy', type=io.str_to_bool, default=io.Undefined,
+        '--connect_with_dummy', type=io.str_to_bool, default=Undefined,
         help=(
             'Establish an arc to a dummy token when there is no '
             'parent/child among the precedents?'))
     data_group.add_argument(
-        '--connect_with_self', type=io.str_to_bool, default=io.Undefined,
+        '--connect_with_self', type=io.str_to_bool, default=Undefined,
         help=(
             'Establish a recursive arc to the token itself when there '
             'is not parent/child among the precedents?'))
     data_group.add_argument(
         '--masks_setting', type=str, choices=(
             "complete", "current", "next", "both"),
-        default=io.Undefined,
+        default=Undefined,
         help=('What dependencies to assign to the current token.'))
 
     # # # Trainer parser group
@@ -669,7 +698,7 @@ def create_parser() -> argparse.ArgumentParser:
     trainer_group.add_argument(
         '--dependency_mode', type=str,
         choices=("supervised", "input", "standard"),
-        default=io.Undefined,
+        default=Undefined,
         help="how to use dependency information")
     trainer_group.add_argument(
         '--combined_loss', type=io.str_to_bool,
@@ -688,29 +717,42 @@ def create_parser() -> argparse.ArgumentParser:
             "Whether to compute the distribution for the combined loss"
             " globally or as an average of per-head distributions."))
     trainer_group.add_argument(
-        '--batch_size', type=int, default=io.Undefined,
+        '--include_current', type=io.str_to_bool,
+        default=False,
+        help=(
+            "Include attention to current item (diagonal) when computing"
+            "the attention distribution for attention losses."))
+    trainer_group.add_argument(
+        '--length_weighted', type=io.str_to_bool,
+        default=False,
+        help=(
+            "Normalise attention entropy loss by length of left "
+            "context (maximum entropy). The scores are mapped to an "
+            "the interval [0, 1]."))
+    trainer_group.add_argument(
+        '--batch_size', type=int, default=Undefined,
         help=(
             "batch size; in case of multiple GPUs it is "
             "chunked across the devices"))
     trainer_group.add_argument(
-        '--loss_alpha', type=io.OptNone(float), default=io.Undefined,
+        '--loss_alpha', type=io.OptNone(float), default=Undefined,
         help=(
             "loss weight for supervised learning; 1.0 is only "
             "language model training while 0.0 is only arc training"))
     trainer_group.add_argument(
-        '--w1', type=io.OptNone(float), default=io.Undefined,
+        '--w1', type=io.OptNone(float), default=Undefined,
         help=(
             "Factor for language modelling loss in combined cost"))
     trainer_group.add_argument(
-        '--w2', type=io.OptNone(float), default=io.Undefined,
+        '--w2', type=io.OptNone(float), default=Undefined,
         help=(
             "Factor for attention entropy loss in combined cost"))
     trainer_group.add_argument(
-        '--w3', type=io.OptNone(float), default=io.Undefined,
+        '--w3', type=io.OptNone(float), default=Undefined,
         help=(
             "Factor for distance loss in combined cost"))
     trainer_group.add_argument(
-        '--arc_loss_weighted', type=io.str_to_bool, default=io.Undefined,
+        '--arc_loss_weighted', type=io.str_to_bool, default=Undefined,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
 
     # # # Plot parser group
