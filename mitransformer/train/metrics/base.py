@@ -37,6 +37,8 @@ class Metric(params.Params, ABC):
 
     def __init__(self, **kwargs: Any) -> None:
         # initialize all fields from fields, allowing overrides via kwargs
+        # print(kwargs)
+        # print(self.fields.items())
         num_losses = len(
             [mf for mf in self.fields.values() if mf.include_in_loss])
         for name, mf in self.fields.items():
@@ -275,7 +277,7 @@ class Metric(params.Params, ABC):
             return True
         else:
             raise Exception(
-                f"Main metric {name} is not 'loss' and"
+                f"Main metric '{name}' is not 'loss' and "
                 "cannot be found in the Metric fields")
 
     def __gt__(self, other: object) -> bool:

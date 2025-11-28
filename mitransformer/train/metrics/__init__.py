@@ -1,6 +1,7 @@
 from .composed import (  # noqa: F401
     SupervisedMetric, EvalMetric, SupervisedEvalMetric,
-    CostsMetric, CostsEvalMetric, LMMetric)
+    CostsMetric, CostsEvalMetric, LMMetric,
+    DynamicWeightedEvalMetric, DynamicWeightedMetric)
 from .writer import MetricWriter, metric_writer  # noqa: F401
 from .utils import (  # noqa: F401
     minimise)

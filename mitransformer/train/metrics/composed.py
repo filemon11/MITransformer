@@ -2,7 +2,14 @@ from . import base, field
 
 import torch
 
+from typing import Sequence, Any
+
 # ---------------------- concrete metric classes ---------------------------
+
+_dynamic_weighted_metric_cache: dict[tuple[str, ...], Any] = {}
+_dynamic_weighted_eval_metric_cache: dict[tuple[str, ...], Any] = {}
+# NOTE: this is a stupid way of implementing it and should be
+# changed at some point...
 
 
 class LMMetric(base.Metric):
@@ -57,3 +64,37 @@ class CostsEvalMetric(CostsMetric, EvalMetric):
     fields: dict[str, field.MetricField] = {
         **CostsMetric.fields, **EvalMetric.fields,
     }
+
+
+def DynamicWeightedMetric(loss_names: Sequence):
+    key = tuple(loss_names)
+    if key in _dynamic_weighted_metric_cache:
+        return _dynamic_weighted_metric_cache[key]
+
+    new_class = type(
+        f"DynamicWeightedMetric_{'_'.join(key)}",
+        (base.WeightedMetric,),
+        {"fields": {
+            **base.WeightedMetric.fields,
+            **{name: field.loss("num") for name in key}
+        }}
+    )
+    _dynamic_weighted_metric_cache[key] = new_class
+    return new_class
+
+
+def DynamicWeightedEvalMetric(loss_names: Sequence):
+    key = tuple(loss_names)
+    if key in _dynamic_weighted_eval_metric_cache:
+        return _dynamic_weighted_eval_metric_cache[key]
+
+    TrainMetric = DynamicWeightedMetric(loss_names)
+    new_class = type(
+        f"DynamicWeightedEvalMetric_{'_'.join(key)}",
+        (TrainMetric, EvalMetric),
+        {"fields": {
+            **TrainMetric.fields,
+            **EvalMetric.fields}}
+    )
+    _dynamic_weighted_metric_cache[key] = new_class
+    return new_class

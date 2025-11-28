@@ -7,8 +7,8 @@ from ..data.dataset import (
 from .metrics import (
     sum_metrics, SupervisedEvalMetric,
     SupervisedMetric, LMMetric, EvalMetric,
-    CostsMetric, CostsEvalMetric,
-    MetricWriter)
+    MetricWriter, DynamicWeightedMetric,
+    DynamicWeightedEvalMetric)
 
 from ..data import (
     DataLoader, get_loader,
@@ -93,6 +93,7 @@ class GeneralConfig(utils.Params):
     w1: float | None = None
     w2: float | None = None
     w3: float | None = None
+    additional_losses: Sequence[str] = ("attention_entropy", "distance")
 
 
 @dataclass
@@ -113,6 +114,7 @@ class LMTrainer():
             self, transformerlm: models.MITransformerLM,
             transformer_config: models.MITransformerConfig,
             config: GeneralConfig):
+
         self.writer = MetricWriter(
             log_dir=os.path.join("./runs", config.model_name))
         self.transformerlm: models.MITransformerLM | DDP = transformerlm
@@ -381,26 +383,39 @@ class LMTrainer():
             input_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
             reduction: Literal["sum", "mean"] = "mean"
-            ) -> tuple[torch.Tensor, torch.Tensor]:
+            ) -> dict[str, torch.Tensor]:
         """proj_states cannot be none if mode is `att_n`.
         arc_logits have form (M, B, S, S)
         TODO: restructure so that we have two modes of returning arcs;
         one mode (item 2 returned) for alpha computation and second mode
         (item 3 returned with dict of proj_states and att
         for combined loss mode)"""
+        out_dict: dict[str, torch.Tensor] = {}
+        if len(self.config.additional_losses) == 0:
+            return out_dict
+
         arc_distribution = attdistr.arc_distribution(
             additional, mode=self.config.distr_mode,
             without_diagonal=not self.config.include_current,
             without_dummy_prefixes=2)
         del additional
 
-        return (
-            self.attention_entropy_loss(
-                arc_distribution, to_ignore_mask, input_ids,
-                ignore_index, reduction),
-            self.distance_loss(
-                arc_distribution, to_ignore_mask, input_ids,
-                ignore_index, reduction))
+        for loss in self.config.additional_losses:
+            match loss:
+                case "attention_entropy":
+                    out_dict[f"{loss}_loss"] = (
+                        self.attention_entropy_loss(
+                            arc_distribution, to_ignore_mask, input_ids,
+                            ignore_index, reduction))
+                case "distance":
+                    out_dict[f"{loss}_loss"] = (
+                        self.distance_loss(
+                            arc_distribution, to_ignore_mask, input_ids,
+                            ignore_index, reduction))
+                case _:
+                    raise Exception(f"Additional loss '{loss}' unknown.")
+
+        return out_dict
 
     @staticmethod
     def filter_arc_scores(
@@ -498,8 +513,7 @@ class LMTrainer():
             perplexity: float | None = None,
             uas: float | pd.DataFrame | None = None,
             att_entropy: pd.DataFrame | None = None,
-            attention_entropy_loss: torch.Tensor | None = None,
-            distance_loss: torch.Tensor | None = None,
+            additional_losses: dict[str, torch.Tensor] | None = None,
             weights: Sequence | None = None
             ) -> LMMetric:
         if perplexity is not None:
@@ -526,16 +540,15 @@ class LMTrainer():
                         main_metric=self.config.early_stop_metric)
                 else:
                     assert (
-                        attention_entropy_loss is not None
-                        and distance_loss is not None
+                        additional_losses is not None
                         and weights is not None
                     )
-                    return CostsEvalMetric(
+                    losses = ["lm_loss"] + list(additional_losses.keys())
+                    return DynamicWeightedEvalMetric(losses)(
                         num=num_instances,
                         lm_loss=lm_loss,
                         main_metric=self.config.early_stop_metric,
-                        attention_entropy_loss=attention_entropy_loss,
-                        distance_loss=distance_loss,
+                        **additional_losses,
                         weights=weights,
                         perplexity=perplexity
                     )
@@ -548,16 +561,15 @@ class LMTrainer():
                     main_metric=self.config.early_stop_metric)
             else:
                 assert (
-                    attention_entropy_loss is not None
-                    and distance_loss is not None
+                    additional_losses is not None
                     and weights is not None
                 )
-                return CostsMetric(
+                losses = ["lm_loss"] + list(additional_losses.keys())
+                return DynamicWeightedMetric(losses)(
                     num=num_instances,
                     lm_loss=lm_loss,
                     main_metric=self.config.early_stop_metric,
-                    attention_entropy_loss=attention_entropy_loss,
-                    distance_loss=distance_loss,
+                    **additional_losses,
                     weights=weights,
                 )
         else:
@@ -590,8 +602,7 @@ class LMTrainer():
             ignore_index=ignore_index,
             reduction="sum")
         arc_loss: torch.Tensor | None = None
-        attention_entropy_loss: torch.Tensor | None = None
-        distance_loss: torch.Tensor | None = None
+        additional_losses: dict[str, torch.Tensor] | None = None
 
         num_arc_instances: int | None = None
         if self.train_config.dependency_mode == "supervised":
@@ -623,7 +634,7 @@ class LMTrainer():
                     "Scores did not align. Check keys.")
 
         elif self.config.combined_loss:
-            attention_entropy_loss, distance_loss = self.attention_losses(
+            additional_losses = self.attention_losses(
                 additional, to_ignore_mask="triangular",
                 reduction="sum",
                 input_ids=batch["input_ids"], ignore_index=ignore_index)
@@ -635,8 +646,7 @@ class LMTrainer():
             num_arc_instances=num_arc_instances,
             lm_loss=lm_loss,
             arc_loss=arc_loss,
-            attention_entropy_loss=attention_entropy_loss,
-            distance_loss=distance_loss,
+            additional_losses=additional_losses,
             weights=(self.config.w1, self.config.w2, self.config.w3))
 
         loss = metric.loss
@@ -688,9 +698,8 @@ class LMTrainer():
             labels, ignore_index).sum().detach().cpu().item()
 
         uas_abs: None | pd.DataFrame | float = None
-        arc_loss = None
-        attention_entropy_loss: torch.Tensor | None = None
-        distance_loss: torch.Tensor | None = None
+        arc_loss: None | torch.Tensor = None
+        additional_losses = None | dict[str, torch.Tensor]
 
         att_entropy = None
         num_arc_instances = None
@@ -754,13 +763,14 @@ class LMTrainer():
                     for key, logits_preds in score_logits.items()})
                 # can make separate list of heads
         elif self.config.combined_loss:
-            attention_entropy_loss, distance_loss = self.attention_losses(
+            additional_losses = self.attention_losses(
                 additional,
                 to_ignore_mask="triangular",
                 reduction="sum",
                 input_ids=batch["input_ids"],
                 ignore_index=ignore_index)
 
+        print(arc_loss)
         metric = self.get_metric(
             num_instances,
             lm_loss=lm_loss,
@@ -769,8 +779,7 @@ class LMTrainer():
             perplexity=surprisal_sum,
             uas=uas_abs,
             att_entropy=att_entropy,
-            attention_entropy_loss=attention_entropy_loss,
-            distance_loss=distance_loss,
+            additional_losses=additional_losses,
             weights=(self.config.w1, self.config.w2, self.config.w3))
         metric.to_("cpu")
         metric.detach_()
