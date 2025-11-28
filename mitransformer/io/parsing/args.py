@@ -59,9 +59,7 @@ class TrainParserArgs(ParserArgs):
     global_distr: bool
     length_weighted: bool
     include_current: bool
-    w1: float | None
-    w2: float | None
-    w3: float | None
+    losses: None | dict[str, float | int]
     arc_loss_weighted: bool
     discriminative: bool
 
@@ -112,9 +110,7 @@ class HyperoptParserArgs(ParserArgs):
     global_distr: bool | list[bool]
     learning_rate: float | tuple[float, float] | list[float]
     loss_alpha: float | tuple[float, float] | list[float | None] | None
-    w1: float | tuple[float, float] | list[float] | None
-    w2: float | tuple[float, float] | list[float] | None
-    w3: float | tuple[float, float] | list[float] | None
+    losses: list[dict[str, float | int]] | dict[str, float | int] | None
 
     arc_loss_weighted: bool | list[bool]
     discriminative: bool | list[bool]
@@ -158,9 +154,7 @@ class TestParserArgs(ParserArgs):
     global_distr: bool
     batch_size: int | Undefined
     loss_alpha: float | None | Undefined
-    w1: float | None | Undefined
-    w2: float | None | Undefined
-    w3: float | None | Undefined
+    losses: dict[str, float | int] | None | Undefined
     arc_loss_weighted: bool | Undefined
 
     att_plot: bool

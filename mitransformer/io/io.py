@@ -25,7 +25,7 @@ from mitransformer.utils.logmaker import (
     getLogger, info)
 
 from typing import (
-    Any, Iterable, cast, Iterator)
+    Any, Iterable, cast, Iterator, Union)
 
 import time
 
@@ -49,9 +49,9 @@ if not, search on huggingface and parse and load new.
 
 
 def _load_data_provider(
-        arguments: (
-            "parsing.ParserArgs " |
-            "parsing.TestParserArgs | parsing.CompareParserArgs"),
+        arguments: Union[
+            "parsing.ParserArgs ",
+            "parsing.TestParserArgs | parsing.CompareParserArgs"],
         memmaped: bool = False,
         model_num: int | None = None
         ) -> DataProvider:

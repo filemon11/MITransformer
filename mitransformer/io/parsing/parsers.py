@@ -2,7 +2,10 @@ import torch
 
 import optuna
 import argparse
-from ast import literal_eval as make_tuple
+from ast import literal_eval
+# Note that using this function is probably not
+# very safe but okay for low risk applications
+# as this
 
 from . import argtypes
 from ...utils import logmaker
@@ -177,17 +180,10 @@ def create_parser() -> argparse.ArgumentParser:
             "loss weight for supervised learning; 1.0 is only "
             "language model training while 0.0 is only arc training"))
     trainer_group.add_argument(
-        '--w1', type=argtypes.OptNone(float), default=None,
+        '--losses', type=argtypes.OptNone(literal_eval), default={"lm": 1},
         help=(
-            "Factor for language modelling loss in combined cost"))
-    trainer_group.add_argument(
-        '--w2', type=argtypes.OptNone(float), default=None,
-        help=(
-            "Factor for attention entropy loss in combined cost"))
-    trainer_group.add_argument(
-        '--w3', type=argtypes.OptNone(float), default=None,
-        help=(
-            "Factor for distance loss in combined cost"))
+            "Dictionary of losses for combined loss setting "
+            "and their weights."))
     trainer_group.add_argument(
         '--arc_loss_weighted', type=argtypes.str_to_bool, default=False,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
@@ -199,7 +195,7 @@ def create_parser() -> argparse.ArgumentParser:
     model_group = train_parser.add_argument_group('model')
     model_group.add_argument(
         '--transformer_description',
-        type=argtypes.OptNone(make_tuple), default=None,
+        type=argtypes.OptNone(literal_eval), default=None,
         help=(
             "Architecture of the transformer model. Tuple of layers "
             "where each layer is a tuple of a tuple of "
@@ -209,7 +205,7 @@ def create_parser() -> argparse.ArgumentParser:
             "--width, --depth, --unrestricted_before, --unrestricted_after"))
     model_group.add_argument(
         '--layer_design',
-        type=argtypes.OptNone(make_tuple), default=None,
+        type=argtypes.OptNone(literal_eval), default=None,
         # ("head_current", "child_current"),
         help=(
             "design of the core transformer layer; tuple of head types "
@@ -468,20 +464,14 @@ def create_parser() -> argparse.ArgumentParser:
             "context (maximum entropy). The scores are mapped to an "
             "the interval [0, 1]."))
     hyperopt_flexible_trainer_group.add_argument(
-        '--w1', type=argtypes.HyperoptSpace(argtypes.OptNone(float)),
+        '--losses',
+        type=argtypes.OptNone(argtypes.HyperoptSpace(literal_eval)),
         default=None,
         help=(
-            "Factor for language modelling loss in combined cost"))
-    hyperopt_flexible_trainer_group.add_argument(
-        '--w2', type=argtypes.HyperoptSpace(argtypes.OptNone(float)),
-        default=None,
-        help=(
-            "Factor for attention entropy loss in combined cost"))
-    hyperopt_flexible_trainer_group.add_argument(
-        '--w3', type=argtypes.HyperoptSpace(argtypes.OptNone(float)),
-        default=None,
-        help=(
-            "Factor for distance loss in combined cost"))
+            "Dictionary of losses for combined loss setting "
+            "and their weights."))
+    # TODO: make it possible to define continuous spaces for loss weights
+    # separately as well as sampling s.t. the weights sum to 1.
     hyperopt_flexible_trainer_group.add_argument(
         '--arc_loss_weighted',
         type=argtypes.HyperoptSpace(argtypes.str_to_bool),
@@ -509,7 +499,7 @@ def create_parser() -> argparse.ArgumentParser:
         'model flexible')
     hyperopt_flexible_model_group.add_argument(
         '--transformer_description',
-        type=argtypes.HyperoptSpace(argtypes.OptNone(make_tuple)),
+        type=argtypes.HyperoptSpace(argtypes.OptNone(literal_eval)),
         default=None,  # ((('head', 'child'), 1),),
         help=(
             "Architecture of the transformer model. Tuple of layers "
@@ -518,7 +508,7 @@ def create_parser() -> argparse.ArgumentParser:
             "The width is applied to every head type in the layer."))
     hyperopt_flexible_model_group.add_argument(
         '--layer_design',
-        type=argtypes.HyperoptSpace(make_tuple), default=None,
+        type=argtypes.HyperoptSpace(literal_eval), default=None,
         # ("head_current", "child_current"),
         help=(
             "design of the core transformer layer; tuple of head types "
@@ -722,29 +712,29 @@ def create_parser() -> argparse.ArgumentParser:
         help="how to use dependency information")
     trainer_group.add_argument(
         '--combined_loss', type=argtypes.str_to_bool,
-        default=False,
+        default=Undefined,
         help=(
             "whether to use combined loss for unsupervised"
             " memory cost learning"))
     trainer_group.add_argument(
         '--distr_mode', type=str,
-        default="att", choices=("att", "att-n"),
+        default=Undefined, choices=("att", "att-n"),
         help="mode for calculation attention distribution for combined loss")
     trainer_group.add_argument(
         '--global_distr', type=argtypes.str_to_bool,
-        default=True,
+        default=Undefined,
         help=(
             "Whether to compute the distribution for the combined loss"
             " globally or as an average of per-head distributions."))
     trainer_group.add_argument(
         '--include_current', type=argtypes.str_to_bool,
-        default=False,
+        default=Undefined,
         help=(
             "Include attention to current item (diagonal) when computing"
             "the attention distribution for attention losses."))
     trainer_group.add_argument(
         '--length_weighted', type=argtypes.str_to_bool,
-        default=False,
+        default=Undefined,
         help=(
             "Normalise attention entropy loss by length of left "
             "context (maximum entropy). The scores are mapped to an "
@@ -760,17 +750,10 @@ def create_parser() -> argparse.ArgumentParser:
             "loss weight for supervised learning; 1.0 is only "
             "language model training while 0.0 is only arc training"))
     trainer_group.add_argument(
-        '--w1', type=argtypes.OptNone(float), default=Undefined,
+        '--losses', type=argtypes.OptNone(literal_eval), default=Undefined,
         help=(
-            "Factor for language modelling loss in combined cost"))
-    trainer_group.add_argument(
-        '--w2', type=argtypes.OptNone(float), default=Undefined,
-        help=(
-            "Factor for attention entropy loss in combined cost"))
-    trainer_group.add_argument(
-        '--w3', type=argtypes.OptNone(float), default=Undefined,
-        help=(
-            "Factor for distance loss in combined cost"))
+            "Dictionary of losses for combined loss setting "
+            "and their weights."))
     trainer_group.add_argument(
         '--arc_loss_weighted', type=argtypes.str_to_bool, default=Undefined,
         help="Overrepresent arcs against non-arcs in arc loss calculation")

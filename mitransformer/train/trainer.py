@@ -35,7 +35,7 @@ import os
 
 from dataclasses import dataclass, field
 from collections import defaultdict
-from collections.abc import Sequence
+from types import MappingProxyType
 
 from ..utils import pickle
 
@@ -90,10 +90,8 @@ class GeneralConfig(utils.Params):
     global_distr: bool = True
     length_weighted: bool = False
     include_current: bool = True
-    w1: float | None = None
-    w2: float | None = None
-    w3: float | None = None
-    additional_losses: Sequence[str] = ("attention_entropy", "distance")
+    losses: None | Mapping[str, int | float] = MappingProxyType(
+        {"lm": 1})
 
 
 @dataclass
@@ -391,7 +389,8 @@ class LMTrainer():
         (item 3 returned with dict of proj_states and att
         for combined loss mode)"""
         out_dict: dict[str, torch.Tensor] = {}
-        if len(self.config.additional_losses) == 0:
+        assert self.config.losses is not None
+        if len(self.config.losses) == 1:
             return out_dict
 
         arc_distribution = attdistr.arc_distribution(
@@ -400,7 +399,7 @@ class LMTrainer():
             without_dummy_prefixes=2)
         del additional
 
-        for loss in self.config.additional_losses:
+        for loss in self.config.losses:
             match loss:
                 case "attention_entropy":
                     out_dict[f"{loss}_loss"] = (
@@ -412,6 +411,8 @@ class LMTrainer():
                         self.distance_loss(
                             arc_distribution, to_ignore_mask, input_ids,
                             ignore_index, reduction))
+                case "lm":
+                    pass
                 case _:
                     raise Exception(f"Additional loss '{loss}' unknown.")
 
@@ -513,8 +514,8 @@ class LMTrainer():
             perplexity: float | None = None,
             uas: float | pd.DataFrame | None = None,
             att_entropy: pd.DataFrame | None = None,
-            additional_losses: dict[str, torch.Tensor] | None = None,
-            weights: Sequence | None = None
+            additional_losses: Mapping[str, torch.Tensor] | None = None,
+            weights: Mapping[str, int | float] | None = None
             ) -> LMMetric:
         if perplexity is not None:
             if arc_loss is not None:
@@ -549,7 +550,7 @@ class LMTrainer():
                         lm_loss=lm_loss,
                         main_metric=self.config.early_stop_metric,
                         **additional_losses,
-                        weights=weights,
+                        weights=list(weights.values()),
                         perplexity=perplexity
                     )
 
@@ -570,7 +571,7 @@ class LMTrainer():
                     lm_loss=lm_loss,
                     main_metric=self.config.early_stop_metric,
                     **additional_losses,
-                    weights=weights,
+                    weights=list(weights.values()),
                 )
         else:
             assert num_arc_instances is not None
@@ -647,7 +648,7 @@ class LMTrainer():
             lm_loss=lm_loss,
             arc_loss=arc_loss,
             additional_losses=additional_losses,
-            weights=(self.config.w1, self.config.w2, self.config.w3))
+            weights=self.config.losses)
 
         loss = metric.loss
         if self.train_config.gradient_acc is not None:
@@ -779,7 +780,7 @@ class LMTrainer():
             uas=uas_abs,
             att_entropy=att_entropy,
             additional_losses=additional_losses,
-            weights=(self.config.w1, self.config.w2, self.config.w3))
+            weights=self.config.losses)
         metric.to_("cpu")
         metric.detach_()
         return metric
