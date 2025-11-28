@@ -10,7 +10,7 @@ from ..train.metrics import (
     MetricWriter, metric_writer, sum_and_std_metrics, minimise)
 from ..utils.params import dict_info, is_undef
 from ..train.hooks import TreePlotHook, AttentionPlotHook
-from . import args
+from . import args, argtypes
 
 from tqdm import tqdm
 import optuna
@@ -25,108 +25,13 @@ from mitransformer.utils.logmaker import (
     getLogger, info)
 
 from typing import (
-    Any, Iterable, cast, Iterator, TypeVar, Generic,
-    Sequence, Callable)
+    Any, Iterable, cast, Iterator)
 
 import time
 
 logger = getLogger(__name__)
 optuna.logging.enable_propagation()  # Propagate logs to the root logger.
 optuna.logging.disable_default_handler()  # Stop showing logs in sys.stderr.
-
-
-T = TypeVar("T")
-
-
-class StrToLiteral(Generic[T]):
-    def __init__(self, *selection: T):
-        self.selection: tuple[T, ...] = selection
-
-    def __call__(self, string: str) -> T:
-        if string in self.selection:
-            return cast(T, string)
-        else:
-            raise Exception(
-                f"Argument value not allowed."
-                f"Given: {string}, allowed: {self.selection}")
-
-
-def str_to_bool(string: str) -> bool:
-    try:
-        if (string.lower() == "true"
-                or int(string) == 1):
-            return True
-    except ValueError:
-        pass
-    try:
-        if (string.lower() == "false"
-                or int(string) == 0):
-            return False
-    except ValueError:
-        pass
-    raise Exception((
-        f"argument value {string} cannot"
-        "be parsed as a string!"))
-
-
-class OptNone(Generic[T]):
-    def __init__(self, type: Callable[[Any], T]):
-        self.type = type
-
-    def __call__(self, value: str) -> None | T:
-        if value.lower() == 'none':
-            return None
-        try:
-            return self.type(value)  # type: ignore
-        except TypeError:
-            raise Exception(
-                f"Constructor for {self.type} does not accept an argument")
-
-
-class HyperoptSpace(Generic[T]):
-    def __init__(
-            self, type: Callable[[Any], T],
-            choices: Sequence[T] | None = None):
-        self.type = type
-        self.choices = choices
-
-    def __call__(self, value: str) -> tuple[T, T] | list[T] | T:
-        # try to split via :
-        split = value.split(":")
-        if len(split) == 2:
-            try:
-                h_range = (
-                    self.type(split[0]),
-                    self.type(split[1]))  # type: ignore
-                assert (isinstance(h_range[0], (int, float, complex))
-                        and not isinstance(h_range[0], bool)), (
-                        f"Non-numeric range detected: {h_range}")
-                return h_range
-            except TypeError:
-                raise Exception(
-                    f"Constructor for {self.type} does not accept an argument")
-
-        assert len(split) < 2, (
-            f"Range must have one starting and one end point. Given: {value}")
-
-        split = value.split(";")
-        if len(split) == 1:
-            try:
-                return self.type(value)  # type: ignore
-            except TypeError:
-                raise Exception(
-                    f"Constructor for {self.type} does not accept an argument")
-
-        try:
-            options = [self.type(v) for v in split]  # type: ignore
-            if self.choices is not None:
-                for o in options:
-                    assert o in self.choices, (
-                        f"{o} must be one of {self.choices}")
-            return options
-        except TypeError:
-            raise Exception(
-                f"Constructor for {self.type} does not accept an argument")
 
 
 """
@@ -569,9 +474,9 @@ USE_LOG = {"learning_rate"}
 
 def hyperopt_arguments_sampler(
         name: str,
-        arg: T | list[T] | tuple[T, T],
+        arg: argtypes.T | list[argtypes.T] | tuple[argtypes.T, argtypes.T],
         trial
-        ) -> T:
+        ) -> argtypes.T:
     if isinstance(arg, list):
         assert len(arg) > 0, f"Provided an empty selection for {name}!"
         return trial.suggest_categorical(name, arg)
@@ -591,7 +496,7 @@ def hyperopt_arguments_sampler(
             raise Exception(
                 f"Range {arg} for arg {name} inconsistently typed!")
     else:
-        return cast(T, arg)
+        return cast(argtypes.T, arg)
 
 
 class Objective:

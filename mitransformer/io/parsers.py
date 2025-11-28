@@ -4,7 +4,7 @@ import optuna
 import argparse
 from ast import literal_eval as make_tuple
 
-from . import io
+from . import argtypes
 from ..utils import logmaker
 from ..utils.params import Undefined
 
@@ -18,7 +18,7 @@ torch.autograd.set_detect_anomaly(True)
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--rank', '--local-rank', type=io.OptNone(int), default=None,
+        '--rank', '--local-rank', type=argtypes.OptNone(int), default=None,
         help="which rank this process runs on; set by torchrun.")
     parser.add_argument(
         '--n_workers', type=int, default=0,
@@ -32,7 +32,7 @@ def create_parser() -> argparse.ArgumentParser:
         default="cuda" if torch.cuda.is_available() else "cpu",
         help="device to run models on; must be 'cuda' if --use_ddp is set")
     parser.add_argument(
-        '--use_ddp', type=io.str_to_bool,
+        '--use_ddp', type=argtypes.str_to_bool,
         default=torch.cuda.device_count() > 1,
         help="whether to use distributed GPU training")
     parser.add_argument(
@@ -56,33 +56,33 @@ def create_parser() -> argparse.ArgumentParser:
         '--dataset_name', type=str, help='name of the dataset to load',
         default='Wikitext_processed')
     data_group.add_argument(
-        '--max_len_train', type=io.OptNone(int), default=40,
+        '--max_len_train', type=argtypes.OptNone(int), default=40,
         help='maximum number of tokens in training set')
     data_group.add_argument(
-        '--max_len_eval_test', type=io.OptNone(int), default=None,
+        '--max_len_eval_test', type=argtypes.OptNone(int), default=None,
         help='maximum number of tokens in eval set')
     data_group.add_argument(
         '--triangulate', type=int, default=0,
         help='TODO')
     data_group.add_argument(
-        '--vocab_size', type=io.OptNone(int), default=50_000,
+        '--vocab_size', type=argtypes.OptNone(int), default=50_000,
         help=(
             'number of most frequent tokens to embed; all other '
             'tokens are replaced with an UNK token;'
             'can be None when loading existing token_mapper'))
     data_group.add_argument(
-        '--first_k', type=io.OptNone(int), default=None,
+        '--first_k', type=argtypes.OptNone(int), default=None,
         help='only load first k sentences of the training set')
     data_group.add_argument(
-        '--first_k_eval_test', type=io.OptNone(int), default=None,
+        '--first_k_eval_test', type=argtypes.OptNone(int), default=None,
         help='only load first k sentences of the eval and test sets')
     data_group.add_argument(
-        '--connect_with_dummy', type=io.str_to_bool, default=True,
+        '--connect_with_dummy', type=argtypes.str_to_bool, default=True,
         help=(
             'Establish an arc to a dummy token when there is no '
             'parent/child among the precedents?'))
     data_group.add_argument(
-        '--connect_with_self', type=io.str_to_bool, default=False,
+        '--connect_with_self', type=argtypes.str_to_bool, default=False,
         help=(
             'Establish a recursive arc to the token itself when there '
             'is not parent/child among the precedents?'))
@@ -95,7 +95,7 @@ def create_parser() -> argparse.ArgumentParser:
     # # # Trainer parser group
     trainer_group = train_parser.add_argument_group('trainer')
     trainer_group.add_argument(
-        '--model_name', type=io.OptNone(str),
+        '--model_name', type=argtypes.OptNone(str),
         default=None,
         help="model name. Set to experiment name if None")
     trainer_group.add_argument(
@@ -104,7 +104,7 @@ def create_parser() -> argparse.ArgumentParser:
         default="supervised",
         help="how to use dependency information")
     trainer_group.add_argument(
-        '--combined_loss', type=io.str_to_bool,
+        '--combined_loss', type=argtypes.str_to_bool,
         default=False,
         help=(
             "whether to use combined loss for"
@@ -114,19 +114,19 @@ def create_parser() -> argparse.ArgumentParser:
         default="att", choices=("att", "att-n"),
         help="mode for calculation attention distribution for combined loss")
     trainer_group.add_argument(
-        '--global_distr', type=io.str_to_bool,
+        '--global_distr', type=argtypes.str_to_bool,
         default=True,
         help=(
             "Whether to compute the distribution for the combined loss"
             " globally or as an average of per-head distributions."))
     trainer_group.add_argument(
-        '--include_current', type=io.str_to_bool,
+        '--include_current', type=argtypes.str_to_bool,
         default=False,
         help=(
             "Include attention to current item (diagonal) when computing"
             "the attention distribution for attention losses."))
     trainer_group.add_argument(
-        '--length_weighted', type=io.str_to_bool,
+        '--length_weighted', type=argtypes.str_to_bool,
         default=False,
         help=(
             "Normalise attention entropy loss by length of left "
@@ -138,13 +138,13 @@ def create_parser() -> argparse.ArgumentParser:
             "batch size; in case of multiple GPUs it is "
             "chunked across the devices"))
     trainer_group.add_argument(
-        '--use_steps', type=io.str_to_bool, default=False,
+        '--use_steps', type=argtypes.str_to_bool, default=False,
         help=(
             "Where the unit of evaluation are steps (i.e. batches) "
             "instead of epochs. If true, --eval_interval "
             "refers to number of batches processed."))
     trainer_group.add_argument(
-        '--max_steps', type=io.OptNone(int), default=100_000,
+        '--max_steps', type=argtypes.OptNone(int), default=100_000,
         help=(
             "maximum number of steps (batches) to process "
             "if --use_steps is set to true"))
@@ -152,12 +152,13 @@ def create_parser() -> argparse.ArgumentParser:
         '--eval_interval', type=int,
         default=1, help="frequency to perform evaluations in")
     trainer_group.add_argument(
-        '--early_stop_after', type=io.OptNone(int), default=None,
+        '--early_stop_after', type=argtypes.OptNone(int), default=None,
         help=(
             "abort training after x evaluations without "
             "improvement on the eval loss; if None, no early stopping"))
     trainer_group.add_argument(
-        '--early_stop_metric', type=io.OptNone(str), default='perplexity',
+        '--early_stop_metric', type=argtypes.OptNone(str),
+        default='perplexity',
         help=(
             "metric to chose for early stopping if "
             "--early_stop_after is not none"))
@@ -165,40 +166,40 @@ def create_parser() -> argparse.ArgumentParser:
         '--epochs', type=int, default=100,
         help="how many epochs to train for")
     trainer_group.add_argument(
-        '--gradient_acc', type=io.OptNone(int), default=None,
+        '--gradient_acc', type=argtypes.OptNone(int), default=None,
         help="If specified, only optimises after n iterations.")
     trainer_group.add_argument(
         '--learning_rate', type=float, default=1e-3,
         help="learning rate for the optimiser")
     trainer_group.add_argument(
-        '--loss_alpha', type=io.OptNone(float), default=0.5,
+        '--loss_alpha', type=argtypes.OptNone(float), default=0.5,
         help=(
             "loss weight for supervised learning; 1.0 is only "
             "language model training while 0.0 is only arc training"))
     trainer_group.add_argument(
-        '--w1', type=io.OptNone(float), default=None,
+        '--w1', type=argtypes.OptNone(float), default=None,
         help=(
             "Factor for language modelling loss in combined cost"))
     trainer_group.add_argument(
-        '--w2', type=io.OptNone(float), default=None,
+        '--w2', type=argtypes.OptNone(float), default=None,
         help=(
             "Factor for attention entropy loss in combined cost"))
     trainer_group.add_argument(
-        '--w3', type=io.OptNone(float), default=None,
+        '--w3', type=argtypes.OptNone(float), default=None,
         help=(
             "Factor for distance loss in combined cost"))
     trainer_group.add_argument(
-        '--arc_loss_weighted', type=io.str_to_bool, default=False,
+        '--arc_loss_weighted', type=argtypes.str_to_bool, default=False,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
     trainer_group.add_argument(
-        '--discriminative', type=io.str_to_bool, default=False,
+        '--discriminative', type=argtypes.str_to_bool, default=False,
         help="Train the language model in a discriminative fashion")
 
     # # # Model parser group
     model_group = train_parser.add_argument_group('model')
     model_group.add_argument(
         '--transformer_description',
-        type=io.OptNone(make_tuple), default=None,
+        type=argtypes.OptNone(make_tuple), default=None,
         help=(
             "Architecture of the transformer model. Tuple of layers "
             "where each layer is a tuple of a tuple of "
@@ -208,14 +209,14 @@ def create_parser() -> argparse.ArgumentParser:
             "--width, --depth, --unrestricted_before, --unrestricted_after"))
     model_group.add_argument(
         '--layer_design',
-        type=io.OptNone(make_tuple), default=None,
+        type=argtypes.OptNone(make_tuple), default=None,
         # ("head_current", "child_current"),
         help=(
             "design of the core transformer layer; tuple of head types "
             "is overriden if --transformer_description is provided"))
     model_group.add_argument(
         '--use_standard',
-        type=io.str_to_bool, default=False,
+        type=argtypes.str_to_bool, default=False,
         help=("whether to add an unrestricted head to the core layer(s)"))
     model_group.add_argument(
         '--width',
@@ -245,37 +246,37 @@ def create_parser() -> argparse.ArgumentParser:
         '--d_ff_factor', type=int, default=4,
         help="hidden dimensionality of the feed-forward layers (*n_embd)")
     model_group.add_argument(
-        '--dropout', type=io.OptNone(float), default=0.3,
+        '--dropout', type=argtypes.OptNone(float), default=0.3,
         help=(
             "hidden dimensionality of the feed-forward layers; "
             "can be further specified by additional dropout params"))
     model_group.add_argument(
-        '--dropout_attn', type=io.OptNone(float), default=0,
+        '--dropout_attn', type=argtypes.OptNone(float), default=0,
         help=(
             "dropout for the attention module; "
             "overridden by --dropout if set to -1"))
     model_group.add_argument(
-        '--dropout_resid', type=io.OptNone(float), default=-1,
+        '--dropout_resid', type=argtypes.OptNone(float), default=-1,
         help=(
             "dropout for the residual connections; "
             "overridden by --dropout if set to -1"))
     model_group.add_argument(
-        '--dropout_ff', type=io.OptNone(float), default=-1,
+        '--dropout_ff', type=argtypes.OptNone(float), default=-1,
         help=(
             "dropout for the feed-forward layers; "
             "overridden by --dropout if set to -1"))
     model_group.add_argument(
-        '--dropout_embd', type=io.OptNone(float), default=-1,
+        '--dropout_embd', type=argtypes.OptNone(float), default=-1,
         help=(
             "dropout for the embedding layer; "
             "overridden by --dropout if set to -1"))
     model_group.add_argument(
-        '--dropout_lstm', type=io.OptNone(float), default=-1,
+        '--dropout_lstm', type=argtypes.OptNone(float), default=-1,
         help=(
             "dropout for the LSTM (if existant); "
             "overridden by --dropout if set to -1"))
     model_group.add_argument(
-        '--use_lstm', type=io.str_to_bool, default=True,
+        '--use_lstm', type=argtypes.str_to_bool, default=True,
         help=("use LSTM layer"))
     model_group.add_argument(
         '--block_size', type=int, default=500,
@@ -284,18 +285,18 @@ def create_parser() -> argparse.ArgumentParser:
         '--n_embd', type=int, default=500,
         help="model embedding size")
     model_group.add_argument(
-        '--overlay_causal', type=io.str_to_bool, default=True,
+        '--overlay_causal', type=argtypes.str_to_bool, default=True,
         help=(
             "whether to overlay a casual mask if providing"
             "masks as additional inputs"))
     model_group.add_argument(
-        '--use_dual_fixed', type=io.str_to_bool, default=False,
+        '--use_dual_fixed', type=argtypes.str_to_bool, default=False,
         help=(
             "whether to cross-fix key and query weights of "
             "the head and child attention heads. Only allowed "
             "if both are present in the description with width 1"))
     model_group.add_argument(
-        '--bias', type=io.str_to_bool, default=False,
+        '--bias', type=argtypes.str_to_bool, default=False,
         help="Whether to use bias in all of the model weights")
     model_group.add_argument(
         '--pos_enc', type=str, choices=("embedding", "sinusoidal"),
@@ -328,46 +329,53 @@ def create_parser() -> argparse.ArgumentParser:
     # Data parser group
     data_group = hyperopt_parser.add_argument_group('data')
     data_group.add_argument(
-        '--dataset_name', type=io.HyperoptSpace(str),
+        '--dataset_name', type=argtypes.HyperoptSpace(str),
         help='name of the dataset to load',
         default='Wikitext_processed')
     data_group.add_argument(
-        '--max_len_train', type=io.HyperoptSpace(io.OptNone(int)), default=40,
+        '--max_len_train',
+        type=argtypes.HyperoptSpace(argtypes.OptNone(int)), default=40,
         help='maximum number of tokens in training set')
     data_group.add_argument(
-        '--max_len_eval_test', type=io.HyperoptSpace(io.OptNone(int)),
+        '--max_len_eval_test',
+        type=argtypes.HyperoptSpace(argtypes.OptNone(int)),
         default=None,
         help='maximum number of tokens in eval set')
     data_group.add_argument(
-        '--triangulate', type=io.HyperoptSpace(int), default=0,
+        '--triangulate', type=argtypes.HyperoptSpace(int), default=0,
         help='TODO')
     data_group.add_argument(
-        '--vocab_size', type=io.HyperoptSpace(io.OptNone(int)), default=50_000,
+        '--vocab_size',
+        type=argtypes.HyperoptSpace(argtypes.OptNone(int)), default=50_000,
         help=(
             'number of most frequent tokens to embed; all other '
             'tokens are replaced with an UNK token;'
             'can be None when loading existing token_mapper'))
     data_group.add_argument(
-        '--first_k', type=io.HyperoptSpace(io.OptNone(int)), default=None,
+        '--first_k',
+        type=argtypes.HyperoptSpace(argtypes.OptNone(int)), default=None,
         help='only load first k sentences of the training set')
     data_group.add_argument(
-        '--first_k_eval_test', type=io.HyperoptSpace(io.OptNone(int)),
+        '--first_k_eval_test',
+        type=argtypes.HyperoptSpace(argtypes.OptNone(int)),
         default=None,
         help='only load first k sentences of the eval and test sets')
     data_group.add_argument(
-        '--connect_with_dummy', type=io.HyperoptSpace(io.str_to_bool),
+        '--connect_with_dummy',
+        type=argtypes.HyperoptSpace(argtypes.str_to_bool),
         default=True,
         help=(
             'Establish an arc to a dummy token when there is no '
             'parent/child among the precedents?'))
     data_group.add_argument(
-        '--connect_with_self', type=io.HyperoptSpace(io.str_to_bool),
+        '--connect_with_self',
+        type=argtypes.HyperoptSpace(argtypes.str_to_bool),
         default=False,
         help=(
             'Establish a recursive arc to the token itself when there '
             'is not parent/child among the precedents?'))
     data_group.add_argument(
-        '--masks_setting', type=io.HyperoptSpace(
+        '--masks_setting', type=argtypes.HyperoptSpace(
             str, choices=("next", "complete", "current")),
         default="current",
         help=('What dependencies to assign to the current token.'))
@@ -381,7 +389,7 @@ def create_parser() -> argparse.ArgumentParser:
         default="supervised",
         help="how to use dependency information")
     hyperopt_fixed_trainer_group.add_argument(
-        '--combined_loss', type=io.str_to_bool,
+        '--combined_loss', type=argtypes.str_to_bool,
         default=False,
         help=(
             "whether to use combined loss"
@@ -392,12 +400,12 @@ def create_parser() -> argparse.ArgumentParser:
             "batch size; in case of multiple GPUs it is"
             "chunked across the devices"))
     hyperopt_fixed_trainer_group.add_argument(
-        '--use_steps', type=io.str_to_bool, default=False,
+        '--use_steps', type=argtypes.str_to_bool, default=False,
         help=(
             "Where the unit of evaluation are steps (i.e. batches) "
             "instead of epochs. If true, --eval_interval refers to batches."))
     hyperopt_fixed_trainer_group.add_argument(
-        '--max_steps', type=io.OptNone(int), default=100_000,
+        '--max_steps', type=argtypes.OptNone(int), default=100_000,
         help=(
             "maximum number of steps (batches) to process "
             "if --use_steps is set to true"))
@@ -405,7 +413,7 @@ def create_parser() -> argparse.ArgumentParser:
         '--eval_interval', type=int,
         default=1, help="frequency to perform evaluations in")
     hyperopt_fixed_trainer_group.add_argument(
-        '--early_stop_after', type=io.OptNone(int), default=None,
+        '--early_stop_after', type=argtypes.OptNone(int), default=None,
         help=(
             "abort training after x evaluations without"
             "improvement on the eval loss"))
@@ -418,65 +426,69 @@ def create_parser() -> argparse.ArgumentParser:
         '--epochs', type=int, default=100,
         help="how many epochs to train for")
     hyperopt_fixed_trainer_group.add_argument(
-        '--gradient_acc', type=io.OptNone(int), default=None,
+        '--gradient_acc', type=argtypes.OptNone(int), default=None,
         help="If specified, only optimises after n iterations.")
 
     # # # Hyperopt Flexible Trainer parser group
     hyperopt_flexible_trainer_group = hyperopt_parser.add_argument_group(
         'trainer flexible')
     hyperopt_flexible_trainer_group.add_argument(
-        '--learning_rate', type=io.HyperoptSpace(float), default=1e-3,
+        '--learning_rate', type=argtypes.HyperoptSpace(float), default=1e-3,
         help="learning rate for the optimiser")
     hyperopt_flexible_trainer_group.add_argument(
-        '--loss_alpha', type=io.HyperoptSpace(float), default=0.5,
+        '--loss_alpha', type=argtypes.HyperoptSpace(float), default=0.5,
         help=(
             "loss weight for supervised learning; 1.0 is only"
             "language model training while 0.0 is only arc training"))
     hyperopt_flexible_trainer_group.add_argument(
-        '--distr_mode', type=io.HyperoptSpace(
-            io.StrToLiteral("att", "att-n")),
+        '--distr_mode', type=argtypes.HyperoptSpace(
+            argtypes.StrToLiteral("att", "att-n")),
         default="att", choices=("att", "att-n"),
         help="mode for calculation attention distribution for combined loss")
     hyperopt_flexible_trainer_group.add_argument(
-        '--global_distr', type=io.HyperoptSpace(
-            io.str_to_bool),
+        '--global_distr', type=argtypes.HyperoptSpace(
+            argtypes.str_to_bool),
         default=True,
         help=(
             "Whether to compute the distribution for the combined loss"
             " globally or as an average of per-head distributions."))
     hyperopt_flexible_trainer_group.add_argument(
-        '--include_current', type=io.HyperoptSpace(
-            io.str_to_bool),
+        '--include_current', type=argtypes.HyperoptSpace(
+            argtypes.str_to_bool),
         default=False,
         help=(
             "Include attention to current item (diagonal) when computing"
             "the attention distribution for attention losses."))
     hyperopt_flexible_trainer_group.add_argument(
-        '--length_weighted', type=io.HyperoptSpace(
-            io.str_to_bool),
+        '--length_weighted', type=argtypes.HyperoptSpace(
+            argtypes.str_to_bool),
         default=False,
         help=(
             "Normalise attention entropy loss by length of left "
             "context (maximum entropy). The scores are mapped to an "
             "the interval [0, 1]."))
     hyperopt_flexible_trainer_group.add_argument(
-        '--w1', type=io.HyperoptSpace(io.OptNone(float)), default=None,
+        '--w1', type=argtypes.HyperoptSpace(argtypes.OptNone(float)),
+        default=None,
         help=(
             "Factor for language modelling loss in combined cost"))
     hyperopt_flexible_trainer_group.add_argument(
-        '--w2', type=io.HyperoptSpace(io.OptNone(float)), default=None,
+        '--w2', type=argtypes.HyperoptSpace(argtypes.OptNone(float)),
+        default=None,
         help=(
             "Factor for attention entropy loss in combined cost"))
     hyperopt_flexible_trainer_group.add_argument(
-        '--w3', type=io.HyperoptSpace(io.OptNone(float)), default=None,
+        '--w3', type=argtypes.HyperoptSpace(argtypes.OptNone(float)),
+        default=None,
         help=(
             "Factor for distance loss in combined cost"))
     hyperopt_flexible_trainer_group.add_argument(
-        '--arc_loss_weighted', type=io.HyperoptSpace(io.str_to_bool),
+        '--arc_loss_weighted',
+        type=argtypes.HyperoptSpace(argtypes.str_to_bool),
         default=False,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
     hyperopt_flexible_trainer_group.add_argument(
-        '--discriminative', type=io.HyperoptSpace(io.str_to_bool),
+        '--discriminative', type=argtypes.HyperoptSpace(argtypes.str_to_bool),
         default=False,
         help="Train the language model in a discriminative fashion")
 
@@ -487,7 +499,7 @@ def create_parser() -> argparse.ArgumentParser:
         '--block_size', type=int, default=500,
         help="maximum sequence length of the model")
     hyperopt_fixed_model_group.add_argument(
-        '--overlay_causal', type=io.str_to_bool, default=True,
+        '--overlay_causal', type=argtypes.str_to_bool, default=True,
         help=(
             "whether to overlay a casual mask if providing"
             "masks as additional inputs"))
@@ -497,7 +509,7 @@ def create_parser() -> argparse.ArgumentParser:
         'model flexible')
     hyperopt_flexible_model_group.add_argument(
         '--transformer_description',
-        type=io.HyperoptSpace(io.OptNone(make_tuple)),
+        type=argtypes.HyperoptSpace(argtypes.OptNone(make_tuple)),
         default=None,  # ((('head', 'child'), 1),),
         help=(
             "Architecture of the transformer model. Tuple of layers "
@@ -506,94 +518,102 @@ def create_parser() -> argparse.ArgumentParser:
             "The width is applied to every head type in the layer."))
     hyperopt_flexible_model_group.add_argument(
         '--layer_design',
-        type=io.HyperoptSpace(make_tuple), default=None,
+        type=argtypes.HyperoptSpace(make_tuple), default=None,
         # ("head_current", "child_current"),
         help=(
             "design of the core transformer layer; tuple of head types "
             "is overriden if --transformer_description is provided"))
     hyperopt_flexible_model_group.add_argument(
         '--use_standard',
-        type=io.HyperoptSpace(io.str_to_bool), default=False,
+        type=argtypes.HyperoptSpace(argtypes.str_to_bool), default=False,
         help=("whether to add an unrestricted head to the core layer(s)"))
     hyperopt_flexible_model_group.add_argument(
         '--width',
-        type=io.HyperoptSpace(int), default=1,
+        type=argtypes.HyperoptSpace(int), default=1,
         help=(
             "width of the core transformer; "
             "is overriden if --transformer_description is provided"))
     hyperopt_flexible_model_group.add_argument(
         '--depth',
-        type=io.HyperoptSpace(int), default=1,
+        type=argtypes.HyperoptSpace(int), default=1,
         help=(
             "depth of the core transformer; "
             "is overriden if --transformer_description is provided"))
     hyperopt_flexible_model_group.add_argument(
         '--unrestricted_before',
-        type=io.HyperoptSpace(int), default=0,
+        type=argtypes.HyperoptSpace(int), default=0,
         help=(
             "number of unrestricted layers below the core transformer; "
             "is overriden if --transformer_description is provided"))
     hyperopt_flexible_model_group.add_argument(
         '--unrestricted_after',
-        type=io.HyperoptSpace(int), default=0,
+        type=argtypes.HyperoptSpace(int), default=0,
         help=(
             "number of unrestricted layers above the core transformer; "
             "is overriden if --transformer_description is provided"))
     hyperopt_flexible_model_group.add_argument(
-        '--d_ff_factor', type=io.HyperoptSpace(int), default=4,
+        '--d_ff_factor', type=argtypes.HyperoptSpace(int), default=4,
         help="hidden dimensionality of the feed-forward layers (*n_embd)")
     hyperopt_flexible_model_group.add_argument(
-        '--dropout', type=io.HyperoptSpace(io.OptNone(float)), default=0.3,
+        '--dropout', type=argtypes.HyperoptSpace(argtypes.OptNone(float)),
+        default=0.3,
         help=(
             "hidden dimensionality of the feed-forward layers; "
             "if provided, fixes the search for all specific dropouts;"
             "if provided, specific dropouts establish individual "
             " search spaces"))
     hyperopt_flexible_model_group.add_argument(
-        '--dropout_attn', type=io.HyperoptSpace(io.OptNone(float)), default=-1,
+        '--dropout_attn', type=argtypes.HyperoptSpace(argtypes.OptNone(float)),
+        default=-1,
         help=(
             "dropout for the attention module; "
             "overriden by --dropout if specified"))
     hyperopt_flexible_model_group.add_argument(
-        '--dropout_resid', type=io.HyperoptSpace(io.OptNone(float)),
+        '--dropout_resid',
+        type=argtypes.HyperoptSpace(argtypes.OptNone(float)),
         default=-1,
         help=(
             "dropout for the residual connections; "
             "overriden by --dropout if specified"))
     hyperopt_flexible_model_group.add_argument(
-        '--dropout_ff', type=io.HyperoptSpace(io.OptNone(float)), default=-1,
+        '--dropout_ff', type=argtypes.HyperoptSpace(argtypes.OptNone(float)),
+        default=-1,
         help=(
             "dropout for the feed-forward layers; "
             "overriden by --dropout if specified"))
     hyperopt_flexible_model_group.add_argument(
-        '--dropout_embd', type=io.HyperoptSpace(io.OptNone(float)), default=-1,
+        '--dropout_embd', type=argtypes.HyperoptSpace(argtypes.OptNone(float)),
+        default=-1,
         help=(
             "dropout for the embedding layer; "
             "overriden by --dropout if specified"))
     hyperopt_flexible_model_group.add_argument(
-        '--dropout_lstm', type=io.HyperoptSpace(io.OptNone(float)), default=-1,
+        '--dropout_lstm', type=argtypes.HyperoptSpace(argtypes.OptNone(float)),
+        default=-1,
         help=(
             "dropout for the LSTM (if existant); "
             "overriden by --dropout if specified"))
     hyperopt_flexible_model_group.add_argument(
-        '--use_lstm', type=io.HyperoptSpace(io.str_to_bool), default=True,
+        '--use_lstm', type=argtypes.HyperoptSpace(argtypes.str_to_bool),
+        default=True,
         help=("use LSTM layer"))
     hyperopt_flexible_model_group.add_argument(
-        '--n_embd', type=io.HyperoptSpace(int), default=500,
+        '--n_embd', type=argtypes.HyperoptSpace(int), default=500,
         help="model embedding size")
     hyperopt_flexible_model_group.add_argument(
-        '--use_dual_fixed', type=io.HyperoptSpace(io.str_to_bool),
+        '--use_dual_fixed', type=argtypes.HyperoptSpace(argtypes.str_to_bool),
         default=False,
         help=(
             "whether to cross-fix key and query weights of "
             "the head and child attention heads. Only allowed "
             "if both are present in the description with width 1"))
     hyperopt_flexible_model_group.add_argument(
-        '--bias', type=io.HyperoptSpace(io.str_to_bool), default=False,
+        '--bias', type=argtypes.HyperoptSpace(argtypes.str_to_bool),
+        default=False,
         help="Whether to use bias in all of the model weights")
     hyperopt_flexible_model_group.add_argument(
-        '--pos_enc', type=io.HyperoptSpace(
-            io.StrToLiteral("embedding", "sinusoidal")),
+        '--pos_enc', type=argtypes.HyperoptSpace(
+            argtypes.StrToLiteral("embedding", "sinusoidal")),
         default="embedding",
         help="What kind of positional encodings to use.")
 
@@ -607,33 +627,33 @@ def create_parser() -> argparse.ArgumentParser:
         '--dataset_name', type=str, help='name of the dataset to load',
         default='Wikitext_processed')
     data_group.add_argument(
-        '--max_len_train', type=io.OptNone(int), default=40,
+        '--max_len_train', type=argtypes.OptNone(int), default=40,
         help='maximum number of tokens in training set')
     data_group.add_argument(
-        '--max_len_eval_test', type=io.OptNone(int), default=None,
+        '--max_len_eval_test', type=argtypes.OptNone(int), default=None,
         help='maximum number of tokens in eval set')
     data_group.add_argument(
         '--triangulate', type=int, default=0,
         help='TODO')
     data_group.add_argument(
-        '--vocab_size', type=io.OptNone(int), default=50_000,
+        '--vocab_size', type=argtypes.OptNone(int), default=50_000,
         help=(
             'number of most frequent tokens to embed; all other '
             'tokens are replaced with an UNK token;'
             'can be None when loading existing token_mapper'))
     data_group.add_argument(
-        '--first_k', type=io.OptNone(int), default=None,
+        '--first_k', type=argtypes.OptNone(int), default=None,
         help='only load first k sentences of the training set')
     data_group.add_argument(
-        '--first_k_eval_test', type=io.OptNone(int), default=None,
+        '--first_k_eval_test', type=argtypes.OptNone(int), default=None,
         help='only load first k sentences of the eval and test sets')
     data_group.add_argument(
-        '--connect_with_dummy', type=io.str_to_bool, default=True,
+        '--connect_with_dummy', type=argtypes.str_to_bool, default=True,
         help=(
             'Establish an arc to a dummy token when there is no '
             'parent/child among the precedents?'))
     data_group.add_argument(
-        '--connect_with_self', type=io.str_to_bool, default=False,
+        '--connect_with_self', type=argtypes.str_to_bool, default=False,
         help=(
             'Establish a recursive arc to the token itself when there '
             'is not parent/child among the precedents?'))
@@ -653,33 +673,33 @@ def create_parser() -> argparse.ArgumentParser:
         '--dataset_name', type=str, help='name of the dataset to load',
         default=Undefined)
     data_group.add_argument(
-        '--max_len_train', type=io.OptNone(int), default=Undefined,
+        '--max_len_train', type=argtypes.OptNone(int), default=Undefined,
         help='maximum number of tokens in training set')
     data_group.add_argument(
-        '--max_len_eval_test', type=io.OptNone(int), default=Undefined,
+        '--max_len_eval_test', type=argtypes.OptNone(int), default=Undefined,
         help='maximum number of tokens in eval set')
     data_group.add_argument(
         '--triangulate', type=int, default=Undefined,
         help='TODO')
     data_group.add_argument(
-        '--vocab_size', type=io.OptNone(int), default=Undefined,
+        '--vocab_size', type=argtypes.OptNone(int), default=Undefined,
         help=(
             'number of most frequent tokens to embed; all other '
             'tokens are replaced with an UNK token;'
             'can be None when loading existing token_mapper'))
     data_group.add_argument(
-        '--first_k', type=io.OptNone(int), default=Undefined,
+        '--first_k', type=argtypes.OptNone(int), default=Undefined,
         help='only load first k sentences of the training set')
     data_group.add_argument(
-        '--first_k_eval_test', type=io.OptNone(int), default=Undefined,
+        '--first_k_eval_test', type=argtypes.OptNone(int), default=Undefined,
         help='only load first k sentences of the eval and test sets')
     data_group.add_argument(
-        '--connect_with_dummy', type=io.str_to_bool, default=Undefined,
+        '--connect_with_dummy', type=argtypes.str_to_bool, default=Undefined,
         help=(
             'Establish an arc to a dummy token when there is no '
             'parent/child among the precedents?'))
     data_group.add_argument(
-        '--connect_with_self', type=io.str_to_bool, default=Undefined,
+        '--connect_with_self', type=argtypes.str_to_bool, default=Undefined,
         help=(
             'Establish a recursive arc to the token itself when there '
             'is not parent/child among the precedents?'))
@@ -692,7 +712,7 @@ def create_parser() -> argparse.ArgumentParser:
     # # # Trainer parser group
     trainer_group = test_parser.add_argument_group('trainer')
     trainer_group.add_argument(
-        '--model_name', type=io.OptNone(str),
+        '--model_name', type=argtypes.OptNone(str),
         default=None,
         help="model name. Set to experiment name if None")
     trainer_group.add_argument(
@@ -701,7 +721,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=Undefined,
         help="how to use dependency information")
     trainer_group.add_argument(
-        '--combined_loss', type=io.str_to_bool,
+        '--combined_loss', type=argtypes.str_to_bool,
         default=False,
         help=(
             "whether to use combined loss for unsupervised"
@@ -711,19 +731,19 @@ def create_parser() -> argparse.ArgumentParser:
         default="att", choices=("att", "att-n"),
         help="mode for calculation attention distribution for combined loss")
     trainer_group.add_argument(
-        '--global_distr', type=io.str_to_bool,
+        '--global_distr', type=argtypes.str_to_bool,
         default=True,
         help=(
             "Whether to compute the distribution for the combined loss"
             " globally or as an average of per-head distributions."))
     trainer_group.add_argument(
-        '--include_current', type=io.str_to_bool,
+        '--include_current', type=argtypes.str_to_bool,
         default=False,
         help=(
             "Include attention to current item (diagonal) when computing"
             "the attention distribution for attention losses."))
     trainer_group.add_argument(
-        '--length_weighted', type=io.str_to_bool,
+        '--length_weighted', type=argtypes.str_to_bool,
         default=False,
         help=(
             "Normalise attention entropy loss by length of left "
@@ -735,34 +755,34 @@ def create_parser() -> argparse.ArgumentParser:
             "batch size; in case of multiple GPUs it is "
             "chunked across the devices"))
     trainer_group.add_argument(
-        '--loss_alpha', type=io.OptNone(float), default=Undefined,
+        '--loss_alpha', type=argtypes.OptNone(float), default=Undefined,
         help=(
             "loss weight for supervised learning; 1.0 is only "
             "language model training while 0.0 is only arc training"))
     trainer_group.add_argument(
-        '--w1', type=io.OptNone(float), default=Undefined,
+        '--w1', type=argtypes.OptNone(float), default=Undefined,
         help=(
             "Factor for language modelling loss in combined cost"))
     trainer_group.add_argument(
-        '--w2', type=io.OptNone(float), default=Undefined,
+        '--w2', type=argtypes.OptNone(float), default=Undefined,
         help=(
             "Factor for attention entropy loss in combined cost"))
     trainer_group.add_argument(
-        '--w3', type=io.OptNone(float), default=Undefined,
+        '--w3', type=argtypes.OptNone(float), default=Undefined,
         help=(
             "Factor for distance loss in combined cost"))
     trainer_group.add_argument(
-        '--arc_loss_weighted', type=io.str_to_bool, default=Undefined,
+        '--arc_loss_weighted', type=argtypes.str_to_bool, default=Undefined,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
 
     # # # Plot parser group
     plot_group = test_parser.add_argument_group('plot')
     plot_group.add_argument(
-        '--att_plot', type=io.str_to_bool,
+        '--att_plot', type=argtypes.str_to_bool,
         default=False,
         help="plot attention matrices")
     plot_group.add_argument(
-        '--tree_plot', type=io.str_to_bool,
+        '--tree_plot', type=argtypes.str_to_bool,
         default=False,
         help="plot dependency trees")
 
