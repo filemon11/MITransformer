@@ -5,8 +5,8 @@ import argparse
 from ast import literal_eval as make_tuple
 
 from . import argtypes
-from ..utils import logmaker
-from ..utils.params import Undefined
+from ...utils import logmaker
+from ...utils.params import Undefined
 
 logger = logmaker.getLogger(__name__)
 optuna.logging.enable_propagation()  # Propagate logs to the root logger.

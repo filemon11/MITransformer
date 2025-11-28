@@ -1,10 +1,10 @@
 import torch
 
-from ..data import (
+from ...data import (
     MasksSetting)
-from ..models import (
+from ...models import (
     TransformerDescription)
-from ..utils.params import Params, Undefined
+from ...utils.params import Params, Undefined
 
 import random
 import os

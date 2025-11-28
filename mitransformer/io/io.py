@@ -10,7 +10,7 @@ from ..train.metrics import (
     MetricWriter, metric_writer, sum_and_std_metrics, minimise)
 from ..utils.params import dict_info, is_undef
 from ..train.hooks import TreePlotHook, AttentionPlotHook
-from . import args, argtypes
+from . import parsing
 
 from tqdm import tqdm
 import optuna
@@ -50,19 +50,19 @@ if not, search on huggingface and parse and load new.
 
 def _load_data_provider(
         arguments: (
-            "args.ParserArgs "
-            "| args.TestParserArgs | args.CompareParserArgs"),
+            "parsing.ParserArgs "
+            "| parsing.TestParserArgs | parsing.CompareParserArgs"),
         memmaped: bool = False,
         model_num: int | None = None
         ) -> DataProvider:
     try:
-        if isinstance(arguments, args.TestParserArgs):
+        if isinstance(arguments, parsing.TestParserArgs):
             provider = DataProvider.load(
                 os.path.join(
                     LMTrainer.model_dir, arguments.model_name,
                     "data_config.json"),
                 **arguments.to_dict())
-        elif isinstance(arguments, args.CompareParserArgs):
+        elif isinstance(arguments, parsing.CompareParserArgs):
             assert isinstance(model_num, int)
             provider = DataProvider.load(
                 os.path.join(
@@ -82,12 +82,12 @@ def _load_data_provider(
     return provider
 
 
-def main_dataprep(arguments: "args.ParserArgs") -> None:
+def main_dataprep(arguments: "parsing.ParserArgs") -> None:
     _load_data_provider(arguments, memmaped=False)
 
 
 def main_train(
-        arguments: "args.TrainParserArgs",
+        arguments: "parsing.TrainParserArgs",
         world_size: int,
         iterate: bool = False,
         data_provider: DataProvider | None = None
@@ -178,7 +178,7 @@ MeanStdDict = dict[str, tuple[float, float]]
 
 
 def main_train_multiple(
-        arguments: "args.TrainParserArgs",
+        arguments: "parsing.TrainParserArgs",
         world_size: int,
         data_provider: DataProvider | None = None
         ) -> (
@@ -203,7 +203,7 @@ def main_train_multiple(
         run_arguments = copy(arguments)
         run_arguments.model_name = f"{arguments.name}_{n_run}"
         run_arguments.seed = arguments.seed + n_run  # offset seed
-        args.args_logic(run_arguments)  # also sets seed
+        parsing.args_logic(run_arguments)  # also sets seed
 
         metrics_list.append(
             tuple(next(main_train(
@@ -236,7 +236,7 @@ def main_train_multiple(
 
 
 def main_test(
-        arguments: "args.TestParserArgs",
+        arguments: "parsing.TestParserArgs",
         world_size: int,
         data_provider: DataProvider | None = None
         ) -> tuple[LMMetric, LMMetric, LMMetric]:
@@ -300,7 +300,7 @@ def main_test(
 
 
 def main_compare(
-        arguments: "args.CompareParserArgs",
+        arguments: "parsing.CompareParserArgs",
         world_size: int,
         data_provider: DataProvider | None = None
         ) -> None:
@@ -474,9 +474,9 @@ USE_LOG = {"learning_rate"}
 
 def hyperopt_arguments_sampler(
         name: str,
-        arg: argtypes.T | list[argtypes.T] | tuple[argtypes.T, argtypes.T],
+        arg: parsing.T | list[parsing.T] | tuple[parsing.T, parsing.T],
         trial
-        ) -> argtypes.T:
+        ) -> parsing.T:
     if isinstance(arg, list):
         assert len(arg) > 0, f"Provided an empty selection for {name}!"
         return trial.suggest_categorical(name, arg)
@@ -496,13 +496,13 @@ def hyperopt_arguments_sampler(
             raise Exception(
                 f"Range {arg} for arg {name} inconsistently typed!")
     else:
-        return cast(argtypes.T, arg)
+        return cast(parsing.T, arg)
 
 
 class Objective:
     def __init__(
             self, n_devices: int,
-            arguments: "args.HyperoptParserArgs",
+            arguments: "parsing.HyperoptParserArgs",
             writer: MetricWriter,
             pg):
         self.n_devices = n_devices
@@ -547,13 +547,13 @@ class Objective:
             trial = optuna.integration.TorchDistributedTrial(
                 trial, self.pg)  # type: ignore
 
-        arguments = args.TrainParserArgs.from_kwargs(**{
+        arguments = parsing.TrainParserArgs.from_kwargs(**{
             name: hyperopt_arguments_sampler(name, arg, trial) for
             name, arg in self.arguments.to_dict().items()},
             model_name=f"{self.arguments.name}_{trial.number}",
             n_runs=1)
         arguments.seed = arguments.seed + trial.number
-        args.args_logic(arguments)
+        parsing.args_logic(arguments)
 
         train_iterator = main_train(
             arguments, self.n_devices,
@@ -598,7 +598,7 @@ class Objective:
 
 
 def main_hyperopt(
-        arguments: "args.HyperoptParserArgs",
+        arguments: "parsing.HyperoptParserArgs",
         world_size: int) -> None:
     direction = (
         "minimize" if minimise[arguments.optimise.lower().split(":")[0]]
@@ -717,7 +717,7 @@ def ddp(rank: int | None, world_size: int) -> Iterator[bool]:
         clean_ddp(world_size)
 
 
-def main(arguments: "args.ParserArgs") -> None:
+def main(arguments: "parsing.ParserArgs") -> None:
     if arguments.mode == "dataprep":
         main_dataprep(arguments)
     else:
@@ -739,20 +739,20 @@ def main(arguments: "args.ParserArgs") -> None:
             mode = arguments.mode
             match mode:
                 case "train":
-                    assert isinstance(arguments, args.TrainParserArgs)
+                    assert isinstance(arguments, parsing.TrainParserArgs)
                     info(arguments.rank, logger, "Launching model training.")
                     main_train_multiple(arguments, n_devices)
                 case "test":
-                    assert isinstance(arguments, args.TestParserArgs)
+                    assert isinstance(arguments, parsing.TestParserArgs)
                     info(arguments.rank, logger, "Launching model testing.")
                     main_test(arguments, n_devices)
                 case "hyperopt":
-                    assert isinstance(arguments, args.HyperoptParserArgs)
+                    assert isinstance(arguments, parsing.HyperoptParserArgs)
                     info(
                         arguments.rank, logger,
                         "Launching hyperparameter tuning.")
                     main_hyperopt(arguments, n_devices)
                 case _:
-                    assert isinstance(arguments, args.CompareParserArgs)
+                    assert isinstance(arguments, parsing.CompareParserArgs)
                     info(arguments.rank, logger, "Launching model comparison.")
                     main_compare(arguments, n_devices)
