@@ -183,7 +183,7 @@ def create_parser() -> argparse.ArgumentParser:
         '--losses', type=argtypes.OptNone(literal_eval), default={"lm": 1},
         help=(
             "Dictionary of losses for combined loss setting "
-            "and their weights."))
+            "and their weights. Must include 'lm'."))
     trainer_group.add_argument(
         '--arc_loss_weighted', type=argtypes.str_to_bool, default=False,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
@@ -453,7 +453,7 @@ def create_parser() -> argparse.ArgumentParser:
             argtypes.str_to_bool),
         default=False,
         help=(
-            "Include attention to current item (diagonal) when computing"
+            "Include attention to current item (diagonal) when computing "
             "the attention distribution for attention losses."))
     hyperopt_flexible_trainer_group.add_argument(
         '--length_weighted', type=argtypes.HyperoptSpace(
@@ -469,7 +469,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Dictionary of losses for combined loss setting "
-            "and their weights."))
+            "and their weights. Must include 'lm'."))
     # TODO: make it possible to define continuous spaces for loss weights
     # separately as well as sampling s.t. the weights sum to 1.
     hyperopt_flexible_trainer_group.add_argument(
@@ -753,7 +753,7 @@ def create_parser() -> argparse.ArgumentParser:
         '--losses', type=argtypes.OptNone(literal_eval), default=Undefined,
         help=(
             "Dictionary of losses for combined loss setting "
-            "and their weights."))
+            "and their weights. Must include 'lm'."))
     trainer_group.add_argument(
         '--arc_loss_weighted', type=argtypes.str_to_bool, default=Undefined,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
