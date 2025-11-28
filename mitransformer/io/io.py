@@ -50,8 +50,8 @@ if not, search on huggingface and parse and load new.
 
 def _load_data_provider(
         arguments: (
-            "parsing.ParserArgs "
-            "| parsing.TestParserArgs | parsing.CompareParserArgs"),
+            "parsing.ParserArgs " |
+            "parsing.TestParserArgs | parsing.CompareParserArgs"),
         memmaped: bool = False,
         model_num: int | None = None
         ) -> DataProvider:
@@ -563,6 +563,7 @@ class Objective:
 
         should_prune = False
         metrics = None
+        step = 0
         for step, metrics in enumerate(train_iterator, start=1):
             # Handle pruning based on the intermediate value.
             opt_metric = getattr(
@@ -604,6 +605,7 @@ def main_hyperopt(
         "minimize" if minimise[arguments.optimise.lower().split(":")[0]]
         else "maximize")
 
+    study: None | optuna.Study = None
     ld = os.path.join("./runs", f"{arguments.name}_hyperopt")
     with new_pg(world_size, "gloo") as pg, metric_writer(log_dir=ld) as writer:
         objective: Objective = Objective(world_size, arguments, writer, pg)
@@ -681,6 +683,7 @@ def new_pg(
         world_size, backend: str = "gloo") -> Iterator[
             dist.ProcessGroup
             | None]:
+    pg = None
     try:
         pg = setup_group(world_size, backend)
         yield pg
