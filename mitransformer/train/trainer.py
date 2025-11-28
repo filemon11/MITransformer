@@ -699,7 +699,7 @@ class LMTrainer():
 
         uas_abs: None | pd.DataFrame | float = None
         arc_loss: None | torch.Tensor = None
-        additional_losses = None | dict[str, torch.Tensor]
+        additional_losses: None | dict[str, torch.Tensor] = None
 
         att_entropy = None
         num_arc_instances = None
