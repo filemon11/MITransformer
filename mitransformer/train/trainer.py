@@ -88,6 +88,8 @@ class GeneralConfig(utils.Params):
     combined_loss: bool = False
     distr_mode: Literal["att", "att-n"] = "att"
     global_distr: bool = True
+    length_weighted: bool = False
+    include_current: bool = True
     w1: float | None = None
     w2: float | None = None
     w3: float | None = None
@@ -351,12 +353,13 @@ class LMTrainer():
             input_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
             reduction: Literal["sum", "mean"] = "mean",
-            global_distr: bool = True
             ) -> torch.Tensor:
         return losses.attention_entropy_loss(
             arc_distributions, to_ignore_mask, reduction=reduction,
-            global_distr=global_distr, include_current=False,
-            length_weighted=True, prefix_dummies=2,
+            global_distr=self.config.global_distr,
+            include_current=self.config.include_current,
+            length_weighted=self.config.length_weighted,
+            prefix_dummies=2,
             input_ids=input_ids, ignore_index=ignore_index)
 
     def distance_loss(
@@ -365,11 +368,10 @@ class LMTrainer():
             input_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
             reduction: Literal["sum", "mean"] = "mean",
-            global_distr: bool = True
             ) -> torch.Tensor:
         return losses.distance_loss(
             arc_distributions, to_ignore_mask, reduction=reduction,
-            global_distr=global_distr, include_current=False,
+            global_distr=self.config.global_distr,
             prefix_dummies=2,
             input_ids=input_ids, ignore_index=ignore_index)
 
@@ -378,9 +380,7 @@ class LMTrainer():
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             input_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
-            mode: Literal["att", "att-n"] = "att",
-            reduction: Literal["sum", "mean"] = "mean",
-            global_distr: bool = True
+            reduction: Literal["sum", "mean"] = "mean"
             ) -> tuple[torch.Tensor, torch.Tensor]:
         """proj_states cannot be none if mode is `att_n`.
         arc_logits have form (M, B, S, S)
@@ -389,18 +389,18 @@ class LMTrainer():
         (item 3 returned with dict of proj_states and att
         for combined loss mode)"""
         arc_distribution = attdistr.arc_distribution(
-            additional, mode)
+            additional, mode=self.config.distr_mode,
+            without_diagonal=not self.config.include_current,
+            without_dummy_prefixes=2)
         del additional
 
         return (
             self.attention_entropy_loss(
                 arc_distribution, to_ignore_mask, input_ids,
-                ignore_index, reduction,
-                global_distr=global_distr),
+                ignore_index, reduction),
             self.distance_loss(
                 arc_distribution, to_ignore_mask, input_ids,
-                ignore_index, reduction,
-                global_distr=global_distr))
+                ignore_index, reduction))
 
     @staticmethod
     def filter_arc_scores(
@@ -625,8 +625,7 @@ class LMTrainer():
         elif self.config.combined_loss:
             attention_entropy_loss, distance_loss = self.attention_losses(
                 additional, to_ignore_mask="triangular",
-                reduction="sum", mode=self.config.distr_mode,
-                global_distr=self.config.global_distr,
+                reduction="sum",
                 input_ids=batch["input_ids"], ignore_index=ignore_index)
 
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
@@ -757,10 +756,10 @@ class LMTrainer():
         elif self.config.combined_loss:
             attention_entropy_loss, distance_loss = self.attention_losses(
                 additional,
-                to_ignore_mask="triangular", reduction="sum",
-                mode=self.config.distr_mode,
-                global_distr=self.config.global_distr,
-                input_ids=batch["input_ids"], ignore_index=ignore_index)
+                to_ignore_mask="triangular",
+                reduction="sum",
+                input_ids=batch["input_ids"],
+                ignore_index=ignore_index)
 
         metric = self.get_metric(
             num_instances,

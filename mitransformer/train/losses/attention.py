@@ -23,7 +23,6 @@ def attention_entropy_loss(
     output shape
     [B, S] if reduction = 'none'
     else scalar"""
-
     probs = arc_distributions
 
     if to_ignore_mask is not None and to_ignore_mask != "triangular":
@@ -55,7 +54,6 @@ def distance_loss(
         input_ids: torch.Tensor | None = None,
         ignore_index: int = -100,
         global_distr: bool = True,
-        include_current: bool = True,
         prefix_dummies: int = 2,
         ) -> torch.Tensor:
     """input shape [B, H, S, S] with
@@ -67,7 +65,6 @@ def distance_loss(
     [B, S] if reduction = 'none'
     else scalar"""
 
-    probs = normalise(probs, not include_current, prefix_dummies > 0)
     if to_ignore_mask is not None:
         if to_ignore_mask == "triangular":
             probs = torch.tril(probs)
@@ -111,33 +108,6 @@ def get_head_averaged_distribution(
         ) -> torch.Tensor:
     """input: [B, H, S, S]"""
     probs = probs.mean(1)  # [B, S, S]
-    return probs
-
-
-def normalise_without_diagonal(
-        probs: torch.Tensor) -> torch.Tensor:
-    probs = torch.tril(probs, diagonal=-1)
-    probs = probs / probs.sum(dim=-1, keepdim=True).clamp(min=1e-4)
-    return torch.tril(probs, diagonal=-1)
-
-
-def normalise(
-        probs: torch.Tensor,
-        without_diagonal: bool = False,
-        without_root_dummy: bool = False) -> torch.Tensor:
-    if not without_diagonal and not without_root_dummy:
-        return probs
-
-    if without_diagonal:
-        probs = torch.tril(probs, diagonal=-1)
-    if without_root_dummy:
-        probs[..., :2] = 0
-    probs = probs / probs.sum(dim=-1, keepdim=True).clamp(min=1e-4)
-
-    if without_diagonal:
-        probs = torch.tril(probs, diagonal=-1)
-    if without_root_dummy:
-        probs[..., :2] = 0
     return probs
 
 
