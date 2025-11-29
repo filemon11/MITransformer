@@ -28,7 +28,7 @@ prefix="--standalone --nnodes=1 --nproc-per-node=${N_GPUS} -m mitransformer.__ma
 
 general_params="--n_workers ${THREADS_PER_GPU} --device ${DEVICE} --use_ddp ${USE_DDP}"
 general_hyperopt_params='--batch_size 256 --epochs 5 --early_stop_after 4 --n_trials=500 --eval_interval 2000 --n_warmup_steps 2 --n_startup_trials 3 --use_steps 1 --max_steps none --optimise uas --masks_setting current'
-hyperopt_selection='--n_embd 200:1000 --dropout_attn 0.0 --dropout_resid 0.0:0.6 --dropout_ff 0.0:0.6 --dropout_embd 0.0:0.6 --dropout_lstm 0.0:0.6 --learning_rate 1e-4:1e-2 --d_ff_factor 4:10 --bias 0 --loss_alpha 0.0:1.0 --use_dual_fixed 0'
+hyperopt_selection='--n_embd 200;1000 --dropout_attn 0.0 --dropout_resid 0.0;0.6 --dropout_ff 0.0;0.6 --dropout_embd 0.0;0.6 --dropout_lstm 0.0;0.6 --learning_rate 1e-4;1e-2 --d_ff_factor 4;10 --bias 0 --loss_alpha 0.0;1.0 --use_dual_fixed 0'
 
 core="${general_params} hyperopt ${hyperopt_selection} ${general_hyperopt_params}"
 

@@ -64,7 +64,7 @@ class HyperoptSpace(Generic[T]):
 
     def __call__(self, value: str) -> tuple[T, T] | list[T] | T:
         # try to split via :
-        split = value.split(":")
+        split = split_nested(value, ";")
         if len(split) == 2:
             try:
                 h_range = (
@@ -81,7 +81,7 @@ class HyperoptSpace(Generic[T]):
         assert len(split) < 2, (
             f"Range must have one starting and one end point. Given: {value}")
 
-        split = value.split(";")
+        split = split_nested(value, "|")
         if len(split) == 1:
             try:
                 return self.type(value)  # type: ignore
@@ -127,7 +127,6 @@ class StrToTuple(Generic[T]):
         out_list = []
         for c, t in zip(components, self.types):
             out_list.append(t(c))
-        print(out_list)
         return tuple(out_list)
 
 
@@ -167,6 +166,7 @@ class StrToDict(Generic[S, T]):
         self.value_type = value_type
 
     def __call__(self, string: str) -> dict[S, T]:
+        print(string)
         string = string.strip()
         assert string[0] == "{" and string[-1] == "}"
         string = string[1:-1]
@@ -181,4 +181,5 @@ class StrToDict(Generic[S, T]):
             value = value.strip()
             out_dict[self.key_type(key)] = self.value_type(value)
 
+        print(out_dict)
         return out_dict

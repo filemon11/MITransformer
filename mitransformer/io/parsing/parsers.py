@@ -17,6 +17,9 @@ optuna.logging.disable_default_handler()  # Stop showing logs in sys.stderr.
 torch.autograd.set_detect_anomaly(True)
 
 
+# TODO: for hyperopt spaces, specify whether we have a continuous space,
+# a selection or both as part of the type
+
 TransformerDescription = argtypes.OptNone(
     argtypes.StrToTuple(
         argtypes.StrToTuple(argtypes.StrToTuple(str, ...), int), ...))
@@ -472,7 +475,14 @@ def create_parser() -> argparse.ArgumentParser:
     hyperopt_flexible_trainer_group.add_argument(
         '--losses',
         type=argtypes.OptNone(
-            argtypes.HyperoptSpace(argtypes.StrToDict(str, float))),
+            argtypes.HyperoptSpace(argtypes.StrToDict(
+                str, argtypes.HyperoptSpace(float)))),
+        # TODO: sampler is not choosing from tuples and dicts yet.
+        # Maybe it will be necessary to encode spaces into
+        # a separate class because currently the sampler
+        # chooses from lists and tuples which might conflict
+        # tuple arguments with StrToTuple.
+        # Maybe subclass tuple and list?
         default=None,
         help=(
             "Dictionary of losses for combined loss setting "
