@@ -238,7 +238,7 @@ def load_dataset(
                 masks_setting=masks_setting)
         else:
             return dataset.MemMapDataset.from_file(
-                dir, transform,
+                file=dir, transform_masks=transform,
                 max_len=max_len,
                 first_k=first_k_param,
                 masks_setting=masks_setting)

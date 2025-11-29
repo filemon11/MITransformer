@@ -13,7 +13,7 @@ Adding the dummy arcs is also performed at the dataloading stage.
 The masks use boolean arrays/tensors.
 """
 
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset as TorchDataset
 import conllu
 from conllu.models import TokenList
 
@@ -21,17 +21,17 @@ import numpy as np
 import numpy.typing as npt
 from mmap_ninja import RaggedMmap   # type: ignore
 
-from collections import defaultdict
-
-from . import tokeniser
+from .. import tokeniser
+from . import sentence, transform, utils
 
 from abc import ABC, abstractmethod
 
-from typing import (Iterable, Iterator, Sequence, TypedDict,
+from typing import (Iterable, Iterator, Sequence,
                     TypeVar, Callable, Hashable, Literal, Mapping,
-                    Concatenate, NotRequired, Generic, Union, Any)
+                    Generic, Union, Any,
+                    Self)
 
-from ..utils.logmaker import getLogger
+from ...utils.logmaker import getLogger
 
 logger = getLogger(__name__)
 
@@ -45,199 +45,39 @@ EOS_DEPREL = "eos"
 MasksSetting = Literal["complete", "both", "next", "current"]
 
 
-TransformFunc = Callable[
-    [npt.NDArray[np.bool_]],
-    Mapping[str, npt.NDArray[np.bool_]]]
-
 X = TypeVar("X")
 Y = TypeVar("Y")
 Z = TypeVar("Z", bound=Hashable)
 
 
-def listmap(func: Callable[[X], Y], seq: Iterable[X]) -> list[Y]:
-    return list(map(func, seq))
-
-
-def filldict(
-        keys: Sequence[Z],
-        funcs: Sequence[Callable[[X], Y]],
-        seq: Iterable[X]) -> dict[Z, list[Y]]:
-
-    out_dict: dict[Z, list[Y]] = defaultdict(list)
-
-    for entry in seq:
-        for key, func in zip(keys, funcs):
-            out_dict[key].append(func(entry))
-
-    return out_dict
-
-
-class MaskTransform(ABC):
-    @abstractmethod
-    def __call__(
-            self, mask: npt.NDArray[np.bool_],
-            ) -> dict[str, npt.NDArray[np.bool_]]:
-        ...
-
-
-class TransformMaskHeadChild(MaskTransform):
-    def __init__(
-            self,
-            keys_for_head: set[str] = {"head"},
-            keys_for_child: set[str] = {"child"},
-            triangulate: int | None = 0,
-            connect_with_dummy: bool = True,
-            connect_with_self: bool = False,):
-        assert not (connect_with_dummy and connect_with_self), (
-            "You cannot represent non-existant arcs both with "
-            "arcs to the dummy node and with self-arcs."
-        )
-
-        self.keys_for_head = keys_for_head
-        self.keys_for_child = keys_for_child
-        self.triangulate = triangulate
-        self.connect_with_dummy = connect_with_dummy
-        self.connect_with_self = connect_with_self
-
-    def __call__(
-            self,
-            mask: npt.NDArray[np.bool_],
-            ) -> dict[str, npt.NDArray[np.bool_]]:
-        """Assumes a dummy token in the beginning. Therefore: one needs to
-        add arcs for nodes that
-        do not have a left head and nodes that do not have left children.
-
-        ATTENTION: modifies the matrix inplace."""
-
-        head = mask
-        child = mask.T
-        # head[range(len(head)), range(len(head))] = True
-        # child[range(len(child)), range(len(child))] = True
-    
-        if self.connect_with_dummy:
-            tril_head = np.tril(head, -1)
-            set_true = ~tril_head.any(1)
-            head[:, 0] = np.logical_or(set_true, head[:, 0])
-
-            tril_child = np.tril(child, -1)
-            set_true = ~tril_child.any(1)
-            child[:, 0] = np.logical_or(set_true, child[:, 0])
-
-        if self.connect_with_self:
-            child = child.copy()
-            tril_head = np.tril(head, -1)
-            length = head.shape[0]
-            set_true = ~tril_head.any(1)
-            head[
-                np.arange(0, length),
-                np.arange(0, length)] = np.logical_or(
-                    set_true,
-                    head.diagonal(
-                        axis1=-1,
-                        axis2=-2
-                    ))
-            tril_child = np.tril(child, -1)
-            length = head.shape[0]
-            set_true = ~tril_child.any(1)
-            child[
-                np.arange(0, length),
-                np.arange(0, length)] = np.logical_or(
-                    set_true,
-                    child.diagonal(
-                        axis1=-1,
-                        axis2=-2
-                    ))
-
-        if self.triangulate is not None:
-            head = np.tril(head, self.triangulate)
-            child = np.tril(child, self.triangulate)
-
-        out_dict: dict[str, npt.NDArray[np.bool_]] = {}
-
-        for key in self.keys_for_head:
-            out_dict[key] = head
-
-        for key in self.keys_for_child:
-            out_dict[key] = child
-        # print(child)
-
-        return out_dict
-
-
-class TransformMaskFull(MaskTransform):
-    def __init__(
-            self, keys_for_empty: set[str] = {"standard"}):
-        self.keys_for_empty = keys_for_empty
-
-    def __call__(
-            self,
-            mask: npt.NDArray[np.bool_],
-            ) -> dict[str, npt.NDArray[np.bool_]]:
-        """No arcs are masked"""
-
-        # maybe this should produce all True matrices to easy collation
-        trues = np.full(mask.shape, True)
-        return {key: trues for key in self.keys_for_empty}
-
-
-def transform_combined(
-        mask: npt.NDArray[np.bool_],
-        funcs_and_args: set[
-            tuple[
-                Callable[
-                    Concatenate[npt.NDArray[np.bool_], ...],
-                    Mapping[str, npt.NDArray[np.bool_]]],
-                dict[str, npt.NDArray[np.bool_]]]]
-        ) -> dict[str, npt.NDArray[np.bool_]]:
-
-    out_dict: dict[str, npt.NDArray[np.bool_]] = {}
-
-    for func, kwargs in funcs_and_args:
-        out_dict.update(func(mask, **kwargs))
-
-    return out_dict
-
-
-class CoNLLUDict(TypedDict):
-    tokens: list[list[str]]
-    heads: list[npt.NDArray[np.uint8]]  # max 127 sequence length
-    space_after: NotRequired[list[npt.NDArray[np.bool_]]]
-    deprels: list[list[str]]
-
-
-class IdxSentence(TypedDict):
-    idx: npt.NDArray[np.int_]
-
-
-class MaskedSentence(TypedDict):
-    masks: dict[str, npt.NDArray[np.bool_] | None]
-
-
-class IDDict(TypedDict):
-    input_ids: npt.NDArray[np.uint32]
-    label_ids: npt.NDArray[np.uint32]
-
-
-class CoNLLUSentence(MaskedSentence):
-    tokens: list[str]
-    labels: list[str]
-    space_after: NotRequired[list[npt.NDArray[np.bool_]]]
-
-
-class CoNLLUTokenisedSentence(IdxSentence, CoNLLUSentence, IDDict):
-    pass
-
-
-class EssentialSentence(IdxSentence, MaskedSentence, IDDict):
-    pass
-
-
-Sen = TypeVar("Sen", bound=MaskedSentence, covariant=True)
+T = TypeVar("T")
+Sen = TypeVar("Sen", bound=sentence.MaskedSentence, covariant=True)
 IDSen = TypeVar("IDSen", bound=Union[
-    CoNLLUTokenisedSentence,
-    EssentialSentence],
+    sentence.CoNLLUTokenisedSentence,
+    sentence.EssentialSentence],
                 covariant=True)
 # We treat the dictionaries as frozendicts.
+
+
+class Dataset(TorchDataset, ABC, Generic[T]):
+    keys_for_tensors: set[str]
+    keys_for_padding: dict[str, int]
+
+    @classmethod
+    @abstractmethod
+    def from_file(
+            cls, file: str,
+            max_len: int | None,
+            first_k: int | None) -> Self:
+        ...
+
+    @abstractmethod
+    def __len__(self) -> int:
+        ...
+
+    @abstractmethod
+    def __getitem__(self, idx) -> T:
+        ...
 
 
 class DepDataset(Dataset, ABC, Generic[Sen]):
@@ -245,20 +85,20 @@ class DepDataset(Dataset, ABC, Generic[Sen]):
     keys_for_tensors: set[str]
     keys_for_padding: dict[str, int]
     keys_for_mask_padding: dict[str, bool]
-    transform_mask: TransformFunc | None
+    transform_mask: transform.TransformFunc | None
 
     @classmethod
     @abstractmethod
     def from_file(
             cls, file: str,
+            max_len: int | None,
+            first_k: int | None,
             transform_masks: Callable[
                 [npt.NDArray[np.bool_]],
                 Mapping[
                     str,
-                    npt.NDArray[np.bool_]]] | None,
-            masks_setting: MasksSetting,
-            max_len: int | None,
-            first_k: int | None):
+                    npt.NDArray[np.bool_]]] | None = None,
+            masks_setting: MasksSetting = "current") -> Self:
         ...
 
     @abstractmethod
@@ -270,10 +110,12 @@ class DepDataset(Dataset, ABC, Generic[Sen]):
         ...
 
 
-class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
+class CoNLLUDataset(
+        DepDataset[
+            sentence.CoNLLUSentence | sentence.CoNLLUTokenisedSentence]):
     def __init__(
-            self, data: CoNLLUDict,
-            transform_mask: TransformFunc | None,
+            self, data: sentence.CoNLLUDict,
+            transform_mask: transform.TransformFunc | None,
             masks_setting: MasksSetting = "current"):
         self.mapped: bool = False
 
@@ -283,7 +125,7 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
         self.space_after: list[npt.NDArray[np.bool_]] | None
         self.space_after = data.get("space_after", None)
 
-        self.transform_mask: TransformFunc | None
+        self.transform_mask: transform.TransformFunc | None
         self.transform_mask = transform_mask
 
         # self.masks: dict[str, list[npt.NDArray[np.bool_]]] = dict()
@@ -305,12 +147,13 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
         self.keys_for_mask_padding: dict[str, bool] = {}
 
     @staticmethod
-    def make_conlludict(tokenlists: Iterable[TokenList]) -> CoNLLUDict:
-        d = filldict(
+    def make_conlludict(
+            tokenlists: Iterable[TokenList]) -> sentence.CoNLLUDict:
+        d = utils.filldict(
             ("tokens", "heads", "space_after", "deprels"),
             (get_tokens, get_head_list, get_space_after, get_deprels),
             tokenlists)
-        return CoNLLUDict(
+        return sentence.CoNLLUDict(
             tokens=d["tokens"],   # type: ignore
             heads=d["heads"],     # type: ignore
             space_after=d["space_after"],  # type: ignore
@@ -319,14 +162,14 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
     @classmethod
     def from_file(
             cls, file: str,
+            max_len: int | None = 40,
+            first_k: int | None = None,
             transform_masks: Callable[
                 [npt.NDArray[np.bool_]],
                 Mapping[
                     str,
                     npt.NDArray[np.bool_]]] | None = None,
-            masks_setting: MasksSetting = "current",
-            max_len: int | None = 40,
-            first_k: int | None = None):
+            masks_setting: MasksSetting = "current"):
 
         tokenlists = load_conllu(file, max_len, first_k)
         data_dict = cls.make_conlludict(tokenlists)
@@ -364,10 +207,11 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
     def __len__(self) -> int:
         return len(self.tokens)
 
-    def __getitem__(self, idx) -> CoNLLUSentence | CoNLLUTokenisedSentence:
+    def __getitem__(self, idx) -> (
+            sentence.CoNLLUSentence | sentence.CoNLLUTokenisedSentence):
         # creates mask dynamically
 
-        sentence: list[str] = self.tokens[idx][:-1]
+        sen: list[str] = self.tokens[idx][:-1]
         label: list[str] = self.tokens[idx][1:]
 
         heads: npt.NDArray[np.uint8] = self.heads[idx]      # is not output
@@ -381,7 +225,7 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
 
         keys = dict(
             idx=np.array(idx),
-            tokens=sentence,
+            tokens=sen,
             labels=label,
             masks=masks)
 
@@ -389,17 +233,17 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
             keys["space_after"] = self.space_after[idx]
 
         if self.tokenised is None:
-            return CoNLLUSentence(**keys)   # type: ignore
+            return sentence.CoNLLUSentence(**keys)   # type: ignore
         else:
-            return CoNLLUTokenisedSentence(
+            return sentence.CoNLLUTokenisedSentence(
                 **keys,    # type: ignore
                 input_ids=self.tokenised[idx][:-1],
                 label_ids=self.tokenised[idx][1:])
 
     def map_to_ids(self, token_mapper: tokeniser.TokenMapper) -> None:
         self.tokenised = [
-            np.array(sentence, dtype=np.uint32)
-            for sentence in token_mapper(self.tokens)]
+            np.array(sen, dtype=np.uint32)
+            for sen in token_mapper(self.tokens)]
         self.token_mapper = token_mapper
 
         self.keys_for_tensors = {"input_ids", "masks", "label_ids"}
@@ -411,11 +255,11 @@ class CoNLLUDataset(DepDataset[CoNLLUSentence | CoNLLUTokenisedSentence]):
         self.mapped = True
 
 
-class MemMapDataset(DepDataset[EssentialSentence]):
+class MemMapDataset(DepDataset[sentence.EssentialSentence]):
 
     def __init__(
             self,
-            transform_mask: TransformFunc | None,
+            transform_mask: transform.TransformFunc | None,
             file: str | None = None,
             masks_setting: MasksSetting = "current",
             id_hl: RaggedMmap | None = None,
@@ -426,7 +270,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
         self.file: str | None = file
         self.first_k: int | None = first_k
 
-        self.transform_mask: TransformFunc | None
+        self.transform_mask: transform.TransformFunc | None
         self.transform_mask = transform_mask
 
         self.max_len: int | None = max_len
@@ -478,14 +322,14 @@ class MemMapDataset(DepDataset[EssentialSentence]):
     @classmethod
     def from_file(
             cls, file: str,
+            max_len: int | None = 40,
+            first_k: int | None = None,
             transform_masks: Callable[
                 [npt.NDArray[np.bool_]],
                 Mapping[
                     str,
                     npt.NDArray[np.bool_]]] | None = None,
-            masks_setting: MasksSetting = "current",
-            max_len: int | None = 40,
-            first_k: int | None = None):
+            masks_setting: MasksSetting = "current"):
 
         return cls(
             transform_masks, file, masks_setting,
@@ -526,10 +370,11 @@ class MemMapDataset(DepDataset[EssentialSentence]):
         else:
             return len(self.id_hl)
 
-    def __getitem__(self, idx) -> EssentialSentence:
+    def __getitem__(self, idx) -> sentence.EssentialSentence:
         # creates mask dynamically
         assert self.id_hl is not None
-        ids, heads = self.id_hl[idx]
+        ids: np.ndarray
+        ids, heads = self.id_hl[idx]  # type: ignore
         masks: dict[str, npt.NDArray[np.bool_] | None] = dict()
         if self.transform_mask is not None:
             masks.update(
@@ -537,7 +382,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
 
         masks = shift_masks(self.masks_setting, masks)
 
-        return EssentialSentence(
+        return sentence.EssentialSentence(
             idx=np.array(idx),
             masks=masks,
             input_ids=ids[:-1],
@@ -572,7 +417,7 @@ class MemMapDataset(DepDataset[EssentialSentence]):
 class MemMapWindowDataset(MemMapDataset):
     def __init__(
             self,
-            transform_mask: TransformFunc | None,
+            transform_mask: transform.TransformFunc | None,
             file: str | None = None,
             masks_setting: MasksSetting = "current",
             memdir: str | None = None,
@@ -583,10 +428,10 @@ class MemMapWindowDataset(MemMapDataset):
         self.file: str | None = file
         self.first_k: int | None = first_k
 
-        self.transform_mask: TransformFunc | None
+        self.transform_mask: transform.TransformFunc | None
         self.transform_mask = transform_mask
 
-        self.max_len: int = max_len
+        self.max_len = max_len
 
         self.masks_setting: MasksSetting
         self.masks_setting = masks_setting
@@ -606,14 +451,14 @@ class MemMapWindowDataset(MemMapDataset):
     @classmethod
     def from_file(
             cls, file: str,
+            max_len: int | None = 40,
+            first_k: int | None = None,
             transform_masks: Callable[
                 [npt.NDArray[np.bool_]],
                 Mapping[
                     str,
                     npt.NDArray[np.bool_]]] | None = None,
-            masks_setting: MasksSetting = "current",
-            max_len: int | None = 40,
-            first_k: int | None = None):
+            masks_setting: MasksSetting = "current",):
         assert max_len is not None
         return cls(
             transform_masks, file, masks_setting,
@@ -647,9 +492,10 @@ class MemMapWindowDataset(MemMapDataset):
 
     def __len__(self) -> int:
         assert self.arr_len is not None
+        assert self.max_len is not None
         return self.arr_len // self.max_len
 
-    def __getitem__(self, idx) -> EssentialSentence:
+    def __getitem__(self, idx) -> sentence.EssentialSentence:
         # creates mask dynamically
         assert self.mapped
         assert self.memdir is not None
@@ -687,7 +533,7 @@ class MemMapWindowDataset(MemMapDataset):
 
         masks = shift_masks(self.masks_setting, masks)
 
-        return EssentialSentence(
+        return sentence.EssentialSentence(
             idx=np.array(idx),
             masks=masks,
             input_ids=ids[:-1],
@@ -740,6 +586,7 @@ class MemMapWindowDataset(MemMapDataset):
     def sentences(self) -> Iterator[tuple[list[str],
                                     npt.NDArray[np.uint8]]]:
         assert self.file is not None
+        assert self.max_len is not None
         return (self.get_sentence(tl) for tl in load_conllu(
             self.file,
             self.max_len//10,
@@ -826,8 +673,9 @@ def head_list_to_adjacency_matrix(
         ) -> npt.NDArray[np.bool_]:
     sen_len = len(headlist)
     headlist_arr = np.array(headlist)
-    
-    headlist_arr[1:][np.equal(headlist_arr[1:], np.arange(0, len(headlist_arr))[1:])] = 1
+
+    headlist_arr[1:][
+        np.equal(headlist_arr[1:], np.arange(0, len(headlist_arr))[1:])] = 1
 
     # print("before overunder:", headlist_arr)
     if correct_underflow_overflow:
