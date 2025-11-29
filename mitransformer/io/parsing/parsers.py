@@ -2,7 +2,6 @@ import torch
 
 import optuna
 import argparse
-from ast import literal_eval
 # Note that using this function is probably not
 # very safe but okay for low risk applications
 # as this
@@ -16,6 +15,11 @@ optuna.logging.enable_propagation()  # Propagate logs to the root logger.
 optuna.logging.disable_default_handler()  # Stop showing logs in sys.stderr.
 
 torch.autograd.set_detect_anomaly(True)
+
+
+TransformerDescription = argtypes.OptNone(
+    argtypes.StrToTuple(
+        argtypes.StrToTuple(argtypes.StrToTuple(str, ...), int), ...))
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -180,7 +184,8 @@ def create_parser() -> argparse.ArgumentParser:
             "loss weight for supervised learning; 1.0 is only "
             "language model training while 0.0 is only arc training"))
     trainer_group.add_argument(
-        '--losses', type=argtypes.OptNone(literal_eval), default={"lm": 1},
+        '--losses', type=argtypes.OptNone(
+            argtypes.StrToDict(str, float)), default={"lm": 1},
         help=(
             "Dictionary of losses for combined loss setting "
             "and their weights. Must include 'lm'."))
@@ -195,7 +200,8 @@ def create_parser() -> argparse.ArgumentParser:
     model_group = train_parser.add_argument_group('model')
     model_group.add_argument(
         '--transformer_description',
-        type=argtypes.OptNone(literal_eval), default=None,
+        type=TransformerDescription,
+        default=None,
         help=(
             "Architecture of the transformer model. Tuple of layers "
             "where each layer is a tuple of a tuple of "
@@ -205,7 +211,7 @@ def create_parser() -> argparse.ArgumentParser:
             "--width, --depth, --unrestricted_before, --unrestricted_after"))
     model_group.add_argument(
         '--layer_design',
-        type=argtypes.OptNone(literal_eval), default=None,
+        type=argtypes.OptNone(argtypes.StrToTuple(str, ...)), default=None,
         # ("head_current", "child_current"),
         help=(
             "design of the core transformer layer; tuple of head types "
@@ -465,7 +471,8 @@ def create_parser() -> argparse.ArgumentParser:
             "the interval [0, 1]."))
     hyperopt_flexible_trainer_group.add_argument(
         '--losses',
-        type=argtypes.OptNone(argtypes.HyperoptSpace(literal_eval)),
+        type=argtypes.OptNone(
+            argtypes.HyperoptSpace(argtypes.StrToDict(str, float))),
         default=None,
         help=(
             "Dictionary of losses for combined loss setting "
@@ -499,7 +506,7 @@ def create_parser() -> argparse.ArgumentParser:
         'model flexible')
     hyperopt_flexible_model_group.add_argument(
         '--transformer_description',
-        type=argtypes.HyperoptSpace(argtypes.OptNone(literal_eval)),
+        type=argtypes.HyperoptSpace(argtypes.OptNone(TransformerDescription)),
         default=None,  # ((('head', 'child'), 1),),
         help=(
             "Architecture of the transformer model. Tuple of layers "
@@ -508,7 +515,8 @@ def create_parser() -> argparse.ArgumentParser:
             "The width is applied to every head type in the layer."))
     hyperopt_flexible_model_group.add_argument(
         '--layer_design',
-        type=argtypes.HyperoptSpace(literal_eval), default=None,
+        type=argtypes.HyperoptSpace(argtypes.StrToTuple(str, ...)),
+        default=None,
         # ("head_current", "child_current"),
         help=(
             "design of the core transformer layer; tuple of head types "
@@ -750,7 +758,8 @@ def create_parser() -> argparse.ArgumentParser:
             "loss weight for supervised learning; 1.0 is only "
             "language model training while 0.0 is only arc training"))
     trainer_group.add_argument(
-        '--losses', type=argtypes.OptNone(literal_eval), default=Undefined,
+        '--losses', type=argtypes.OptNone(
+            argtypes.StrToDict(str, float)), default=Undefined,
         help=(
             "Dictionary of losses for combined loss setting "
             "and their weights. Must include 'lm'."))

@@ -1,9 +1,13 @@
+from itertools import cycle
+
+from types import EllipsisType
 from typing import (
     Any, cast, TypeVar, Generic,
-    Sequence, Callable)
+    Sequence, Callable, Iterable)
 
 
 T = TypeVar("T")
+S = TypeVar("S")
 
 
 class StrToLiteral(Generic[T]):
@@ -95,3 +99,87 @@ class HyperoptSpace(Generic[T]):
         except TypeError:
             raise Exception(
                 f"Constructor for {self.type} does not accept an argument")
+
+
+class StrToTuple(Generic[T]):
+    def __init__(
+            self,
+            type1: Callable[[Any], T],
+            type2: Callable[[Any], T] | EllipsisType | None = None,
+            *types: Callable[[Any], T]):
+        self.types: Iterable[Callable[[Any], T]]
+        if type2 is not None:
+            if type2 == Ellipsis:
+                self.types = cycle([type1])
+            else:
+                self.types = [type1, type2, *types]  # type: ignore
+        else:
+            self.types = [type1]
+
+    def __call__(self, string: str) -> tuple[T, ...]:
+        print(string)
+        string = string.strip()
+        assert string[0] == "(" and string[-1] == ")"
+        string = string[1:-1]
+        components: Iterable[str] = split_nested(string)
+        components = [c.strip() for c in components]
+
+        out_list = []
+        for c, t in zip(components, self.types):
+            out_list.append(t(c))
+        print(out_list)
+        return tuple(out_list)
+
+
+def split_nested(
+        string: str, split_at: str = ",",
+        l_brackets: str = "({[",
+        r_brackets: str = ")}]"
+        ) -> tuple[str, ...]:
+    """ATTENTION: do not cross brackets"""
+    assert len(split_at) == 1
+
+    components: list[str] = []
+    level = 0
+    c_incomplete = ""
+    for c in string:
+        if c == split_at and level == 0:
+            components.append(c_incomplete)
+            c_incomplete = ""
+            continue
+        elif c in l_brackets:
+            level += 1
+        elif c in r_brackets:
+            level -= 1
+        c_incomplete += c
+    if len(c_incomplete) > 0:
+        components.append(c_incomplete)
+
+    return tuple(components)
+
+
+class StrToDict(Generic[S, T]):
+    def __init__(
+            self,
+            key_type: Callable[[Any], S],
+            value_type: Callable[[Any], T],):
+        self.key_type = key_type
+        self.value_type = value_type
+
+    def __call__(self, string: str) -> dict[S, T]:
+        string = string.strip()
+        assert string[0] == "{" and string[-1] == "}"
+        string = string[1:-1]
+        components: Iterable[str] = split_nested(string)
+        components = [c.strip() for c in components]
+        # components are of form key:value
+
+        out_dict: dict[S, T] = {}
+        for c in components:
+            key, value = c.split(":")
+            key = key.strip()
+            value = value.strip()
+            out_dict[self.key_type(key)] = self.value_type(value)
+
+        print(out_dict)
+        return out_dict
