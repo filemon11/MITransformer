@@ -55,7 +55,8 @@ def arc_distribution(
 
     match mode:
         case "att":
-            att = merge_layer_heads(additional["att"])
+            assert "att" in additional.keys()
+            att = merge_layer_heads(additional["att"])  # type: ignore
 
         case "att-n":
             assert "proj_states" in additional.keys()

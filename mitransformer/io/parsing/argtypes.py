@@ -172,7 +172,6 @@ class StrToDict(Generic[S, T]):
         self.value_type = value_type
 
     def __call__(self, string: str) -> dict[S, T]:
-        print(string)
         string = string.strip()
         assert string[0] == "{" and string[-1] == "}"
         string = string[1:-1]
@@ -187,5 +186,4 @@ class StrToDict(Generic[S, T]):
             value = value.strip()
             out_dict[self.key_type(key)] = self.value_type(value)
 
-        print(out_dict)
         return out_dict

@@ -25,7 +25,7 @@ AdditionalKeys = Literal["proj_states", "att"]
 
 class AdditionalResults(TypedDict):
     proj_states: NotRequired[torch.Tensor]
-    att: torch.Tensor
+    att: NotRequired[torch.Tensor]
 
 
 def combine_scores(
@@ -168,7 +168,8 @@ class MIAttention(nn.Module):
             block_size: int, attn_dropout: float,
             resid_dropout: float, overlay_causal: bool = False,
             use_dual_fixed: bool = False, bias: bool = False,
-            return_proj_states: bool = False):
+            return_proj_states: bool = False,
+            return_att: bool = False):
         """Initialise mask-informed attention module.
 
         Parameters
@@ -216,6 +217,7 @@ class MIAttention(nn.Module):
         self.attn_dropout = attn_dropout
         self.resid_dropout = nn.Dropout(resid_dropout)
         self.return_proj_states: bool = return_proj_states
+        self.return_att: bool = return_att
 
         self.overlay_causal: bool = overlay_causal
         if overlay_causal:
@@ -328,9 +330,10 @@ class MIAttention(nn.Module):
 
         # TODO: also output att @ v (with output transform?)
 
-        additional_output: AdditionalResults = {
-            "att": att
-        }
+        additional_output: AdditionalResults = {}
+        if self.return_att:
+            additional_output["att"] = att
+
         if self.return_proj_states:
             # adapted from Goro Kobayashi
             # (https://github.com/gorokoba560/norm-analysis-of-transformer)
@@ -374,7 +377,8 @@ class MILayer(nn.Module):
             resid_dropout: float,
             dropout_ff: float, overlay_causal: bool = False,
             use_dual_fixed: bool = False, bias: bool = False,
-            return_proj_states: bool = False):
+            return_proj_states: bool = False,
+            return_att: bool = False):
         # n_embd: embedding dimensionType[DependencyMultiHeadAttention]
         # n_heads : the number of heads we'd like to use
         super().__init__()
@@ -384,7 +388,8 @@ class MILayer(nn.Module):
                                 block_size, attn_dropout,
                                 resid_dropout, overlay_causal,
                                 use_dual_fixed,
-                                return_proj_states=return_proj_states)
+                                return_proj_states=return_proj_states,
+                                return_att=return_att)
         self.ln_2 = nn.LayerNorm(n_embd, bias=bias)
         self.ff = FeedForward(n_embd, d_ff_factor, dropout_ff, bias)
 
@@ -430,6 +435,7 @@ class MITransformerConfig(utils.Params):
     use_lstm: bool = True
     pos_enc: Literal["embedding", "sinusoidal"] = "embedding"
     return_proj_states: bool = False
+    return_att: bool = False
 
 
 class MITransformer(nn.Module):
@@ -444,7 +450,8 @@ class MITransformer(nn.Module):
             config.block_size, config.dropout_attn,
             config.dropout_resid, config.dropout_ff,
             config.overlay_causal, config.use_dual_fixed,
-            config.bias, return_proj_states=config.return_proj_states)
+            config.bias, return_proj_states=config.return_proj_states,
+            return_att=config.return_att)
             for layer_description in transformer_description])
         self.return_projected_states: bool = config.return_proj_states
 
@@ -536,11 +543,8 @@ class MITransformer(nn.Module):
             att_logits.append(al)
             additional_list.append(additional)
 
-        additional_stacked: AdditionalResults = {
-            "att": torch.stack(
-                    [additional["att"] for additional in additional_list])}
-
-        if self.return_projected_states and len(additional_list) > 0:
+        additional_stacked: AdditionalResults = {}
+        if len(additional_list) > 0:
             key: AdditionalKeys
             for key in additional_list[0].keys():  # type: ignore
                 if key != "att":

@@ -144,7 +144,8 @@ def main_train(
     transformer_config = MITransformerConfig.from_kwargs(
         **arguments.to_dict(),
         use_input_mask=(arguments.dependency_mode == "input"),
-        return_proj_states=arguments.distr_mode == "att-n")
+        return_proj_states=arguments.distr_mode == "att-n",
+        return_att=arguments.combined_loss)
 
     trainer = LMTrainer.new(transformer_config, train_config)
     if isinstance(data_provider, DataProvider):
