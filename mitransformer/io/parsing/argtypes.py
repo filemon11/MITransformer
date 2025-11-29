@@ -181,5 +181,4 @@ class StrToDict(Generic[S, T]):
             value = value.strip()
             out_dict[self.key_type(key)] = self.value_type(value)
 
-        print(out_dict)
         return out_dict
