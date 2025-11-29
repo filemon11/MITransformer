@@ -483,7 +483,7 @@ def create_parser() -> argparse.ArgumentParser:
         # chooses from lists and tuples which might conflict
         # tuple arguments with StrToTuple.
         # Maybe subclass tuple and list?
-        default=None,
+        default={"lm": 1},
         help=(
             "Dictionary of losses for combined loss setting "
             "and their weights. Must include 'lm'."))

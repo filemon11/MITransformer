@@ -1,5 +1,7 @@
 from itertools import cycle
 
+from . import hyperopt
+
 from types import EllipsisType
 from typing import (
     Any, cast, TypeVar, Generic,
@@ -62,7 +64,9 @@ class HyperoptSpace(Generic[T]):
         self.type = type
         self.choices = choices
 
-    def __call__(self, value: str) -> tuple[T, T] | list[T] | T:
+    def __call__(
+            self, value: str
+            ) -> hyperopt.Range | hyperopt.Choices[T] | T:
         # try to split via :
         split = split_nested(value, ";")
         if len(split) == 2:
@@ -70,13 +74,16 @@ class HyperoptSpace(Generic[T]):
                 h_range = (
                     self.type(split[0]),
                     self.type(split[1]))  # type: ignore
-                assert (isinstance(h_range[0], (int, float, complex))
-                        and not isinstance(h_range[0], bool)), (
-                        f"Non-numeric range detected: {h_range}")
-                return h_range
             except TypeError:
                 raise Exception(
                     f"Constructor for {self.type} does not accept an argument")
+            assert (isinstance(h_range[0], (int, float, complex))
+                    and not isinstance(h_range[0], bool)), (
+                    f"Non-numeric range detected: {h_range}")
+            assert (isinstance(h_range[1], (int, float, complex))
+                    and not isinstance(h_range[1], bool)), (
+                    f"Non-numeric range detected: {h_range}")
+            return hyperopt.Range(*h_range)  # type: ignore
 
         assert len(split) < 2, (
             f"Range must have one starting and one end point. Given: {value}")
@@ -91,14 +98,14 @@ class HyperoptSpace(Generic[T]):
 
         try:
             options = [self.type(v) for v in split]  # type: ignore
-            if self.choices is not None:
-                for o in options:
-                    assert o in self.choices, (
-                        f"{o} must be one of {self.choices}")
-            return options
         except TypeError:
             raise Exception(
                 f"Constructor for {self.type} does not accept an argument")
+        if self.choices is not None:
+            for o in options:
+                assert o in self.choices, (
+                    f"{o} must be one of {self.choices}")
+        return hyperopt.Choices(options)
 
 
 class StrToTuple(Generic[T]):
@@ -117,7 +124,6 @@ class StrToTuple(Generic[T]):
             self.types = [type1]
 
     def __call__(self, string: str) -> tuple[T, ...]:
-        print(string)
         string = string.strip()
         assert string[0] == "(" and string[-1] == ")"
         string = string[1:-1]

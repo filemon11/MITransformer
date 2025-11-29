@@ -474,29 +474,35 @@ USE_LOG = {"learning_rate"}
 
 def hyperopt_arguments_sampler(
         name: str,
-        arg: parsing.T | list[parsing.T] | tuple[parsing.T, parsing.T],
+        arg: parsing.T | parsing.Choices[parsing.T] | parsing.Range | dict[
+            str, parsing.T | parsing.Choices[parsing.T] | parsing.Range],
         trial
-        ) -> parsing.T:
-    if isinstance(arg, list):
+        ) -> parsing.T | dict[str, parsing.T]:
+    if isinstance(arg, parsing.Choices):
         assert len(arg) > 0, f"Provided an empty selection for {name}!"
-        return trial.suggest_categorical(name, arg)
+        str_choices: list[str] = [
+            f"{num}_{str(choice)}" for num, choice in enumerate(arg)]
+        str_arg: str = trial.suggest_categorical(name, str_choices)
+        arg = arg[int(str_arg.split("_", 1)[0])]
     elif (
-            isinstance(arg, tuple)
-            and len(arg) == 2
-            and isinstance(arg[0], (int, float))):
-        if isinstance(arg[0], float) and isinstance(arg[1], float):
-            return trial.suggest_float(
-                name, arg[0], arg[1],
-                log=name in USE_LOG)
-        elif isinstance(arg[0], int) and isinstance(arg[1], int):
-            return trial.suggest_int(
+            isinstance(arg, parsing.Range)):
+        if arg.is_continuous:
+            arg = trial.suggest_float(
                 name, arg[0], arg[1],
                 log=name in USE_LOG)
         else:
-            raise Exception(
-                f"Range {arg} for arg {name} inconsistently typed!")
+            arg = trial.suggest_int(
+                name, arg[0], arg[1],
+                log=name in USE_LOG)
+
+    if isinstance(arg, dict):
+        arg = {subn: hyperopt_arguments_sampler(  # type: ignore
+            f"{name}_{subn}", subv, trial)
+            for subn, subv in arg.items()}
     else:
-        return cast(parsing.T, arg)
+        arg = cast(parsing.T, arg)
+
+    return arg  # type: ignore
 
 
 class Objective:
