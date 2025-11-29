@@ -167,9 +167,7 @@ class MIAttention(nn.Module):
             self, n_embd: int, layer_description: LayerDescription,
             block_size: int, attn_dropout: float,
             resid_dropout: float, overlay_causal: bool = False,
-            use_dual_fixed: bool = False, bias: bool = False,
-            return_proj_states: bool = False,
-            return_att: bool = False):
+            use_dual_fixed: bool = False, bias: bool = False):
         """Initialise mask-informed attention module.
 
         Parameters
@@ -191,8 +189,6 @@ class MIAttention(nn.Module):
             transformer.
         bias : bool, default=False
             Include bias in linear layers.
-        return_proj_states: bool, default=False
-            Return projected states.
         """
         # n_embd: embedding dimensionType[DependencyMultiHeadAttention]
         # n_heads : the number of heads we'd like to use
@@ -216,8 +212,6 @@ class MIAttention(nn.Module):
 
         self.attn_dropout = attn_dropout
         self.resid_dropout = nn.Dropout(resid_dropout)
-        self.return_proj_states: bool = return_proj_states
-        self.return_att: bool = return_att
 
         self.overlay_causal: bool = overlay_causal
         if overlay_causal:
@@ -236,11 +230,22 @@ class MIAttention(nn.Module):
     def forward(
             self,
             x: torch.Tensor,
-            masks: dict[str, torch.Tensor | None]
+            masks: dict[str, torch.Tensor | None],
+            return_arc_logits: bool = False,
+            return_proj_states: bool = False,
+            return_att: bool = False
             ) -> tuple[
                 torch.Tensor,
-                dict[str, list[torch.Tensor]],
+                None | dict[str, list[torch.Tensor]],
                 AdditionalResults]:
+        """
+        return_arc_logits: bool, default=False
+            Return per-head attention logits.
+        return_proj_states: bool, default=False
+            Return projected states.
+        return_att: bool, default=False
+            Return attention distribution."""
+
         tags_l = list(self.tags)
         # just for compatibility
         # for i in range(len(tags_l)):
@@ -324,17 +329,19 @@ class MIAttention(nn.Module):
         out = self.proj(out)
         out = self.resid_dropout(out)
 
-        out_logits = {
-            tag: [att_logits[:, m, h] for h in range(self.n_head)]
-            for tag, m in zip(tags, range(self.n_multihead))}
+        out_logits: None | dict[str, list[torch.Tensor]] = None
+        if return_arc_logits:
+            out_logits = {
+                tag: [att_logits[:, m, h] for h in range(self.n_head)]
+                for tag, m in zip(tags, range(self.n_multihead))}
 
         # TODO: also output att @ v (with output transform?)
 
         additional_output: AdditionalResults = {}
-        if self.return_att:
+        if return_att:
             additional_output["att"] = att
 
-        if self.return_proj_states:
+        if return_proj_states:
             # adapted from Goro Kobayashi
             # (https://github.com/gorokoba560/norm-analysis-of-transformer)
             v_layer = v.permute(0, 2, 1, 3).contiguous().unsqueeze(3)
@@ -376,9 +383,7 @@ class MILayer(nn.Module):
             d_ff_factor: int, block_size: int, attn_dropout: float,
             resid_dropout: float,
             dropout_ff: float, overlay_causal: bool = False,
-            use_dual_fixed: bool = False, bias: bool = False,
-            return_proj_states: bool = False,
-            return_att: bool = False):
+            use_dual_fixed: bool = False, bias: bool = False):
         # n_embd: embedding dimensionType[DependencyMultiHeadAttention]
         # n_heads : the number of heads we'd like to use
         super().__init__()
@@ -387,25 +392,30 @@ class MILayer(nn.Module):
         self.attn = MIAttention(n_embd, layer_description,
                                 block_size, attn_dropout,
                                 resid_dropout, overlay_causal,
-                                use_dual_fixed,
-                                return_proj_states=return_proj_states,
-                                return_att=return_att)
+                                use_dual_fixed)
         self.ln_2 = nn.LayerNorm(n_embd, bias=bias)
         self.ff = FeedForward(n_embd, d_ff_factor, dropout_ff, bias)
 
     def forward(
             self,
             x: torch.Tensor,
-            masks: dict[str, torch.Tensor | None]
+            masks: dict[str, torch.Tensor | None],
+            return_arc_logits: bool = False,
+            return_proj_states: bool = False,
+            return_att: bool = False
             ) -> tuple[
                 torch.Tensor,
-                dict[str, list[torch.Tensor]],
+                None | dict[str, list[torch.Tensor]],
                 AdditionalResults]:
         """Mask shape: [M, B, S, S]
         with M number of multiheads,
         B batch size, S sequence length"""
 
-        x_attn, out_logits, additional = self.attn(self.ln_1(x), masks)
+        x_attn, out_logits, additional = self.attn(
+            self.ln_1(x), masks,
+            return_arc_logits=return_arc_logits,
+            return_proj_states=return_proj_states,
+            return_att=return_att)
         x = x + x_attn
         x = x + self.ff(self.ln_2(x))
 
@@ -434,8 +444,6 @@ class MITransformerConfig(utils.Params):
     bias: bool = False
     use_lstm: bool = True
     pos_enc: Literal["embedding", "sinusoidal"] = "embedding"
-    return_proj_states: bool = False
-    return_att: bool = False
 
 
 class MITransformer(nn.Module):
@@ -449,11 +457,8 @@ class MITransformer(nn.Module):
             n_embd, layer_description, config.d_ff_factor,
             config.block_size, config.dropout_attn,
             config.dropout_resid, config.dropout_ff,
-            config.overlay_causal, config.use_dual_fixed,
-            config.bias, return_proj_states=config.return_proj_states,
-            return_att=config.return_att)
+            config.overlay_causal, config.use_dual_fixed)
             for layer_description in transformer_description])
-        self.return_projected_states: bool = config.return_proj_states
 
         self.block_size = config.block_size
 
@@ -505,9 +510,12 @@ class MITransformer(nn.Module):
     def forward(
             self, input_ids: torch.Tensor,
             masks: dict[str, torch.Tensor | None] | None = None,
+            return_arc_logits: bool = False,
+            return_proj_states: bool = False,
+            return_att: bool = False,
             **kwargs
             ) -> tuple[
-                torch.Tensor, dict[str, torch.Tensor],
+                torch.Tensor, None | dict[str, torch.Tensor],
                 AdditionalResults]:
         """
             Input:
@@ -539,21 +547,32 @@ class MITransformer(nn.Module):
         additional_list: list[AdditionalResults] = []
         for layer in self.layers:
             x, al, additional = layer(
-                x, masks if self.use_input_mask else None)
-            att_logits.append(al)
+                x, masks if self.use_input_mask else None,
+                return_arc_logits=return_arc_logits,
+                return_proj_states=return_proj_states,
+                return_att=return_att)
+            if al is not None:
+                att_logits.append(al)
             additional_list.append(additional)
 
-        additional_stacked: AdditionalResults = {}
-        if len(additional_list) > 0:
-            key: AdditionalKeys
-            for key in additional_list[0].keys():  # type: ignore
-                if key != "att":
-                    stacked = torch.stack(
-                        [additional[key]      # type: ignore
-                            for additional in additional_list])
-                    additional_stacked[key] = stacked
+        additional_names: list[AdditionalKeys] = []
+        if return_att:
+            additional_names.append("att")
+        if return_proj_states:
+            additional_names.append("proj_states")
 
-        return x, combine_scores(att_logits), additional_stacked
+        additional_stacked: AdditionalResults = {}
+        for key in additional_names:  # type: ignore
+            stacked = torch.stack(
+                [additional[key]      # type: ignore
+                    for additional in additional_list])
+            additional_stacked[key] = stacked  # type: ignore
+
+        out_logits = None
+        if return_arc_logits == 0:
+            out_logits = combine_scores(att_logits)
+
+        return x, out_logits, additional_stacked
 
 
 class MITransformerLM(nn.Module):
@@ -583,9 +602,13 @@ class MITransformerLM(nn.Module):
 
     def forward(
             self, input_ids: torch.Tensor,
-            masks: dict[str, torch.Tensor | None] | None = None, **kwargs
+            masks: dict[str, torch.Tensor | None] | None = None,
+            return_arc_logits: bool = False,
+            return_proj_states: bool = False,
+            return_att: bool = False,
+            **kwargs
             ) -> tuple[
-                torch.Tensor, dict[str, torch.Tensor],
+                torch.Tensor, None | dict[str, torch.Tensor],
                 AdditionalResults]:
         """
             Input:
@@ -598,7 +621,11 @@ class MITransformerLM(nn.Module):
             Output : Shape[B, S, E]
         """
 
-        x, att_logits, additional = self.mi_transformer(input_ids, masks)
+        x, att_logits, additional = self.mi_transformer(
+            input_ids, masks,
+            return_arc_logits=return_arc_logits,
+            return_proj_states=return_proj_states,
+            return_att=return_att)
 
         x = self.ln(x)
         logits = self.lm_head(x)

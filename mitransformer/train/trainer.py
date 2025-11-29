@@ -382,7 +382,7 @@ class LMTrainer():
             ignore_index: int = -100,
             reduction: Literal["sum", "mean"] = "mean"
             ) -> dict[str, torch.Tensor]:
-        """proj_states cannot be none if mode is `att_n`.
+        """proj_states cannot be none if mode is `att-n`.
         arc_logits have form (M, B, S, S)
         TODO: restructure so that we have two modes of returning arcs;
         one mode (item 2 returned) for alpha computation and second mode
@@ -594,7 +594,11 @@ class LMTrainer():
 
         additional: models.AdditionalResults
         arc_logits: dict[str, torch.Tensor]
-        logits, arc_logits, additional = self.transformerlm(**batch)
+        logits, arc_logits, additional = self.transformerlm(
+            **batch,
+            return_arc_logits=self.config.distr_mode == "att",
+            return_proj_states=self.config.distr_mode == "att-n",
+            return_att=not self.config.combined_loss)
         self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
 
@@ -680,7 +684,11 @@ class LMTrainer():
         self.batch_to(batch, device=self.config.device)  # type: ignore
 
         additional: models.AdditionalResults
-        logits, arc_logits, additional = self.transformerlm(**batch)
+        logits, arc_logits, additional = self.transformerlm(
+            **batch,
+            return_arc_logits=self.config.distr_mode == "att",
+            return_proj_states=self.config.distr_mode == "att-n",
+            return_att=not self.config.combined_loss)
         self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
 
@@ -1048,7 +1056,12 @@ class LMTrainer():
             for batch in tqdm(loader, desc="Batches"):
                 self.batch_to(batch, device=self.config.device)  # type: ignore
 
-                logits, arc_logits, additional = self.transformerlm(**batch)
+                logits, arc_logits, additional = self.transformerlm(
+                    **batch,
+                    return_arc_logits=self.config.distr_mode == "att",
+                    return_proj_states=self.config.distr_mode == "att-n",
+                    return_att=not self.config.combined_loss)
+
                 self.run_hooks(batch, (logits, arc_logits))
                 labels = batch["label_ids"]
 
