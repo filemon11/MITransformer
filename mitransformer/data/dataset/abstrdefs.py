@@ -31,7 +31,7 @@ from ...utils.logmaker import getLogger
 
 logger = getLogger(__name__)
 
-T = TypeVar("T")
+T = TypeVar("T", covariant=True)
 
 
 class Dataset(TorchDataset, ABC, Generic[T]):
@@ -57,7 +57,6 @@ class Dataset(TorchDataset, ABC, Generic[T]):
 
 class NLPDataset(Dataset[T]):
     keys_for_tensors: set[str]
-    keys_for_padding: dict[str, int]
     mapped: bool
 
     @staticmethod
@@ -84,23 +83,24 @@ class NLPDataset(Dataset[T]):
         ...
 
 
-I = TypeVar("I", bound=sentence.SentenceIdx)
+I = TypeVar("I", bound=sentence.SentenceIdx, covariant=True)
 
 
 class IdxDataset(NLPDataset[I]):
     ...
 
 
-J = TypeVar("J", bound=sentence.SentenceIds)
+J = TypeVar("J", bound=sentence.SentenceIds, covariant=True)
 
 
 # Is this needed? We do not have separate tokenised datasets
 # since a dataset can be tokenised.
 class TokenisedDataset(NLPDataset[J]):
+    keys_for_padding: dict[str, int]
     ...
 
 
-K = TypeVar("K", bound=sentence.SentenceMask)
+K = TypeVar("K", bound=sentence.SentenceMask, covariant=True)
 
 
 class MaskedDataset(NLPDataset[K]):

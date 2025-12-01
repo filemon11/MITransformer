@@ -8,11 +8,13 @@ from .dataset import (  # noqa: F401
     MemMapDataset, CoNLLUDataset, MemMapDepDataset,
     SentenceDataset,
     MemMapWindowDataset, MasksSetting,
-    TransformMaskHeadChild)
+    TransformMaskHeadChild, SentenceIds,
+    TokenisedDataset)
 from .dataloader import (  # noqa: F401
     DataLoader, get_loader,
     TokenisedBatch, FastBatch,
-    FastMaskedBatch, TokenisedMaskedBatch)
+    FastMaskedBatch, TokenisedMaskedBatch,
+    BatchIds, BatchMaskIds)
 from .provider import DataConfig, DataProvider  # noqa: F401
 from .parse import (  # noqa: F401
     parse_list_of_words_with_spacy, parse_wikitext_with_spacy,

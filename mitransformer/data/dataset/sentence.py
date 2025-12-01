@@ -17,39 +17,6 @@ class CoNLLUDict(BasicDict):
     deprels: list[list[str]]
 
 
-# class IdxSentence(TypedDict):
-#     idx: npt.NDArray[np.int_]
-# 
-# 
-# class MaskedSentence(TypedDict):
-#     masks: dict[str, npt.NDArray[np.bool_] | None]
-# 
-# 
-# class IDDict(TypedDict):
-#     input_ids: npt.NDArray[np.uint32]
-#     label_ids: npt.NDArray[np.uint32]
-# 
-# 
-# class TokenisedSentence(IdxSentence, IDDict):
-#     tokens: list[str]
-#     labels: list[str]
-#     space_after: NotRequired[list[npt.NDArray[np.bool_]]]
-# 
-# 
-# class CoNLLUSentence(MaskedSentence):
-#     tokens: list[str]
-#     labels: list[str]
-#     space_after: NotRequired[list[npt.NDArray[np.bool_]]]
-# 
-# 
-# class CoNLLUTokenisedSentence(IdxSentence, CoNLLUSentence, IDDict):
-#     pass
-# 
-# 
-# class EssentialSentence(IdxSentence, MaskedSentence, IDDict):
-#     pass
-
-
 # for tokenised sentence
 class SentenceIdx(TypedDict):
     idx: npt.NDArray[np.int_]

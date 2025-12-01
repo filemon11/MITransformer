@@ -30,11 +30,12 @@ from ...utils.logmaker import getLogger
 logger = getLogger(__name__)
 
 
-B = TypeVar("B", bound=batches.BatchIdx, covariant=True)  # batch
-S = TypeVar("S", bound=dataset.SentenceIdx, covariant=True)  # sentence
+B = TypeVar("B", bound=batches.BatchIds, covariant=True)  # batch
+S = TypeVar("S", bound=dataset.SentenceIds, covariant=True)  # sentence
 
 
 class DataLoader(torchDataLoader[S], Generic[S, B]):
+    dataset: dataset.TokenisedDataset[S]  # type: ignore
 
     def __iter__(self) -> Iterator[B]:  # type: ignore
         return super().__iter__()  # type: ignore
@@ -108,8 +109,9 @@ def get_loader(
     ...
 
 
+@overload
 def get_loader(
-        ds: dataset.NLPDataset,
+        ds: dataset.TokenisedDataset[dataset.SentenceIds],
         batch_size: int,
         bucket: bool = True,
         min_size: int = 5,
@@ -120,7 +122,23 @@ def get_loader(
         world_size: int = 1,
         n_workers: int = 0,
         ) -> (
-            DataLoader[dataset.SentenceIdx, batches.BatchIdx]):
+            DataLoader[dataset.SentenceIds, batches.BatchIds]):
+    ...
+
+
+def get_loader(
+        ds: dataset.TokenisedDataset[dataset.SentenceIds],
+        batch_size: int,
+        bucket: bool = True,
+        min_size: int = 5,
+        max_size: int = 50,
+        shuffle: bool = True,
+        droplast: bool = True,
+        rank: int | None = 0,
+        world_size: int = 1,
+        n_workers: int = 0,
+        ) -> (
+            DataLoader[dataset.SentenceIds, batches.BatchIds]):
 
     # TODO: include attention mask to disregard masked tokens
     # in loss calculation
@@ -130,10 +148,12 @@ def get_loader(
         assert world_size == 1, (
             "Distributed sampling not implemented"
             "for bucketed sampling.")
+        assert isinstance(ds, dataset.NLPDataset)
+        assert "tokens" in ds[0]
         return DataLoader(
             ds,
             batch_sampler=sampler.BySequenceLengthSampler(
-                ds,
+                ds,  # type: ignore
                 np.arange(min_size, max_size, 1),
                 batch_size),
             collate_fn=collator.Collate(
@@ -155,7 +175,7 @@ def get_loader(
         connect_with_dummy = False
         connect_with_self = False
         pad_mask_with: dict[str, bool] = {}
-        # TODO: 
+        # TODO:
         if isinstance(ds, dataset.MaskedDataset):
             if isinstance(
                     ds.transform_mask,

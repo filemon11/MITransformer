@@ -1,9 +1,7 @@
 from .. import models, data, utils
 from . import hooks, losses, attdistr
-from ..data.dataloader import (
-    IDBatch, D)
 from ..data.dataset import (
-    IDSen, TransformMaskHeadChild)
+    TransformMaskHeadChild)
 from .metrics import (
     sum_metrics, SupervisedEvalMetric,
     SupervisedMetric, LMMetric, EvalMetric,
@@ -12,8 +10,7 @@ from .metrics import (
 
 from ..data import (
     DataLoader, get_loader,
-    CoNLLUTokenisedBatch, EssentialBatch,
-    DepDataset, CoNLLUDataset,
+    CoNLLUDataset,
     DUMMY, ROOT, EOS)
 
 from ..utils.dependencies import (
@@ -585,7 +582,7 @@ class LMTrainer():
 
     def train_step(
             self,
-            batch: CoNLLUTokenisedBatch | EssentialBatch,
+            batch: data.BatchIds | data.BatchMaskIds,
             ignore_index: int,
             perform_opt: bool = True) -> LMMetric:
         assert self.train_config is not None, "Config missing training params."
@@ -611,6 +608,8 @@ class LMTrainer():
 
         num_arc_instances: int | None = None
         if self.train_config.dependency_mode == "supervised":
+            assert "masks" in batch
+            batch = cast(data.BatchMaskIds, batch)
             score_pair = self.prepare_scores(
                 arc_logits, batch["masks"])
 
@@ -678,7 +677,7 @@ class LMTrainer():
 
     def eval_step(
             self,
-            batch: CoNLLUTokenisedBatch | EssentialBatch,
+            batch: data.BatchIds,
             mode: Mode,
             ignore_index: int) -> LMMetric:
         self.batch_to(batch, device=self.config.device)  # type: ignore
@@ -713,6 +712,8 @@ class LMTrainer():
         att_entropy = None
         num_arc_instances = None
         if mode == "supervised":
+            assert "masks" in batch
+            batch = cast(data.BatchMaskIds, batch)
             score_pair = self.prepare_scores(
                 arc_logits, batch["masks"])
 
@@ -812,8 +813,12 @@ class LMTrainer():
 
     def train_iter(
             self,
-            train: DepDataset[IDSen] | DataLoader,
-            eval: DepDataset[IDSen] | DataLoader,
+            train: (
+                data.TokenisedDataset[data.SentenceIds]
+                | data.DataLoader[data.SentenceIds, data.BatchIds]),
+            eval: (
+                data.TokenisedDataset[data.SentenceIds]
+                | data.DataLoader[data.SentenceIds, data.BatchIds]),
             token_mapper: data.TokenMapper | None = None,
             **kwargs) -> Generator[
                 Result,
@@ -931,9 +936,16 @@ class LMTrainer():
 
     def train(
             self,
-            train: DepDataset[IDSen] | DataLoader,
-            eval: DepDataset[IDSen] | DataLoader,
-            test: DepDataset[IDSen] | DataLoader | None = None,
+            train: (
+                data.TokenisedDataset[data.SentenceIds]
+                | data.DataLoader[data.SentenceIds, data.BatchIds]),
+            eval: (
+                data.TokenisedDataset[data.SentenceIds]
+                | data.DataLoader[data.SentenceIds, data.BatchIds]),
+            test: (
+                data.TokenisedDataset[data.SentenceIds]
+                | data.DataLoader[data.SentenceIds, data.BatchIds]
+                | None) = None,
             **kwargs) -> TestResult:
         assert self.train_config is not None, "Config missing training params."
 
@@ -965,7 +977,9 @@ class LMTrainer():
             eval=eval,
             test=test)
 
-    def _train(self, loader: DataLoader[IDBatch, D]) -> Iterable[LMMetric]:
+    def _train(self, loader: (
+            data.DataLoader[data.SentenceIds, data.BatchIds])
+            ) -> Iterable[LMMetric]:
         assert self.train_config is not None, "Config missing training params."
         self.transformerlm.train()
 
@@ -989,7 +1003,8 @@ class LMTrainer():
         else:
             yield self.gather_metrics(sum_metrics(list(iterate())))
 
-    def _eval(self, loader: DataLoader[IDBatch, D]) -> LMMetric:
+    def _eval(self, loader: (
+            data.DataLoader[data.SentenceIds, data.BatchIds])) -> LMMetric:
         self.transformerlm.eval()
         with torch.no_grad():
             # eval loop: no backprop on this data, to avoid storing
@@ -1004,11 +1019,13 @@ class LMTrainer():
 
     def test(
             self, token_mapper: data.TokenMapper | None = None,
-            **datasets: DepDataset | DataLoader | Any
+            **datasets: (
+                data.TokenisedDataset[data.SentenceIds]
+                | data.DataLoader[data.SentenceIds, data.BatchIds] | Any)
             ) -> dict[str, LMMetric]:
         metrics: dict[str, LMMetric] = {}
         for n, ds in datasets.items():
-            if isinstance(ds, (DataLoader, DepDataset)):
+            if isinstance(ds, (data.DataLoader, data.TokenisedDataset)):
                 ds = self.get_loader(ds)
                 self.init_hooks(ds, n, token_mapper=token_mapper)
                 metrics[n] = self._eval(self.get_loader(ds))
@@ -1018,7 +1035,7 @@ class LMTrainer():
         return metrics
 
     def predict(
-            self, dataset: DepDataset,
+            self, dataset: data.TokenisedDataset[data.SentenceIds],
             make_prob: bool = False,
             only_true: bool = False,
             dataset_name: str | None = None,
@@ -1029,8 +1046,9 @@ class LMTrainer():
         """Returns logits and arc scores"""
         # TODO: Does this work with ddp? Batches are distributed but not
         # joined back together.
-        loader = get_loader(
-            dataset, batch_size=self.config.batch_size,
+        loader = get_loader(  # type: ignore
+            dataset,
+            batch_size=self.config.batch_size,
             bucket=False,
             shuffle=False, droplast=False,
             n_workers=self.config.n_workers)
@@ -1128,7 +1146,7 @@ class LMTrainer():
                 triangulate=True)
 
             dataset: CoNLLUDataset = CoNLLUDataset.from_str(
-                conllu, transform, max_len=None)
+                conllu_str=conllu, transform_masks=transform, max_len=None)
 
             dataset.map_to_ids(token_mapper)
             dataloader: DataLoader = get_loader(        # type: ignore
@@ -1180,7 +1198,10 @@ class LMTrainer():
         if not self.use_ddp or self.config.rank == 0:
             self.writer.add_metric(metric, epoch, split)
 
-    def get_loader(self, data: DataLoader | DepDataset) -> DataLoader:
+    def get_loader(self, data: (
+                data.TokenisedDataset[data.SentenceIds]
+                | data.DataLoader[data.SentenceIds, data.BatchIds])
+            ) -> DataLoader[data.SentenceIds, data.BatchIds]:
         if not isinstance(data, DataLoader):
             assert self.config.batch_size <= len(data), (
                 "Batch size larger than dataset. "

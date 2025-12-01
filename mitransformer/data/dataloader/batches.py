@@ -37,6 +37,11 @@ class BatchIds(TypedDict):
     label_ids: torch.Tensor
 
 
+# for memmaped sentences
+class BatchMaskIds(BatchIds, BatchMask):
+    pass
+
+
 class BasicBatch(BatchIdx):
     tokens: list[str]
     labels: list[str]
