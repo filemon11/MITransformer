@@ -1198,23 +1198,24 @@ class LMTrainer():
         if not self.use_ddp or self.config.rank == 0:
             self.writer.add_metric(metric, epoch, split)
 
-    def get_loader(self, data: (
+    # this is not typed in detail like data.get_loader
+    def get_loader(self, in_data: (
                 data.TokenisedDataset[data.SentenceIds]
                 | data.DataLoader[data.SentenceIds, data.BatchIds])
             ) -> DataLoader[data.SentenceIds, data.BatchIds]:
-        if not isinstance(data, DataLoader):
-            assert self.config.batch_size <= len(data), (
+        if not isinstance(in_data, DataLoader):
+            assert self.config.batch_size <= len(in_data), (
                 "Batch size larger than dataset. "
-                f"dataset size: {len(data)}, batch size: "
+                f"dataset size: {len(in_data)}, batch size: "
                 f"{self.config.batch_size}")
-            return get_loader(
-                data, batch_size=self.config.batch_size,
+            return data.get_loader(
+                in_data, batch_size=self.config.batch_size,
                 bucket=False,
                 shuffle=False, droplast=False,
                 world_size=self.config.world_size,
                 rank=self.config.rank,
                 n_workers=self.config.n_workers)
-        return data
+        return in_data
 
 
 # def logits_to_probs(logits: torch.Tensor,
