@@ -1,7 +1,7 @@
 from collections import defaultdict
 
 from typing import (Iterable, Sequence,
-                    TypeVar, Callable, Hashable)
+                    TypeVar, Callable, Hashable, Literal)
 
 from ...utils.logmaker import getLogger
 
@@ -11,6 +11,9 @@ logger = getLogger(__name__)
 X = TypeVar("X")
 Y = TypeVar("Y")
 Z = TypeVar("Z", bound=Hashable)
+
+
+MasksSetting = Literal["complete", "both", "next", "current"]
 
 
 def listmap(func: Callable[[X], Y], seq: Iterable[X]) -> list[Y]:

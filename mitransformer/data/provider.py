@@ -49,9 +49,9 @@ class DatasetDetailsFull(DatasetDetails):
 
 class DatasetDict(TypedDict):
     token_mapper: tokeniser.TokenMapper
-    train: NotRequired[dataset.MemMapDataset]
-    eval: NotRequired[dataset.MemMapDataset]
-    test: NotRequired[dataset.MemMapDataset]
+    train: NotRequired[dataset.MemMapDepDataset]
+    eval: NotRequired[dataset.MemMapDepDataset]
+    test: NotRequired[dataset.MemMapDepDataset]
 
 
 T = TypeVarTuple("T")
@@ -228,25 +228,26 @@ def load_dataset(
 
     def load_dataset(
             dir: str, is_train: bool,
-            max_len: int | None = None) -> dataset.MemMapDataset:
+            max_len: int | None = None) -> dataset.MemMapDepDataset:
         first_k_param = first_k if is_train else first_k_eval_test
         if load_memmap:
-            return dataset.MemMapDataset.from_memmap(
-                dir, transform,
+            return dataset.MemMapDepDataset.from_memmap(
+                path=dir,
                 max_len=max_len,
                 first_k=first_k_param,
+                transform_masks=transform,
                 masks_setting=masks_setting)
         else:
-            return dataset.MemMapDataset.from_file(
+            return dataset.MemMapDepDataset.from_file(
                 file=dir, transform_masks=transform,
                 max_len=max_len,
                 first_k=first_k_param,
                 masks_setting=masks_setting)
 
-    train: None | dataset.MemMapDataset = None
-    eval: None | dataset.MemMapDataset = None
-    test: None | dataset.MemMapDataset = None
-    sets: tuple[dataset.MemMapDataset, ...] = tuple()
+    train: None | dataset.MemMapDepDataset = None
+    eval: None | dataset.MemMapDepDataset = None
+    test: None | dataset.MemMapDepDataset = None
+    sets: tuple[dataset.MemMapDepDataset, ...] = tuple()
     splits: tuple[str, ...] = tuple()
     if len(dirs) == 1:
         # Only test
@@ -362,7 +363,8 @@ class DataProvider():
             "Loaded datasets with "
             + ', '.join([
                 str(len(ds)) for ds  # type: ignore
-                in self.datasets.values() if isinstance(ds, dataset.Dataset)])
+                in self.datasets.values() if isinstance(
+                    ds, dataset.NLPDataset)])
             + " sentences."))
 
     @classmethod

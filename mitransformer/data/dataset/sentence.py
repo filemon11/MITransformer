@@ -7,35 +7,86 @@ from ...utils.logmaker import getLogger
 logger = getLogger(__name__)
 
 
-class CoNLLUDict(TypedDict):
+class BasicDict(TypedDict):
     tokens: list[list[str]]
-    heads: list[npt.NDArray[np.uint8]]  # max 127 sequence length
     space_after: NotRequired[list[npt.NDArray[np.bool_]]]
+
+
+class CoNLLUDict(BasicDict):
+    heads: list[npt.NDArray[np.uint8]]  # max 127 sequence length
     deprels: list[list[str]]
 
 
-class IdxSentence(TypedDict):
+# class IdxSentence(TypedDict):
+#     idx: npt.NDArray[np.int_]
+# 
+# 
+# class MaskedSentence(TypedDict):
+#     masks: dict[str, npt.NDArray[np.bool_] | None]
+# 
+# 
+# class IDDict(TypedDict):
+#     input_ids: npt.NDArray[np.uint32]
+#     label_ids: npt.NDArray[np.uint32]
+# 
+# 
+# class TokenisedSentence(IdxSentence, IDDict):
+#     tokens: list[str]
+#     labels: list[str]
+#     space_after: NotRequired[list[npt.NDArray[np.bool_]]]
+# 
+# 
+# class CoNLLUSentence(MaskedSentence):
+#     tokens: list[str]
+#     labels: list[str]
+#     space_after: NotRequired[list[npt.NDArray[np.bool_]]]
+# 
+# 
+# class CoNLLUTokenisedSentence(IdxSentence, CoNLLUSentence, IDDict):
+#     pass
+# 
+# 
+# class EssentialSentence(IdxSentence, MaskedSentence, IDDict):
+#     pass
+
+
+# for tokenised sentence
+class SentenceIdx(TypedDict):
     idx: npt.NDArray[np.int_]
 
 
-class MaskedSentence(TypedDict):
+# for sentences containing masks
+class SentenceMask(TypedDict):
     masks: dict[str, npt.NDArray[np.bool_] | None]
 
 
-class IDDict(TypedDict):
-    input_ids: npt.NDArray[np.uint32]
-    label_ids: npt.NDArray[np.uint32]
+# for memmaped sentences
+class SentenceIds(TypedDict):
+    input_ids: NotRequired[npt.NDArray[np.uint32]]
+    label_ids: NotRequired[npt.NDArray[np.uint32]]
 
 
-class CoNLLUSentence(MaskedSentence):
+class BasicSentence(SentenceIdx):
     tokens: list[str]
     labels: list[str]
     space_after: NotRequired[list[npt.NDArray[np.bool_]]]
 
 
-class CoNLLUTokenisedSentence(IdxSentence, CoNLLUSentence, IDDict):
+class BasicMaskedSentence(BasicSentence, SentenceMask):
     pass
 
 
-class EssentialSentence(IdxSentence, MaskedSentence, IDDict):
+class TokenisedSentence(SentenceIds, BasicSentence):
+    pass
+
+
+class TokenisedMaskedSentence(TokenisedSentence, SentenceMask):
+    pass
+
+
+class FastSentence(SentenceIdx, SentenceIds):
+    pass
+
+
+class FastMaskedSentence(FastSentence, SentenceMask):
     pass
