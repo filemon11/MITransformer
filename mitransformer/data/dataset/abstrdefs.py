@@ -25,7 +25,7 @@ from abc import ABC, abstractmethod
 from typing import (Iterable,
                     TypeVar, Callable, Mapping,
                     Generic,
-                    Self, Iterator)
+                    Self)
 
 from ...utils.logmaker import getLogger
 
@@ -50,9 +50,9 @@ class Dataset(TorchDataset, ABC, Generic[T]):
     def __getitem__(self, idx) -> T:
         ...
 
-    @abstractmethod
-    def __iter__(self, idx) -> Iterator[T]:
-        ...
+#    @abstractmethod
+#    def __iter__(self, idx) -> Iterator[T]:
+#        ...
 
 
 class NLPDataset(Dataset[T]):
