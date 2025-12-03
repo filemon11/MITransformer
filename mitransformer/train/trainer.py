@@ -1,21 +1,5 @@
 from .. import models, data, utils
-from . import hooks, losses, attdistr
-from ..data.dataset import (
-    TransformMaskHeadChild)
-from .metrics import (
-    sum_metrics, SupervisedEvalMetric,
-    SupervisedMetric, LMMetric, EvalMetric,
-    MetricWriter, DynamicWeightedMetric,
-    DynamicWeightedEvalMetric)
-
-from ..data import (
-    DataLoader, get_loader,
-    CoNLLUDataset,
-    DUMMY, ROOT, EOS)
-
-from ..utils.dependencies import (
-    mst, merge_head_child_scores,
-    dummy_mask_removal, mask_to_headlist, uas_absolute)
+from . import hooks, losses, attdistr, functions, metrics
 
 from tqdm import tqdm
 import pandas as pd
@@ -46,7 +30,7 @@ from ..utils.logmaker import getLogger, info, get_timestr, warning
 logger = getLogger(__name__)
 
 
-M = TypeVar("M", bound=LMMetric)
+M = TypeVar("M", bound=metrics.LMMetric)
 N = TypeVar("N")
 
 
@@ -56,12 +40,12 @@ class AdditionalPrediction(TypedDict):
 
 
 class Result(TypedDict):
-    train: LMMetric
-    eval: LMMetric
+    train: metrics.LMMetric
+    eval: metrics.LMMetric
 
 
 class TestResult(Result):
-    test: NotRequired[LMMetric]
+    test: NotRequired[metrics.LMMetric]
 
 
 Mode = Literal["standard", "input", "supervised"]
@@ -110,7 +94,7 @@ class LMTrainer():
             transformer_config: models.MITransformerConfig,
             config: GeneralConfig):
 
-        self.writer = MetricWriter(
+        self.writer = metrics.MetricWriter(
             log_dir=os.path.join("./runs", config.model_name))
         self.transformerlm: models.MITransformerLM | DDP = transformerlm
         self.transformerlm.to(config.device)
@@ -311,7 +295,7 @@ class LMTrainer():
             hook(input, output)
 
     def init_hooks(
-            self, dataloader: DataLoader, dataset_name: str,
+            self, dataloader: data.DataLoader, dataset_name: str,
             epoch: int | None = None,
             token_mapper: data.TokenMapper | None = None) -> None:
         for hook in self.hooks:
@@ -513,12 +497,12 @@ class LMTrainer():
             att_entropy: pd.DataFrame | None = None,
             additional_losses: Mapping[str, torch.Tensor] | None = None,
             weights: Mapping[str, int | float] | None = None
-            ) -> LMMetric:
+            ) -> metrics.LMMetric:
         if perplexity is not None:
             if arc_loss is not None:
                 assert uas is not None
                 assert num_arc_instances is not None
-                return SupervisedEvalMetric(
+                return metrics.SupervisedEvalMetric(
                     num=num_instances,
                     arc_num=num_arc_instances,
                     lm_loss=lm_loss,
@@ -531,7 +515,7 @@ class LMTrainer():
                     )
             else:
                 if self.config.combined_loss is False:
-                    return EvalMetric(
+                    return metrics.EvalMetric(
                         num=num_instances,
                         lm_loss=lm_loss,
                         perplexity=perplexity,
@@ -542,7 +526,7 @@ class LMTrainer():
                         and weights is not None
                     )
                     losses = ["lm_loss"] + list(additional_losses.keys())
-                    return DynamicWeightedEvalMetric(losses)(
+                    return metrics.DynamicWeightedEvalMetric(losses)(
                         num=num_instances,
                         lm_loss=lm_loss,
                         main_metric=self.config.early_stop_metric,
@@ -553,7 +537,7 @@ class LMTrainer():
 
         if arc_loss is None:
             if self.config.combined_loss is False:
-                return LMMetric(
+                return metrics.LMMetric(
                     num=num_instances,
                     lm_loss=lm_loss,
                     main_metric=self.config.early_stop_metric)
@@ -563,7 +547,7 @@ class LMTrainer():
                     and weights is not None
                 )
                 losses = ["lm_loss"] + list(additional_losses.keys())
-                return DynamicWeightedMetric(losses)(
+                return metrics.DynamicWeightedMetric(losses)(
                     num=num_instances,
                     lm_loss=lm_loss,
                     main_metric=self.config.early_stop_metric,
@@ -572,7 +556,7 @@ class LMTrainer():
                 )
         else:
             assert num_arc_instances is not None
-            return SupervisedMetric(
+            return metrics.SupervisedMetric(
                 num=num_instances,
                 arc_num=num_arc_instances,
                 lm_loss=lm_loss,
@@ -584,7 +568,7 @@ class LMTrainer():
             self,
             batch: data.IdBatch | data.MaskIdBatch,
             ignore_index: int,
-            perform_opt: bool = True) -> LMMetric:
+            perform_opt: bool = True) -> metrics.LMMetric:
         assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
         self.batch_to(batch, device=self.config.device)  # type: ignore
@@ -679,7 +663,7 @@ class LMTrainer():
             self,
             batch: data.IdBatch | data.MaskIdBatch,
             mode: Mode,
-            ignore_index: int) -> LMMetric:
+            ignore_index: int) -> metrics.LMMetric:
         self.batch_to(batch, device=self.config.device)  # type: ignore
 
         additional: models.AdditionalResults
@@ -698,8 +682,8 @@ class LMTrainer():
 
         num_instances = int((labels != ignore_index).sum().item())
 
-        surprisal_sum = sum_depadded(
-            logits_to_surprisal(
+        surprisal_sum = functions.sum_depadded(
+            functions.logits_to_surprisal(
                 logits, labels,
                 ignore_index,
                 softmax=not self.config.discriminative),
@@ -747,12 +731,12 @@ class LMTrainer():
 
                 uas = []
                 if self.config.masks_setting in ("current", "both"):
-                    uas.append(uas_composition(
+                    uas.append(functions.uas_composition(
                         score_preds, score_golds, batch["label_ids"],
                         ignore_index, "current",
                         "head_current", "child_current"))
                 if self.config.masks_setting in ("next", "both"):
-                    uas.append(uas_composition(
+                    uas.append(functions.uas_composition(
                         score_preds, score_golds, batch["label_ids"],
                         ignore_index, "next", "head_next", "child_next"))
                 if len(uas) == 1:
@@ -836,7 +820,7 @@ class LMTrainer():
 
         self.transformerlm.train()
 
-        best: float | LMMetric | None = None
+        best: float | metrics.LMMetric | None = None
         evals_without_improvement: int = 0
         total_steps: int = 0
         break_training: bool = False
@@ -979,51 +963,52 @@ class LMTrainer():
 
     def _train(self, loader: (
             data.DataLoader[data.SentenceIds, data.IdBatch])
-            ) -> Iterable[LMMetric]:
+            ) -> Iterable[metrics.LMMetric]:
         assert self.train_config is not None, "Config missing training params."
         self.transformerlm.train()
 
         def iterate():
             assert self.train_config is not None, (
                 "Config missing training params.")
-            metrics: list[LMMetric] = list()
+            metrics_list: list[metrics.LMMetric] = list()
             for i, batch in tqdm(enumerate(loader), desc="Batches"):
-                metrics.append(self.train_step(
+                metrics_list.append(self.train_step(
                     batch,
                     loader.dataset.keys_for_padding["label_ids"],
-                    perform_opt=(po := check_perform_opt(
+                    perform_opt=(po := functions.check_perform_opt(
                         self.train_config.gradient_acc, i))))
                 if po:
-                    yield sum_metrics(metrics)
-                    metrics = list()
+                    yield metrics.sum_metrics(metrics_list)
+                    metrics_list = list()
 
         if self.train_config.use_steps:
             for e in iterate():
                 yield self.gather_metrics(e)
         else:
-            yield self.gather_metrics(sum_metrics(list(iterate())))
+            yield self.gather_metrics(metrics.sum_metrics(list(iterate())))
 
     def _eval(self, loader: (
-            data.DataLoader[data.SentenceIds, data.IdBatch])) -> LMMetric:
+            data.DataLoader[data.SentenceIds, data.IdBatch])
+            ) -> metrics.LMMetric:
         self.transformerlm.eval()
         with torch.no_grad():
             # eval loop: no backprop on this data, to avoid storing
             # all intermediatte variable
-            metrics = [
+            metrics_list = [
                 self.eval_step(
                     batch,
                     self.config.dependency_mode,
                     loader.dataset.keys_for_padding["label_ids"])
                 for batch in tqdm(loader, desc="Batches")]
-        return self.gather_metrics(sum_metrics(metrics))
+        return self.gather_metrics(metrics.sum_metrics(metrics_list))
 
     def test(
             self, token_mapper: data.TokenMapper | None = None,
             **datasets: (
                 data.TokenisedDataset[data.IdsSentence]
                 | data.DataLoader[data.IdsSentence, data.IdBatch] | Any)
-            ) -> dict[str, LMMetric]:
-        metrics: dict[str, LMMetric] = {}
+            ) -> dict[str, metrics.LMMetric]:
+        metrics_dict: dict[str, metrics.LMMetric] = {}
         for n, ds in datasets.items():
             if isinstance(ds, (data.DataLoader, data.TokenisedDataset)):
                 ds = self.get_loader(ds)
@@ -1031,8 +1016,8 @@ class LMTrainer():
                 metrics[n] = self._eval(self.get_loader(ds))
                 info(
                     self.config.rank, logger,
-                    f"Test metric for {n} split:\n{metrics[n].info}")
-        return metrics
+                    f"Test metric for {n} split:\n{metrics_dict[n].info}")
+        return metrics_dict
 
     def predict(
             self, dataset: data.TokenisedDataset[data.IdsSentence],
@@ -1046,7 +1031,7 @@ class LMTrainer():
         """Returns logits and arc scores"""
         # TODO: Does this work with ddp? Batches are distributed but not
         # joined back together.
-        loader = get_loader(  # type: ignore
+        loader = data.get_loader(  # type: ignore
             dataset,
             batch_size=self.config.batch_size,
             bucket=False,
@@ -1084,19 +1069,20 @@ class LMTrainer():
                 labels = batch["label_ids"]
 
                 if make_prob:
-                    logits = logits_to_probs(
+                    logits = functions.logits_to_probs(
                         logits,
                         not self.config.discriminative)
 
                 if only_true:
-                    logits = select_true(logits, labels, ignore_index)
+                    logits = functions.select_true(
+                        logits, labels, ignore_index)
 
                 unpadded_logits.extend(
-                    unpad(logits, labels, ignore_index))
+                    functions.unpad(logits, labels, ignore_index))
 
                 for key in arc_logits.keys():
                     unpadded_arc_logits[key].extend(
-                        unpad_masks(
+                        functions.unpad_masks(
                             arc_logits[key].swapaxes(0, 1),
                             labels, ignore_index))
 
@@ -1104,7 +1090,7 @@ class LMTrainer():
                 for additional_key in ("proj_states", "att"):
                     if additional_key in additional:  # type: ignore
                         unpadded_additional[additional_key].extend(
-                            unpad_masks(
+                            functions.unpad_masks(
                                 additional[
                                     additional_key].swapaxes(  # type: ignore
                                         0, 1),
@@ -1131,8 +1117,8 @@ class LMTrainer():
                 (1, 2),
                 dtype=torch.long,
                 device=self.config.device)
-            idx[0, 0] = token_mapper.token2id[DUMMY]
-            idx[0, 1] = token_mapper.token2id[ROOT]
+            idx[0, 0] = token_mapper.token2id[data.DUMMY]
+            idx[0, 1] = token_mapper.token2id[data.ROOT]
             g = model.generate(
                 idx, max_new_tokens=max_len).tolist()[0]
             # support an initial mask here
@@ -1140,16 +1126,16 @@ class LMTrainer():
             conllu = data.parse_list_of_words_with_spacy(
                 start.split(), min_len=0)
 
-            transform = TransformMaskHeadChild(
+            transform = data.TransformMaskHeadChild(
                 keys_for_head={"head"},
                 keys_for_child={"child"},
                 triangulate=True)
 
-            dataset: CoNLLUDataset = CoNLLUDataset.from_str(
+            dataset: data.CoNLLUDataset = data.CoNLLUDataset.from_str(
                 conllu_str=conllu, transform_masks=transform, max_len=None)
 
             dataset.map_to_ids(token_mapper)
-            dataloader: DataLoader = get_loader(        # type: ignore
+            dataloader: data.DataLoader = data.get_loader(    # type: ignore
                 dataset, batch_size=1,                  # type: ignore
                 bucket=False, min_size=0, max_size=50,
                 shuffle=False, droplast=False,
@@ -1168,7 +1154,7 @@ class LMTrainer():
             except NameError:
                 raise NameError("dataloader was empty.")
 
-        eos_id = token_mapper.token2id[EOS]
+        eos_id = token_mapper.token2id[data.EOS]
         first_eos = next((i for i, x in enumerate(g) if x == eos_id), len(g))
         g = g[:first_eos + 1]
         return token_mapper.decode([g], to_string=True)[0]
@@ -1180,30 +1166,31 @@ class LMTrainer():
         if self.use_ddp:
             outputs: list[N] = [data]*self.config.world_size
             dist.all_gather_object(outputs, data)
-            if isinstance(data, (torch.Tensor, LMMetric)) and data.is_cuda:
+            if isinstance(
+                    data, (torch.Tensor, metrics.LMMetric)) and data.is_cuda:
                 outputs = [t.to(data.device) for t in outputs]  # type: ignore
             return outputs
         return [data]
 
     def gather_metrics(self, metric: M) -> M:
         if self.use_ddp:
-            return sum_metrics(self.gather_ddp(metric))
+            return metrics.sum_metrics(self.gather_ddp(metric))
         else:
             return metric
 
     def log_metric(
-            self, metric: LMMetric,
+            self, metric: metrics.LMMetric,
             epoch: int,
             split: Literal["train", "eval", "test"]) -> None:
         if not self.use_ddp or self.config.rank == 0:
             self.writer.add_metric(metric, epoch, split)
 
-    # this is not typed in detail like data.get_loader
+    # this is not typed in detail like data.data.get_loader
     def get_loader(self, in_data: (
                 data.TokenisedDataset[data.IdsSentence]
                 | data.DataLoader[data.IdsSentence, data.IdBatch])
-            ) -> DataLoader[data.IdsSentence, data.IdBatch]:
-        if not isinstance(in_data, DataLoader):
+            ) -> data.DataLoader[data.IdsSentence, data.IdBatch]:
+        if not isinstance(in_data, data.DataLoader):
             assert self.config.batch_size <= len(in_data), (
                 "Batch size larger than dataset. "
                 f"dataset size: {len(in_data)}, batch size: "
@@ -1216,162 +1203,3 @@ class LMTrainer():
                 rank=self.config.rank,
                 n_workers=self.config.n_workers)
         return in_data
-
-
-# def logits_to_probs(logits: torch.Tensor,
-#                    labels: torch.Tensor,
-#                    ignore_id: int) -> list[torch.Tensor]:
-#    probs = torch.softmax(logits, dim=-1)
-#    pred_prob_list = []
-#    for probs_sen, label_ids_sen in zip(
-#            probs, labels):
-#        select_entries = label_ids_sen != ignore_id
-#        unpadded_labels = label_ids_sen[select_entries][1:-1]
-#        probs_sen = probs_sen[1:-1]
-#        unpadded_indices = torch.arange(
-#            label_ids_sen.shape[0])[select_entries][1:-1] - 1
-#        pred_prob = probs_sen[unpadded_indices,
-#                              unpadded_labels.long()]
-#        pred_prob_list.append(pred_prob)
-#    return pred_prob_list
-
-
-def select_true(preds: torch.Tensor,
-                labels: torch.Tensor,
-                ignore_index: int | None = None) -> torch.Tensor:
-    """If ignore_index is given, it selects the probability for element zero"""
-    labels = labels.unsqueeze(-1)
-    if ignore_index is not None:
-        labels = labels.clone()
-        labels[labels == ignore_index] = 0
-    return torch.gather(preds, -1, labels).squeeze(-1)
-
-
-def logits_to_probs(logits: torch.Tensor, softmax: bool = True
-                    ) -> torch.Tensor:
-    if softmax:
-        return torch.softmax(logits, dim=-1)
-    else:
-        return torch.sigmoid(logits)
-
-
-def logits_to_true_probs(
-        logits: torch.Tensor,
-        labels: torch.Tensor,
-        ignore_index: int | None = None,
-        softmax: bool = True) -> torch.Tensor:
-    probs = logits_to_probs(logits, softmax)
-    return select_true(probs, labels, ignore_index)
-
-
-def logits_to_surprisal(logits: torch.Tensor,
-                        labels: torch.Tensor,
-                        ignore_index: int | None = None,
-                        softmax: bool = True) -> torch.Tensor:
-    return -torch.log(logits_to_true_probs(
-        logits, labels, ignore_index, softmax))
-
-
-def sum_depadded(
-        values: torch.Tensor,
-        labels: torch.Tensor,
-        ignore_index: int) -> torch.Tensor:
-    values[labels == ignore_index] = 0
-    return values.sum(-1)
-
-
-def mean_depadded(
-        values: torch.Tensor,
-        labels: torch.Tensor,
-        ignore_index: int) -> torch.Tensor:
-    num_items = (labels != ignore_index).sum(-1)
-    sums = sum_depadded(values, labels, ignore_index)
-    return sums / num_items
-
-
-def logits_to_perplexity(
-        logits: torch.Tensor,
-        labels: torch.Tensor,
-        ignore_index: int,
-        softmax: bool = True) -> torch.Tensor:
-    # Should we disregard first node (root from dummy?)
-    surprisal = logits_to_surprisal(logits, labels, softmax)
-    means = mean_depadded(surprisal, labels, ignore_index)
-    return torch.exp(means)
-
-
-def unpad(
-        sentences: torch.Tensor, labels: torch.Tensor,
-        ignore_index: int) -> list[torch.Tensor]:
-    unpadded_list: list[torch.Tensor] = []
-    for sentence, sen_labels in zip(sentences, labels):
-        unpadded_list.append(sentence[sen_labels != ignore_index])
-    return unpadded_list
-
-
-def unpad_masks(masks: torch.Tensor, labels: torch.Tensor,
-                ignore_index: int) -> list[torch.Tensor]:
-    unpadded_list: list[torch.Tensor] = []
-    for sentence, sen_labels in zip(masks, labels):
-        unpadded_list.append(
-            sentence[:, sen_labels != ignore_index][
-                :, :, sen_labels != ignore_index])
-    return unpadded_list
-
-
-def get_uas_abs(inp: tuple[np.ndarray, np.ndarray, np.ndarray]) -> int:
-    pred_arcs, gold_arcs, upto_not_padding = inp
-    pred_arcs = pred_arcs[upto_not_padding][:, upto_not_padding]
-    gold_arcs = gold_arcs[upto_not_padding][:, upto_not_padding]
-    pred_headlist = mst(pred_arcs)
-    # one could max for each row as head instead
-    # but this would not correspond to the max probability
-    # tree given the scores
-    gold_headlist = mask_to_headlist(gold_arcs)
-
-    uas_s = uas_absolute(pred_headlist, gold_headlist) + 1
-    # add 1 for dummy mask
-    return uas_s
-
-
-def inverse_sigmoid(x: torch.Tensor) -> torch.Tensor:
-    return -torch.log((1-x)/x)
-
-
-def check_perform_opt(gradient_acc: int | None, i_train: int) -> bool:
-    return (gradient_acc is None
-            or (i_train+1) % gradient_acc == 0)
-
-
-def uas_composition(
-        score_preds: dict[str, torch.Tensor],
-        score_golds: dict[str, torch.BoolTensor],
-        label_ids: torch.Tensor,
-        ignore_index: int,
-        masks_setting: Literal["current", "next"] = "current",
-        gov_key: str = "head", dep_key: str = "child") -> int:
-    values = torch.stack((
-        score_preds[gov_key], score_golds[gov_key].float(),
-        score_preds[dep_key], score_golds[dep_key].float()))
-    values_np = values.mean(1).detach().cpu().numpy()
-
-    if masks_setting == "next":
-        zeros = np.zeros((
-            values_np.shape[0],
-            values_np.shape[1],
-            1, values_np.shape[3]))
-
-        values_np = np.concatenate(
-                (zeros, values_np[:, :, :-1]), axis=2)
-
-    preds_arcs = dummy_mask_removal(
-        merge_head_child_scores(values_np[0], values_np[2]))
-    golds_arcs = dummy_mask_removal(
-        merge_head_child_scores(values_np[1], values_np[3]))
-
-    not_padding = (
-        label_ids
-        != ignore_index).cpu().numpy()[:, 1:]
-
-    return sum(map(get_uas_abs, zip(
-        preds_arcs, golds_arcs, not_padding)))
