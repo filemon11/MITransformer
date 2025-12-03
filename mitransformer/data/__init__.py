@@ -9,12 +9,12 @@ from .dataset import (  # noqa: F401
     SentenceDataset,
     MemMapWindowDataset, MasksSetting,
     TransformMaskHeadChild, SentenceIds,
-    TokenisedDataset)
+    TokenisedDataset, IdsSentence)
 from .dataloader import (  # noqa: F401
     DataLoader, get_loader,
     TokenisedBatch, FastBatch,
     FastMaskedBatch, TokenisedMaskedBatch,
-    BatchIds, BatchMaskIds)
+    BatchIds, BatchMaskIds, MaskIdBatch, IdBatch)
 from .provider import DataConfig, DataProvider  # noqa: F401
 from .parse import (  # noqa: F401
     parse_list_of_words_with_spacy, parse_wikitext_with_spacy,

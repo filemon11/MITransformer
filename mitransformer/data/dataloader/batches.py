@@ -42,6 +42,14 @@ class BatchMaskIds(BatchIds, BatchMask):
     pass
 
 
+class IdBatch(BatchIds, BatchIdx):
+    pass
+
+
+class MaskIdBatch(BatchMaskIds, BatchIdx):
+    pass
+
+
 class BasicBatch(BatchIdx):
     tokens: list[str]
     labels: list[str]

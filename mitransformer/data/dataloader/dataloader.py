@@ -111,6 +111,23 @@ def get_loader(
 
 @overload
 def get_loader(
+        ds: dataset.TokenisedDataset[dataset.IdsSentence],
+        batch_size: int,
+        bucket: bool = True,
+        min_size: int = 5,
+        max_size: int = 50,
+        shuffle: bool = True,
+        droplast: bool = True,
+        rank: int | None = 0,
+        world_size: int = 1,
+        n_workers: int = 0,
+        ) -> (
+            DataLoader[dataset.IdsSentence, batches.IdBatch]):
+    ...
+
+
+@overload
+def get_loader(
         ds: dataset.TokenisedDataset[dataset.SentenceIds],
         batch_size: int,
         bucket: bool = True,

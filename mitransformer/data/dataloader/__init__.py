@@ -3,4 +3,4 @@ from .dataloader import (  # noqa: F401
 from .batches import (  # noqa: F401
     TokenisedBatch, TokenisedMaskedBatch,
     FastBatch, FastMaskedBatch, BatchIds,
-    BatchMaskIds)
+    BatchMaskIds, MaskIdBatch, IdBatch)

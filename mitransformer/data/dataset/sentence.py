@@ -33,6 +33,10 @@ class SentenceIds(TypedDict):
     label_ids: NotRequired[npt.NDArray[np.uint32]]
 
 
+class IdsSentence(SentenceIds, SentenceIdx):
+    pass
+
+
 class BasicSentence(SentenceIdx):
     tokens: list[str]
     labels: list[str]

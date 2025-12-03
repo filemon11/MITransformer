@@ -304,7 +304,7 @@ class LMTrainer():
         self.hooks.append(hook)
 
     def run_hooks(
-            self, input: CoNLLUTokenisedBatch | EssentialBatch,
+            self, input: data.IdBatch | data.MaskIdBatch,
             output: tuple[torch.Tensor, dict[str, torch.Tensor]]
             ) -> None:
         for hook in self.hooks:
@@ -582,7 +582,7 @@ class LMTrainer():
 
     def train_step(
             self,
-            batch: data.BatchIds | data.BatchMaskIds,
+            batch: data.IdBatch | data.MaskIdBatch,
             ignore_index: int,
             perform_opt: bool = True) -> LMMetric:
         assert self.train_config is not None, "Config missing training params."
@@ -609,7 +609,7 @@ class LMTrainer():
         num_arc_instances: int | None = None
         if self.train_config.dependency_mode == "supervised":
             assert "masks" in batch
-            batch = cast(data.BatchMaskIds, batch)
+            batch = cast(data.MaskIdBatch, batch)
             score_pair = self.prepare_scores(
                 arc_logits, batch["masks"])
 
@@ -677,7 +677,7 @@ class LMTrainer():
 
     def eval_step(
             self,
-            batch: data.BatchIds,
+            batch: data.IdBatch | data.MaskIdBatch,
             mode: Mode,
             ignore_index: int) -> LMMetric:
         self.batch_to(batch, device=self.config.device)  # type: ignore
@@ -713,7 +713,7 @@ class LMTrainer():
         num_arc_instances = None
         if mode == "supervised":
             assert "masks" in batch
-            batch = cast(data.BatchMaskIds, batch)
+            batch = cast(data.MaskIdBatch, batch)
             score_pair = self.prepare_scores(
                 arc_logits, batch["masks"])
 
@@ -814,11 +814,11 @@ class LMTrainer():
     def train_iter(
             self,
             train: (
-                data.TokenisedDataset[data.SentenceIds]
-                | data.DataLoader[data.SentenceIds, data.BatchIds]),
+                data.TokenisedDataset[data.IdsSentence]
+                | data.DataLoader[data.IdsSentence, data.IdBatch]),
             eval: (
-                data.TokenisedDataset[data.SentenceIds]
-                | data.DataLoader[data.SentenceIds, data.BatchIds]),
+                data.TokenisedDataset[data.IdsSentence]
+                | data.DataLoader[data.IdsSentence, data.IdBatch]),
             token_mapper: data.TokenMapper | None = None,
             **kwargs) -> Generator[
                 Result,
@@ -937,14 +937,14 @@ class LMTrainer():
     def train(
             self,
             train: (
-                data.TokenisedDataset[data.SentenceIds]
-                | data.DataLoader[data.SentenceIds, data.BatchIds]),
+                data.TokenisedDataset[data.IdsSentence]
+                | data.DataLoader[data.IdsSentence, data.IdBatch]),
             eval: (
-                data.TokenisedDataset[data.SentenceIds]
-                | data.DataLoader[data.SentenceIds, data.BatchIds]),
+                data.TokenisedDataset[data.IdsSentence]
+                | data.DataLoader[data.IdsSentence, data.IdBatch]),
             test: (
-                data.TokenisedDataset[data.SentenceIds]
-                | data.DataLoader[data.SentenceIds, data.BatchIds]
+                data.TokenisedDataset[data.IdsSentence]
+                | data.DataLoader[data.IdsSentence, data.IdBatch]
                 | None) = None,
             **kwargs) -> TestResult:
         assert self.train_config is not None, "Config missing training params."
@@ -978,7 +978,7 @@ class LMTrainer():
             test=test)
 
     def _train(self, loader: (
-            data.DataLoader[data.SentenceIds, data.BatchIds])
+            data.DataLoader[data.SentenceIds, data.IdBatch])
             ) -> Iterable[LMMetric]:
         assert self.train_config is not None, "Config missing training params."
         self.transformerlm.train()
@@ -1004,7 +1004,7 @@ class LMTrainer():
             yield self.gather_metrics(sum_metrics(list(iterate())))
 
     def _eval(self, loader: (
-            data.DataLoader[data.SentenceIds, data.BatchIds])) -> LMMetric:
+            data.DataLoader[data.SentenceIds, data.IdBatch])) -> LMMetric:
         self.transformerlm.eval()
         with torch.no_grad():
             # eval loop: no backprop on this data, to avoid storing
@@ -1020,8 +1020,8 @@ class LMTrainer():
     def test(
             self, token_mapper: data.TokenMapper | None = None,
             **datasets: (
-                data.TokenisedDataset[data.SentenceIds]
-                | data.DataLoader[data.SentenceIds, data.BatchIds] | Any)
+                data.TokenisedDataset[data.IdsSentence]
+                | data.DataLoader[data.IdsSentence, data.IdBatch] | Any)
             ) -> dict[str, LMMetric]:
         metrics: dict[str, LMMetric] = {}
         for n, ds in datasets.items():
@@ -1035,7 +1035,7 @@ class LMTrainer():
         return metrics
 
     def predict(
-            self, dataset: data.TokenisedDataset[data.SentenceIds],
+            self, dataset: data.TokenisedDataset[data.IdsSentence],
             make_prob: bool = False,
             only_true: bool = False,
             dataset_name: str | None = None,
@@ -1200,9 +1200,9 @@ class LMTrainer():
 
     # this is not typed in detail like data.get_loader
     def get_loader(self, in_data: (
-                data.TokenisedDataset[data.SentenceIds]
-                | data.DataLoader[data.SentenceIds, data.BatchIds])
-            ) -> DataLoader[data.SentenceIds, data.BatchIds]:
+                data.TokenisedDataset[data.IdsSentence]
+                | data.DataLoader[data.IdsSentence, data.IdBatch])
+            ) -> DataLoader[data.IdsSentence, data.IdBatch]:
         if not isinstance(in_data, DataLoader):
             assert self.config.batch_size <= len(in_data), (
                 "Batch size larger than dataset. "

@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 from .. import data
 from . import trainer
 
-from typing import Sequence
+from typing import Sequence, TypeVar, Generic
 
 
 def get_attention_fig(
@@ -58,13 +58,16 @@ def get_attention_fig(
     return fig
 
 
-class Hook(ABC):
+T = TypeVar("T")
+
+
+class Hook(ABC, Generic[T]):
     def __init__(self, note: str | None = None) -> None:
         self.note: str | None = note
 
     @abstractmethod
     def __call__(
-            self, input: data.CoNLLUTokenisedBatch | data.EssentialBatch,
+            self, input: T,
             output: tuple[
                 torch.Tensor, dict[str, torch.Tensor]]) -> None:
         ...
@@ -76,7 +79,7 @@ class Hook(ABC):
         self.note = note
 
 
-class AttentionPlotHook(Hook):
+class AttentionPlotHook(Hook[data.TokenisedMaskedBatch]):
     def __init__(
             self, directory: str, ignore_idx: int | None = None,
             token_mapper: data.TokenMapper | None = None,
@@ -87,7 +90,7 @@ class AttentionPlotHook(Hook):
         self.token_mapper: data.TokenMapper | None = token_mapper
 
     def __call__(
-            self, input: data.CoNLLUTokenisedBatch | data.EssentialBatch,
+            self, input: data.TokenisedMaskedBatch,
             output: tuple[
                 torch.Tensor, dict[str, torch.Tensor]]) -> None:
         for head_type, att_preds in output[1].items():
@@ -135,7 +138,7 @@ class AttentionPlotHook(Hook):
             self.token_mapper = token_mapper
 
 
-class TreePlotHook(Hook):
+class TreePlotHook(Hook[data.TokenisedMaskedBatch]):
     def __init__(
             self, directory: str, ignore_idx: int | None = None,
             token_mapper: data.TokenMapper | None = None,
@@ -148,7 +151,7 @@ class TreePlotHook(Hook):
         self.masks_setting = masks_setting
 
     def __call__(
-            self, input: data.CoNLLUTokenisedBatch | data.EssentialBatch,
+            self, input: data.TokenisedMaskedBatch,
             output: tuple[
                     torch.Tensor, dict[str, torch.Tensor]]) -> None:
         mode = []

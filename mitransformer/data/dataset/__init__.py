@@ -3,7 +3,7 @@ from .transform import (  # noqa: F401
 from .sentence import (  # noqa: F401
     TokenisedSentence, TokenisedMaskedSentence,
     FastSentence, FastMaskedSentence,
-    SentenceIdx, SentenceIds)
+    SentenceIdx, SentenceIds, IdsSentence)
 from .basic import (  # noqa: F401
     SentenceDataset, CoNLLUDataset,)
 from .memmapped import (  # noqa: F401
