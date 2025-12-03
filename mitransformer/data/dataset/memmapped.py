@@ -142,7 +142,7 @@ class MemMapDataset(
 
         self.token_mapper = token_mapper
 
-        self.keys_for_tensors = {"input_ids", "masks", "label_ids"}
+        self.keys_for_tensors = {"input_ids", "label_ids"}
         self.keys_for_padding = {
             "input_ids": token_mapper.pad_id,
             "label_ids": -100}

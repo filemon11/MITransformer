@@ -211,4 +211,5 @@ class CoNLLUDataset(
 
     def map_to_ids(self, token_mapper: tokeniser.TokenMapper) -> None:
         super().map_to_ids(token_mapper)
+        self.keys_for_tensors.add("masks")
         self.keys_for_mask_padding = {"masks": False}

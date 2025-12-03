@@ -102,7 +102,8 @@ def get_space_after(tokenlist: TokenList) -> npt.NDArray[np.bool_]:
 
 
 def head_list_to_adjacency_matrix(
-        headlist: Sequence[int] | npt.NDArray[np.int_] | npt.NDArray[np.uint],
+        headlist: (
+            Sequence[int] | npt.NDArray[np._IntegerT] | npt.NDArray[np.uint]),
         correct_underflow_overflow: bool = False,
         ) -> npt.NDArray[np.bool_]:
     sen_len = len(headlist)
