@@ -49,17 +49,24 @@ class DatasetDetailsFull(DatasetDetails):
 
 class DatasetDict(TypedDict):
     token_mapper: tokeniser.TokenMapper
+    train: NotRequired[dataset.MemMapDataset]
+    eval: NotRequired[dataset.MemMapDataset]
+    test: NotRequired[dataset.MemMapDataset]
+
+
+class MaskedDatasetDict(TypedDict):
+    token_mapper: tokeniser.TokenMapper
     train: NotRequired[dataset.MemMapDepDataset]
     eval: NotRequired[dataset.MemMapDepDataset]
     test: NotRequired[dataset.MemMapDepDataset]
 
 
-T = TypeVarTuple("T")
+Ts = TypeVarTuple("Ts")
 
 
 def make_name(
         dir: str, naming_pattern: str,
-        splits: tuple[*T]) -> tuple[*T]:
+        splits: tuple[*Ts]) -> tuple[*Ts]:
     return tuple(
         os.path.join(
             dir, naming_pattern.format(split))
@@ -151,29 +158,31 @@ def mmd_splits(memmap_dir: str, splits: SplitSelection) -> TupleSelection:
 
 @overload
 def load_dataset(
-        details: DatasetDetailsFull,
-        max_len_train: int | None = 40,
-        max_len_eval_test: int | None = None,
-        vocab_size: int | None = 50_000,
-        first_k: int | None = None,
-        first_k_eval_test: int | None = None,
+        details: DatasetDetailsFull | DatasetDetails,
+        max_len_train: int | None,
+        max_len_eval_test: int | None,
+        vocab_size: int | None,
+        first_k: int | None,
+        first_k_eval_test: int | None,
+        masked: Literal[True],
         triangulate: int | None = 0,
         connect_with_dummy: bool = True,
         connect_with_self: bool = False,
         masks_setting: dataset.MasksSetting = "current",
         *args, **kwargs
-        ) -> DatasetDict:
+        ) -> MaskedDatasetDict:
     ...
 
 
 @overload
 def load_dataset(
-        details: DatasetDetails,
+        details: DatasetDetailsFull | DatasetDetails,
         max_len_train: int | None = 40,
         max_len_eval_test: int | None = None,
         vocab_size: int | None = 50_000,
         first_k: int | None = None,
         first_k_eval_test: int | None = None,
+        masked: Literal[False] = False,
         triangulate: int | None = 0,
         connect_with_dummy: bool = True,
         connect_with_self: bool = False,
@@ -184,17 +193,18 @@ def load_dataset(
 
 
 def load_dataset(
-        details: DatasetDetails | DatasetDetailsFull,       # type: ignore
+        details: DatasetDetails | DatasetDetailsFull,
         max_len_train: int | None = 40,  # should mark all
         max_len_eval_test: int | None = None,
         vocab_size: int | None = 50_000,  # of this with ReadOnly
         first_k: int | None = None,
         first_k_eval_test: int | None = None,
+        masked: bool = False,
         triangulate: int | None = 0,
         connect_with_dummy: bool = True,
         connect_with_self: bool = False,
         masks_setting: dataset.MasksSetting = "current",
-        *args, **kwargs) -> DatasetDict:
+        *args, **kwargs) -> DatasetDict | MaskedDatasetDict:
     # TODO: implement option to read raw string data and parse,
     # to accept raw string as input and to save parsed data
     transform = dataset.TransformMaskHeadChild(
@@ -228,26 +238,42 @@ def load_dataset(
 
     def load_dataset(
             dir: str, is_train: bool,
-            max_len: int | None = None) -> dataset.MemMapDepDataset:
+            max_len: int | None = None
+            ) -> dataset.MemMapDepDataset | dataset.MemMapDataset:
         first_k_param = first_k if is_train else first_k_eval_test
-        if load_memmap:
-            return dataset.MemMapDepDataset.from_memmap(
-                path=dir,
-                max_len=max_len,
-                first_k=first_k_param,
-                transform_masks=transform,
-                masks_setting=masks_setting)
+        if masked:
+            if load_memmap:
+                return dataset.MemMapDepDataset.from_memmap(
+                    path=dir,
+                    max_len=max_len,
+                    first_k=first_k_param,
+                    transform_masks=transform,
+                    masks_setting=masks_setting)
+            else:
+                return dataset.MemMapDepDataset.from_file(
+                    file=dir,
+                    transform_masks=transform,
+                    max_len=max_len,
+                    first_k=first_k_param,
+                    masks_setting=masks_setting)
         else:
-            return dataset.MemMapDepDataset.from_file(
-                file=dir, transform_masks=transform,
-                max_len=max_len,
-                first_k=first_k_param,
-                masks_setting=masks_setting)
+            if load_memmap:
+                return dataset.MemMapDataset.from_memmap(
+                    path=dir,
+                    max_len=max_len,
+                    first_k=first_k_param)
+            else:
+                return dataset.MemMapDataset.from_file(
+                    file=dir,
+                    max_len=max_len,
+                    first_k=first_k_param)
 
-    train: None | dataset.MemMapDepDataset = None
-    eval: None | dataset.MemMapDepDataset = None
-    test: None | dataset.MemMapDepDataset = None
-    sets: tuple[dataset.MemMapDepDataset, ...] = tuple()
+    train: None | dataset.MemMapDepDataset | dataset.MemMapDataset = None
+    eval: None | dataset.MemMapDepDataset | dataset.MemMapDataset = None
+    test: None | dataset.MemMapDepDataset | dataset.MemMapDataset = None
+    sets: (
+        tuple[dataset.MemMapDepDataset, ...]
+        | tuple[dataset.MemMapDataset]) = tuple()
     splits: tuple[str, ...] = tuple()
     if len(dirs) == 1:
         # Only test
@@ -258,11 +284,11 @@ def load_dataset(
         # train, eval and optional test
         train = load_dataset(dirs[0], True, max_len_train)
         eval = load_dataset(dirs[1], False, max_len_eval_test)
-        sets = (train, eval)
+        sets = (train, eval)  # type: ignore
         splits = ("train", "eval")
         if len(dirs) == 3:
             test = load_dataset(dirs[2], False, max_len_eval_test)
-            sets = (train, eval, test)
+            sets = (train, eval, test)  # type: ignore
             splits = ("train", "eval", "test")
     else:
         raise Exception("Too many or not enough dataset dirs provided.")
@@ -300,26 +326,27 @@ def load_dataset(
                 token_mapper,
                 os.path.join(memmap_dir, split_name))
 
+    Dicttype = MaskedDatasetDict if masked else DatasetDict
     if train is not None:
         assert eval is not None
         if test is not None:
-            return DatasetDict(
+            return Dicttype(
                 token_mapper=token_mapper,
-                train=train,
-                eval=eval,
-                test=test
+                train=train,  # type: ignore
+                eval=eval,  # type: ignore
+                test=test  # type: ignore
                 )
         else:
-            return DatasetDict(
+            return Dicttype(  # type: ignore
                 token_mapper=token_mapper,
-                train=train,
-                eval=eval,
+                train=train,  # type: ignore
+                eval=eval,  # type: ignore
                 )
     else:
         assert test is not None
-        return DatasetDict(
+        return Dicttype(  # type: ignore
             token_mapper=token_mapper,
-            test=test
+            test=test  # type: ignore
             )
 
 
@@ -331,6 +358,7 @@ class DataConfig(utils.Params):
     max_len_train: int | None = 40
     max_len_eval_test: int | None = None
     vocab_size: int | None = 50_000
+    masked: bool = False
     first_k: int | None = None
     first_k_eval_test: int | None = None
     triangulate: int | None = 0

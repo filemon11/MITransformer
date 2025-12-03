@@ -28,6 +28,7 @@ class ParserArgs(Params):
     dataset_name: str
     max_len_train: None | int
     max_len_eval_test: None | int
+    masked: bool
     vocab_size: int | None
     triangulate: int
     first_k: int | None

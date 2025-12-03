@@ -15,10 +15,12 @@ if __name__ == "__main__":
     only_content_words_cost = bool(int(sys.argv[4]))
     only_content_words_left = bool(int(sys.argv[5]))
     try:
-        mapper = sys.argv[6]            # hug:<name> loads a huggingface tokeniser
+        mapper = sys.argv[6]
+        # hug:<name> loads a huggingface tokeniser
     except IndexError:
         mapper = "processed/Wikitext_processed/mapper"
-        # TODO unclear; does this mean the model must have been trained on Wikitext?
+        # TODO unclear; does this mean the model must have been trained
+        # on Wikitext?
         # Is the mapper not a model property that can be loaded?
 
     corpus_to_infile: dict[preparation.Corpus, str] = {
