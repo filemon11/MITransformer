@@ -102,7 +102,7 @@ class MemMapDataset(
             id_hl=id_hl,
             max_len=max_len,
             first_k=first_k)
-        dataset.keys_for_tensors = {"input_ids", "masks", "label_ids"}
+        dataset.keys_for_tensors = {"input_ids", "label_ids"}
         dataset.keys_for_padding = {"input_ids": pad_id,
                                     "label_ids": -100}
 
@@ -146,7 +146,6 @@ class MemMapDataset(
         self.keys_for_padding = {
             "input_ids": token_mapper.pad_id,
             "label_ids": -100}
-        self.keys_for_mask_padding = {"masks": False}
 
         self.mapped = True
 

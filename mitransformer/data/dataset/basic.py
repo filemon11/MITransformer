@@ -60,7 +60,8 @@ class SentenceDataset(
             max_len: int | None = 40,
             first_k: int | None = None) -> Self:
 
-        tokenlists = functions.load_conllu(file, max_len, first_k)
+        tokenlists = functions.load_conllu(
+            file, max_len, first_k, verbose=True)
         data_dict = cls.make_conlludict(tokenlists)
 
         return cls(data_dict)
@@ -70,7 +71,8 @@ class SentenceDataset(
             cls, conllu_str: str,
             max_len: int | None = 40) -> Self:
 
-        tokenlists = functions.load_conllu_from_str(conllu_str, max_len)
+        tokenlists = functions.load_conllu_from_str(
+            conllu_str, max_len, verbose=True)
         return cls.from_conllu(tokenlists)
 
     @classmethod
@@ -159,7 +161,8 @@ class CoNLLUDataset(
                     npt.NDArray[np.bool_]]] | None = None,
             masks_setting: utils.MasksSetting = "current"):
 
-        tokenlists = functions.load_conllu(file, max_len, first_k)
+        tokenlists = functions.load_conllu(
+            file, max_len, first_k, verbose=True)
         data_dict = cls.make_conlludict(tokenlists)
 
         return cls(data_dict, transform_masks, masks_setting)
@@ -175,7 +178,8 @@ class CoNLLUDataset(
                     npt.NDArray[np.bool_]]] | None = None,
             masks_setting: utils.MasksSetting = "current"):
 
-        tokenlists = functions.load_conllu_from_str(conllu_str, max_len)
+        tokenlists = functions.load_conllu_from_str(
+            conllu_str, max_len, verbose=True)
         return cls.from_conllu(tokenlists, transform_masks, masks_setting)
 
     @classmethod

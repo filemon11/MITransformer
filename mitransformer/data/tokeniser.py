@@ -6,6 +6,7 @@ IDs back to tokens.
 import math
 from ..utils import pickle
 from collections import defaultdict
+import tqdm
 
 from typing import (Iterable, Self, Hashable, TypeVar,
                     Mapping, Literal, overload)
@@ -100,7 +101,8 @@ class TokenMapper():
             dummmy_token: str = DUMMY,
             root_token: str = ROOT,
             eos_token: str = EOS,
-            keep_top_k: int = 50_000
+            keep_top_k: int = 50_000,
+            verbose: bool = False
             ) -> Self:
         '''The `train` method takes a corpus of sentences, calculates word
         frequencies, selects the top words, and creates a mapping of tokens
@@ -162,7 +164,9 @@ class TokenMapper():
                 dummmy_token, root_token,
                 eos_token)})
 
-        for sentence in corpus:
+        for sentence in tqdm.tqdm(
+                corpus, "Tokeniser training (1/3)",
+                disable=not verbose):
             for word in sentence:
                 word_freqs[word] += 1
 
@@ -175,9 +179,14 @@ class TokenMapper():
             )[:len(word_freqs)-3][:keep_top_k]
 
         # replace words that appear only once with UNK
-        wordset: list[str] = [token for token, freq in selected if freq > 1]
+        wordset: list[str] = [
+            token for token, freq in tqdm.tqdm(
+                selected, "Tokeniser training (2/3)", disable=not verbose)
+            if freq > 1]
 
-        token2id = {word: word_id for word_id, word in enumerate(wordset)}
+        token2id = {word: word_id for word_id, word in tqdm.tqdm(
+            enumerate(wordset), "Tokeniser training (3/3)",
+            disable=not verbose)}
 
         token2id = missingdict(token2id[unk_token], token2id)
 

@@ -18,6 +18,7 @@ from conllu.models import TokenList
 
 import numpy as np
 import numpy.typing as npt
+import tqdm
 
 from .. import tokeniser
 from . import utils
@@ -38,9 +39,12 @@ EOS_DEPREL = "eos"
 
 
 def load_conllu_from_str(
-        conllu_str: str, max_len: int | None = 40
+        conllu_str: str, max_len: int | None = 40,
+        verbose: bool = False
         ) -> list[TokenList]:
-    return [tokenlist for tokenlist in conllu.parse(conllu_str)
+    return [tokenlist for tokenlist in tqdm.tqdm(
+                conllu.parse(conllu_str), "Creating tokenlists",
+                disable=not verbose)
             if max_len is None or len(tokenlist) <= max_len]
 
 
@@ -103,7 +107,7 @@ def get_space_after(tokenlist: TokenList) -> npt.NDArray[np.bool_]:
 
 def head_list_to_adjacency_matrix(
         headlist: (
-            Sequence[int] | npt.NDArray[np._IntegerT] | npt.NDArray[np.uint]),
+            Sequence[int] | npt.NDArray[np.integer] | npt.NDArray[np.uint]),
         correct_underflow_overflow: bool = False,
         ) -> npt.NDArray[np.bool_]:
     sen_len = len(headlist)
@@ -137,11 +141,14 @@ def apply_to_tokenlist(
 
 def load_conllu(
         file: str, max_len: int | None = 40,
-        first_k: int | None = None
+        first_k: int | None = None,
+        verbose: bool = False
         ) -> Iterator[TokenList]:
     data_file = open(file, "r", encoding=ENCODING)
     loaded_num = 0
-    for tokenlist in conllu.parse_incr(data_file):
+    for tokenlist in tqdm.tqdm(
+            conllu.parse_incr(data_file), "Creating tokenlists",
+            disable=not verbose):
         if max_len is None or len(tokenlist) <= max_len:
             # Disregard contracted tokens
             yield TokenList(

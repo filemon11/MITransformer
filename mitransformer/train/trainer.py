@@ -1013,7 +1013,7 @@ class LMTrainer():
             if isinstance(ds, (data.DataLoader, data.TokenisedDataset)):
                 ds = self.get_loader(ds)
                 self.init_hooks(ds, n, token_mapper=token_mapper)
-                metrics[n] = self._eval(self.get_loader(ds))
+                metrics_dict[n] = self._eval(self.get_loader(ds))
                 info(
                     self.config.rank, logger,
                     f"Test metric for {n} split:\n{metrics_dict[n].info}")

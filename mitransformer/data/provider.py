@@ -303,7 +303,8 @@ def load_dataset(
 
         token_mapper = tokeniser.TokenMapper.train(
             train.tokens,
-            keep_top_k=vocab_size)
+            keep_top_k=vocab_size,
+            verbose=True)
 
         Path(tokmap_dir).mkdir(parents=True, exist_ok=True)
         token_mapper.save(os.path.join(tokmap_dir, "mapper"))
