@@ -32,6 +32,8 @@ logger = getLogger(__name__)
 
 M = TypeVar("M", bound=metrics.LMMetric)
 N = TypeVar("N")
+K = TypeVar("K")
+V = TypeVar("V")
 
 
 class AdditionalPrediction(TypedDict):
@@ -479,12 +481,16 @@ class LMTrainer():
         return ~not_to_ignore  # type: ignore
 
     @classmethod
-    def batch_to(cls, batch: dict, device) -> None:
+    def batch_to[D](cls, batch: D, device) -> D:
+        new_batch: D = {}  # type: ignore
+        assert isinstance(batch, dict)
         for key, value in batch.items():
             if isinstance(value, torch.Tensor):
-                batch[key] = value.to(device, non_blocking=True)
+                new_batch[key] = value.to(  # type: ignore
+                    device, non_blocking=True)
             elif isinstance(value, dict):
-                cls.batch_to(value, device)
+                new_batch[key] = cls.batch_to(value, device)  # type: ignore
+        return new_batch  # type: ignore
 
     def get_metric(
             self,
@@ -571,7 +577,7 @@ class LMTrainer():
             perform_opt: bool = True) -> metrics.LMMetric:
         assert self.train_config is not None, "Config missing training params."
         assert self.optimiser is not None
-        self.batch_to(batch, device=self.config.device)  # type: ignore
+        batch = self.batch_to(batch, device=self.config.device)
 
         additional: models.AdditionalResults
         arc_logits: dict[str, torch.Tensor]
@@ -604,6 +610,10 @@ class LMTrainer():
 
                 preds_concat = torch.concat(list(score_preds.values()))
                 golds_concat = torch.concat(list(score_golds.values()))
+                del score_pair
+                del score_preds
+                del score_golds
+
                 to_ignore = self.get_ignore_mask(
                         preds_concat,
                         batch["label_ids"],
@@ -616,6 +626,8 @@ class LMTrainer():
                     cast(torch.BoolTensor, golds_concat),
                     to_ignore,
                     reduction="sum")
+                del preds_concat
+                del golds_concat
             else:
                 warning(
                     self.config.rank, logger,
@@ -626,8 +638,10 @@ class LMTrainer():
                 additional, to_ignore_mask="triangular",
                 reduction="sum",
                 input_ids=batch["input_ids"], ignore_index=ignore_index)
+        del additional
 
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
+        del batch
 
         metric = self.get_metric(
             num_instances,
@@ -638,6 +652,9 @@ class LMTrainer():
             weights=self.config.losses)
 
         loss = metric.loss
+        metric.detach_()
+        metric.to_("cpu")
+
         if self.train_config.gradient_acc is not None:
             (loss / self.train_config.gradient_acc).backward()
             # divide the per-instance avg loss by the number of gradient_acc.
@@ -650,13 +667,12 @@ class LMTrainer():
             # which can be different from a gloal average.
         else:
             loss.backward()
+        del loss
 
         if perform_opt:
             self.optimiser.step()   # update parameters
             self.optimiser.zero_grad(set_to_none=True)
 
-        metric.detach_()
-        metric.to_("cpu")
         return metric
 
     def eval_step(
@@ -664,7 +680,7 @@ class LMTrainer():
             batch: data.IdBatch | data.MaskIdBatch,
             mode: Mode,
             ignore_index: int) -> metrics.LMMetric:
-        self.batch_to(batch, device=self.config.device)  # type: ignore
+        batch = self.batch_to(batch, device=self.config.device)
 
         additional: models.AdditionalResults
         logits, arc_logits, additional = self.transformerlm(
@@ -688,6 +704,8 @@ class LMTrainer():
                 ignore_index,
                 softmax=not self.config.discriminative),
             labels, ignore_index).sum().detach().cpu().item()
+        del logits
+        del labels
 
         uas_abs: None | pd.DataFrame | float = None
         arc_loss: None | torch.Tensor = None
@@ -982,6 +1000,7 @@ class LMTrainer():
                 if po:
                     yield metrics.sum_metrics(metrics_list)
                     metrics_list = list()
+                del batch
 
         if self.train_config.use_steps:
             for e in iterate():
@@ -1059,7 +1078,7 @@ class LMTrainer():
             arc_logits: dict[str, torch.Tensor]
             additional: models.AdditionalResults
             for batch in tqdm(loader, desc="Batches"):
-                self.batch_to(batch, device=self.config.device)  # type: ignore
+                batch = self.batch_to(batch, device=self.config.device)
 
                 logits, arc_logits, additional = self.transformerlm(
                     **batch,
