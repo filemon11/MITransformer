@@ -826,7 +826,7 @@ class LMTrainer():
         break_training: bool = False
         max_epochs = (
             train_config.epochs
-            if train_config is not None
+            if train_config.max_steps is None
             else train_config.max_steps)
         # since we cannot run out of epochs if we use
         # max_steps
@@ -946,6 +946,8 @@ class LMTrainer():
             except StopIteration as e:
                 current, best = e.value
                 break
+        del gen
+
         # load best (saved) into transformerlm
         self.load_state()
 
