@@ -832,4 +832,85 @@ def create_parser() -> argparse.ArgumentParser:
         '--dataset_name', type=str, help='name of the dataset to load',
         default='Wikitext_processed')
 
+    # # RT Parser
+    rt_parser = subparsers.add_parser(
+        "rt", help="RT mode")
+
+    # # # Data parser group
+    data_group = rt_parser.add_argument_group('data')
+    data_group.add_argument(
+        '--dataset_name', type=str, help='name of the dataset to load',
+        default='Wikitext_processed')
+    data_group.add_argument(
+        '--max_len_train', type=argtypes.OptNone(int), default=40,
+        help='maximum number of tokens in training set')
+    data_group.add_argument(
+        '--max_len_eval_test', type=argtypes.OptNone(int), default=None,
+        help='maximum number of tokens in eval set')
+    data_group.add_argument(
+        '--masked', type=argtypes.str_to_bool, default=True,
+        help=(
+            'Whether to include dependencies in dataset. Necessary for'
+            ' dependency parsing setting.'))
+    data_group.add_argument(
+        '--triangulate', type=int, default=0,
+        help='TODO')
+    data_group.add_argument(
+        '--vocab_size', type=argtypes.OptNone(int), default=50_000,
+        help=(
+            'number of most frequent tokens to embed; all other '
+            'tokens are replaced with an UNK token;'
+            'can be None when loading existing token_mapper'))
+    data_group.add_argument(
+        '--first_k', type=argtypes.OptNone(int), default=None,
+        help='only load first k sentences of the training set')
+    data_group.add_argument(
+        '--first_k_eval_test', type=argtypes.OptNone(int), default=None,
+        help='only load first k sentences of the eval and test sets')
+    data_group.add_argument(
+        '--connect_with_dummy', type=argtypes.str_to_bool, default=True,
+        help=(
+            'Establish an arc to a dummy token when there is no '
+            'parent/child among the precedents?'))
+    data_group.add_argument(
+        '--connect_with_self', type=argtypes.str_to_bool, default=False,
+        help=(
+            'Establish a recursive arc to the token itself when there '
+            'is not parent/child among the precedents?'))
+    data_group.add_argument(
+        '--masks_setting', type=str, choices=(
+            "complete", "current", "next", "both"),
+        default="current",
+        help=('What dependencies to assign to the current token.'))
+
+    # # # Model parser group
+    model_group = rt_parser.add_argument_group('model')
+    model_group.add_argument(
+        '--model_name', type=str,
+        help=(
+            'The trained model for computing surprisal and other metrics.'
+            ' Must be in ./models. "hug:<name>" loads a huggingface model.'))
+    model_group.add_argument(
+        '--mapper', type=str, default="processed/Wikitext_processed/mapper",
+        help=(
+            'The path to the tokeniser for the model.'
+            ' "hug:<name>" loads a huggingface tokeniser.'))
+
+    # # # Cost parser group
+    cost_group = rt_parser.add_argument_group('cost')
+    cost_group.add_argument(
+        '--shift', type=int, default=0,
+        help=(
+            'Argument for adding spillover versions of the metrics.'
+            ' Adds shifted versions up to the shift value provided.'))
+    cost_group.add_argument(
+        '--only_content_words_cost', type=argtypes.str_to_bool, default=True,
+        help=(
+            'Assign costs only to content words?'))
+    cost_group.add_argument(
+        '--only_content_words_left', type=argtypes.str_to_bool, default=True,
+        help=(
+            'Take into account only content words in left context when'
+            ' computing costs?'))
+
     return parser

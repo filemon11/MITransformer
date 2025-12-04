@@ -1,6 +1,6 @@
 """
 Mask-informed transformer package.
-Version: 1.0"""
+Version: 1.1"""
 
 from .data import DataProvider, DataConfig  # noqa: F401
 from .train import (  # noqa: F401

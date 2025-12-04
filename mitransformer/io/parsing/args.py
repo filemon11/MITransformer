@@ -174,6 +174,15 @@ class CompareParserArgs(ParserArgs):
     batch_size: int
 
 
+@dataclass
+class RTParserArgs(ParserArgs):
+    model_name: str
+    shift: int
+    only_content_words_cost: bool
+    only_content_words_left: bool
+    mapper: str
+
+
 def seed_everything(seed: int):
     """There might be nondeterministic torch algorithms.
     We're not making them deterministic here."""
@@ -199,7 +208,7 @@ def make_device_str(string: str) -> str:
 def args_logic(args: (
         TrainParserArgs | HyperoptParserArgs
         | DataprepParserArgs | TestParserArgs
-        | CompareParserArgs)
+        | CompareParserArgs | RTParserArgs)
         ) -> None:
     seed_everything(args.seed)
     args.device = make_device_str(args.device)

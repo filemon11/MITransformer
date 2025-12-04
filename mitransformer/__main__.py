@@ -16,7 +16,7 @@ optuna.logging.disable_default_handler()  # Stop showing logs in sys.stderr.
 def parse_args() -> (
         io.TrainParserArgs | io.HyperoptParserArgs
         | io.DataprepParserArgs | io.TestParserArgs
-        | io.CompareParserArgs):
+        | io.CompareParserArgs | io.RTParserArgs):
     parser = io.create_parser()
     args = parser.parse_args()
 
@@ -34,6 +34,8 @@ def parse_args() -> (
             return io.DataprepParserArgs(**vars(args))
         case "test":
             return io.TestParserArgs(**vars(args))
+        case "rt":
+            return io.RTParserArgs(**vars(args))
         case _:
             return io.CompareParserArgs(**vars(args))
 
@@ -42,7 +44,7 @@ if __name__ == "__main__":
     args: (
         io.TrainParserArgs | io.HyperoptParserArgs
         | io.DataprepParserArgs | io.TestParserArgs
-        | io.CompareParserArgs)
+        | io.CompareParserArgs | io.RTParserArgs)
     args = parse_args()
     logmaker.logging_config(logname=args.name)
     # logging_config(
