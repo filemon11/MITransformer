@@ -17,7 +17,8 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 
-from typing import (Sequence, Mapping, Literal, TypedDict, NotRequired)
+from typing import (
+    Sequence, Mapping, Literal, TypedDict, NotRequired)
 
 
 AdditionalKeys = Literal["proj_states", "att"]
@@ -158,6 +159,179 @@ LayerDescription = tuple[tuple[str, ...], int]
 tuple of head names and a dimensionality."""
 
 
+class Attention(nn.Module):
+    def __init__(
+            self, n_embd: int, layer_description: tuple[tuple[str], int],
+            block_size: int, attn_dropout: float,
+            resid_dropout: float, overlay_causal: bool = False,
+            use_dual_fixed: bool = False, bias: bool = False):
+        """Initialise mask-informed attention module.
+
+        Parameters
+        ----------
+        n_embd : int
+            Module layer width.
+        layer_description : LayerDescription
+            Layer description.
+        block_size : int
+            Maximum sequence length.
+        attn_dropout : float
+            Dropout for attention weights.
+        resid_dropout : float
+            Dropout for residual connection.
+        overlay_causal : bool, default=False
+            Apply causal mask, i.e. make model incremental.
+        use_dual_fixed : bool, default=False
+            Cross-fix query and key vectors in dual-head
+            transformer.
+        bias : bool, default=False
+            Include bias in linear layers.
+        """
+        # n_embd: embedding dimensionType[DependencyMultiHeadAttention]
+        # n_heads : the number of heads we'd like to use
+        super().__init__()
+        self.tag: str = layer_description[0][0]
+        self.n_head: int = layer_description[1]
+        self.head_size: int = n_embd // self.n_head
+        assert n_embd % self.n_head == 0
+
+        #####
+        self.scale = self.head_size ** -0.5
+
+        self.w_qkv: nn.Linear | DualFixedLinear
+        if use_dual_fixed:
+            self.w_qkv = DualFixedLinear(n_embd, n_embd * 3, bias=bias)
+        else:
+            self.w_qkv = nn.Linear(n_embd, n_embd * 3, bias=bias)
+
+        self.proj = nn.Linear(n_embd, n_embd, bias=bias)
+
+        self.attn_dropout = attn_dropout
+        self.resid_dropout = nn.Dropout(resid_dropout)
+
+        self.overlay_causal: bool = overlay_causal
+        if overlay_causal:
+            self.register_buffer(
+                'tril',
+                torch.tril(torch.ones(block_size, block_size)))
+        # The diagonal argument of torch.tril refers to
+        # shifting the diagonal to consider,
+        # diagonal = 0 means that the diagonal will be
+        # filled with ones; -1 would mean leaving it out.
+
+        self.register_buffer(
+            'ones',
+            torch.ones(block_size, block_size, dtype=torch.bool))
+
+    def forward(
+            self,
+            x: torch.Tensor,
+            return_arc_logits: bool = False,
+            return_proj_states: bool = False,
+            return_att: bool = False,
+            ) -> tuple[
+                torch.Tensor,
+                None | dict[str, list[torch.Tensor]],
+                AdditionalResults]:
+        """
+        return_arc_logits: bool, default=False
+            Return per-head attention logits.
+        return_proj_states: bool, default=False
+            Return projected states.
+        return_att: bool, default=False
+            Return attention distribution."""
+
+        """Mask shape: [M, B, S, S]
+        with M number of multiheads,
+        B batch size, S sequence length"""
+        B, S, E = x.shape
+        H = self.n_head
+        E = self.head_size
+        # B = batch size, S = sequence length, E = embedding dimensionality
+        # H = head number, M = multihead number
+
+        qkv = self.w_qkv(x).chunk(3, dim=-1)
+
+        q: torch.Tensor
+        k: torch.Tensor
+        v: torch.Tensor
+
+        q, k, v = map(
+            lambda t: einops.rearrange(
+                t, 'b s (h e) -> b h s e',
+                h=H), qkv)
+
+        att: torch.Tensor = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+        # (B, H, S, S)
+
+        att *= (1.0 / math.sqrt(k.shape[-1]))
+
+        # (B, H, S, S)
+        if self.overlay_causal:
+            att = att.masked_fill(
+                self.tril[:S, :S] == 0, float('-inf'))  # type: ignore
+
+        # TODO: get an empty mask for all tags not occurring in the
+        # mask argument; then stack all masks on dim 0 and fill masks
+
+        if self.attn_dropout > 0 and self.training:
+            att[..., 2:][torch.rand(
+                att.shape, device=att.device)[..., 2:]
+                < self.attn_dropout] = float('-inf')
+
+        att_logits = att
+
+        att = F.softmax(att, dim=-1)
+
+        out = torch.matmul(att, v)
+
+        # reassamble all head outputs side by side
+        out = einops.rearrange(out, 'b h s e -> b s (h e)')
+
+        # output projection
+        out = self.proj(out)
+        out = self.resid_dropout(out)
+
+        out_logits: None | dict[str, list[torch.Tensor]] = None
+        if return_arc_logits:
+            out_logits = {
+                self.tag: [att_logits[:, h] for h in range(self.n_head)]}
+
+        additional_output: AdditionalResults = {}
+        if return_att:
+            additional_output["att"] = att
+
+        if return_proj_states:
+            # adapted from Goro Kobayashi
+            # (https://github.com/gorokoba560/norm-analysis-of-transformer)
+            v_layer = v.permute(0, 2, 1, 3).contiguous().unsqueeze(3)
+            # b h s e -> b s h 1 e
+
+            # dense weight is converted to
+            # (num_heads, head_size, all_head_size)
+            output_weight = self.proj.weight.view(H, E, H*E)
+            # he he -> h e he
+
+            # create transformed vectors f(x) from value vectors (value_layer)
+            # and weight matrix (output_weight).
+            # the bias of the output transformation is assumed to be
+            # distributed equally among heads
+            projected_states = v_layer.matmul(output_weight).squeeze(3)
+            # (b s h 1 e) x (h e he) -> b s h he
+
+            projected_states = projected_states.permute(
+                0, 2, 1, 3).contiguous()
+            if self.proj.bias is not None:
+                projected_states += (self.proj.bias / H)
+            # (b h s he)
+            projected_states = torch.einsum(
+                "bhks,bhsd->bhksd", att, projected_states)  # (b h s s he)
+
+            additional_output["proj_states"] = projected_states
+
+        return out, out_logits, additional_output
+
+
 class MIAttention(nn.Module):
     """Mask-informed attention module.
     """
@@ -230,7 +404,7 @@ class MIAttention(nn.Module):
     def forward(
             self,
             x: torch.Tensor,
-            masks: dict[str, torch.Tensor | None],
+            masks: dict[str, torch.Tensor | None] | None = None,
             return_arc_logits: bool = False,
             return_proj_states: bool = False,
             return_att: bool = False
@@ -335,8 +509,6 @@ class MIAttention(nn.Module):
                 tag: [att_logits[:, m, h] for h in range(self.n_head)]
                 for tag, m in zip(tags, range(self.n_multihead))}
 
-        # TODO: also output att @ v (with output transform?)
-
         additional_output: AdditionalResults = {}
         if return_att:
             additional_output["att"] = att
@@ -389,12 +561,22 @@ class MILayer(nn.Module):
         super().__init__()
 
         self.ln_1 = nn.LayerNorm(n_embd, bias=bias)
-        self.attn = MIAttention(n_embd, layer_description,
-                                block_size, attn_dropout,
-                                resid_dropout, overlay_causal,
-                                use_dual_fixed)
+        self.attn: MIAttention | Attention
+        if len(layer_description[0]) == 1:
+            self.attn = Attention(
+                n_embd, ((layer_description[0][0],), layer_description[1]),
+                block_size, attn_dropout,
+                resid_dropout, overlay_causal,
+                use_dual_fixed)
+        else:
+            self.attn = MIAttention(n_embd, layer_description,
+                                    block_size, attn_dropout,
+                                    resid_dropout, overlay_causal,
+                                    use_dual_fixed)
         self.ln_2 = nn.LayerNorm(n_embd, bias=bias)
         self.ff = FeedForward(n_embd, d_ff_factor, dropout_ff, bias)
+
+        self.forward_mask: bool = len(layer_description[0]) != 1
 
     def forward(
             self,
@@ -411,11 +593,20 @@ class MILayer(nn.Module):
         with M number of multiheads,
         B batch size, S sequence length"""
 
-        x_attn, out_logits, additional = self.attn(
-            self.ln_1(x), masks,
-            return_arc_logits=return_arc_logits,
-            return_proj_states=return_proj_states,
-            return_att=return_att)
+        # this is necessary since the simple attention module does
+        # not support custom masks
+        if self.forward_mask:
+            x_attn, out_logits, additional = self.attn(
+                self.ln_1(x), masks,
+                return_arc_logits=return_arc_logits,
+                return_proj_states=return_proj_states,
+                return_att=return_att)
+        else:
+            x_attn, out_logits, additional = self.attn(
+                self.ln_1(x),
+                return_arc_logits=return_arc_logits,
+                return_proj_states=return_proj_states,
+                return_att=return_att)
         x = x + x_attn
         x = x + self.ff(self.ln_2(x))
 
