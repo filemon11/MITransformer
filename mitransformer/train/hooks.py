@@ -15,7 +15,7 @@ import os
 from abc import ABC, abstractmethod
 
 from .. import data
-from . import trainer
+from . import functions
 
 from typing import Sequence, TypeVar, Generic
 
@@ -207,19 +207,19 @@ class TreePlotHook(Hook[data.TokenisedMaskedBatch]):
             att_g_h: torch.Tensor, att_g_c: torch.Tensor,
             labels: torch.Tensor, idx: int, input_ids,
             note2: str = ""):
-        pred_arcs = trainer.dummy_mask_removal(
-            trainer.merge_head_child_scores(
+        pred_arcs = functions.dummy_mask_removal(
+            functions.merge_head_child_scores(
                 att_p_h.cpu(), att_p_c.cpu()))
-        gold_arcs = trainer.dummy_mask_removal(
-            trainer.merge_head_child_scores(
+        gold_arcs = functions.dummy_mask_removal(
+            functions.merge_head_child_scores(
                 att_g_h.cpu(), att_g_c.cpu()))
 
         pred_arcs = pred_arcs[:, labels != self.ignore_idx][
                 labels != self.ignore_idx, :]
         gold_arcs = gold_arcs[:, labels != self.ignore_idx][
                 labels != self.ignore_idx, :]
-        pred_headlist = trainer.mst(pred_arcs)
-        gold_headlist = trainer.mask_to_headlist(gold_arcs)
+        pred_headlist = functions.mst(pred_arcs)
+        gold_headlist = functions.mask_to_headlist(gold_arcs)
         pred_headlist[0] = 0
         gold_headlist[0] = 0
 

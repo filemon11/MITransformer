@@ -8,8 +8,9 @@ import pandas as pd
 from ..train import LMTrainer
 from ..data import (
     load_natural_stories, load_zuco, load_frank, CorpusLoader,
-    TransformMaskHeadChild)
+    TransformMaskHeadChild, MasksSetting)
 from .frame import SplitFrame, UnsplitFrame
+from ..utils.params import Params
 
 from typing import (
     Iterable, Literal)
@@ -29,8 +30,6 @@ LANG = "en"
 TOKEN_COL = "word"
 TEXT_ID_COL = "item"
 WNUM_COL = "zone"
-DEVICE = "cpu"
-BATCH_SIZE = 8
 
 
 Corpus = Literal["naturalstories", "zuco", "frank_SP", "frank_ET"]
@@ -71,18 +70,17 @@ def process(
         input_file: str, output_file: str,
         model_dir: str, token_mapper_dir: str,
         raw: bool = True,
+        world_size: int = 1,
         token_col: str = TOKEN_COL,
         text_id_col: str = TEXT_ID_COL,
         wnum_col: str = WNUM_COL,
         baseline_metrics: Iterable[str] = ("frequency", "length"),
-        device: str = DEVICE,
-        batch_size: int = BATCH_SIZE,
-        masks_setting: Literal[
-            "current", "next"] = "current",
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
-        shift: int = -1,
-        corpus: Corpus = "naturalstories"
+        masks_setting: MasksSetting = "current",
+        shift: int = 0,
+        corpus: Corpus = "naturalstories",
+        trainer_args: Params | None = None
         ) -> None:
 
     if model_dir[:4] == "hug:" and token_mapper_dir[:4] == "hug:":
@@ -170,12 +168,12 @@ def process(
         unsplit_frame.df.to_csv(output_file, index=False)
 
     else:
+        additional = {} if trainer_args is None else trainer_args.to_dict()
+        additional["model_name"] = model_dir
         trainer = LMTrainer.load(
-            model_dir,
-            batch_size=batch_size,
-            device=device,
-            use_ddp=False,
-            world_size=1)
+            world_size=world_size,
+            **additional)
+        # omits undefined args
 
         frame.add_(
             "surprisal", token_mapper_dir=token_mapper_dir,
@@ -202,7 +200,7 @@ def process(
                 "expected_distance",
                 "kl_divergence",
                 "predicted_first_dependent_distance",
-                "attention_entropy",
+                # "attention_entropy",  # why does this throw an exception?
             )
         if not masks_setting == "next":
             # Dependent on dependency prediction

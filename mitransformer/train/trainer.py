@@ -583,9 +583,13 @@ class LMTrainer():
         arc_logits: dict[str, torch.Tensor]
         logits, arc_logits, additional = self.transformerlm(
             **batch,
-            return_arc_logits=self.config.distr_mode == "att",
-            return_proj_states=self.config.distr_mode == "att-n",
-            return_att=not self.config.combined_loss)
+            return_arc_logits=not self.config.combined_loss,
+            return_proj_states=(
+                self.config.combined_loss
+                and self.config.distr_mode == "att-n"),
+            return_att=(
+                self.config.combined_loss
+                and self.config.distr_mode == "att"))
         self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
 
@@ -685,9 +689,13 @@ class LMTrainer():
         additional: models.AdditionalResults
         logits, arc_logits, additional = self.transformerlm(
             **batch,
-            return_arc_logits=self.config.distr_mode == "att",
-            return_proj_states=self.config.distr_mode == "att-n",
-            return_att=not self.config.combined_loss)
+            return_arc_logits=not self.config.combined_loss,
+            return_proj_states=(
+                self.config.combined_loss
+                and self.config.distr_mode == "att-n"),
+            return_att=(
+                self.config.combined_loss
+                and self.config.distr_mode == "att"))
         self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
 
@@ -1082,9 +1090,13 @@ class LMTrainer():
 
                 logits, arc_logits, additional = self.transformerlm(
                     **batch,
-                    return_arc_logits=self.config.distr_mode == "att",
-                    return_proj_states=self.config.distr_mode == "att-n",
-                    return_att=not self.config.combined_loss)
+                    return_arc_logits=not self.config.combined_loss,
+                    return_proj_states=(
+                        self.config.combined_loss
+                        and self.config.distr_mode == "att-n"),
+                    return_att=(
+                        self.config.combined_loss
+                        and self.config.distr_mode == "att"))
 
                 self.run_hooks(batch, (logits, arc_logits))
                 labels = batch["label_ids"]
@@ -1101,11 +1113,12 @@ class LMTrainer():
                 unpadded_logits.extend(
                     functions.unpad(logits, labels, ignore_index))
 
-                for key in arc_logits.keys():
-                    unpadded_arc_logits[key].extend(
-                        functions.unpad_masks(
-                            arc_logits[key].swapaxes(0, 1),
-                            labels, ignore_index))
+                if arc_logits is not None:
+                    for key in arc_logits.keys():
+                        unpadded_arc_logits[key].extend(
+                            functions.unpad_masks(
+                                arc_logits[key].swapaxes(0, 1),
+                                labels, ignore_index))
 
                 additional_key: models.AdditionalKeys
                 for additional_key in ("proj_states", "att"):

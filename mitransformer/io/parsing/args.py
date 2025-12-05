@@ -149,10 +149,10 @@ class TestParserArgs(ParserArgs):
     model_name: str
     dependency_mode: Literal["supervised", "input", "standard"] | Undefined
     combined_loss: bool | Undefined
-    distr_mode: Literal["att", "att-n"]
-    length_weighted: bool
-    include_current: bool
-    global_distr: bool
+    distr_mode: Literal["att", "att-n"] | Undefined
+    length_weighted: bool | Undefined
+    include_current: bool | Undefined
+    global_distr: bool | Undefined
     batch_size: int | Undefined
     loss_alpha: float | None | Undefined
     losses: dict[str, float | int] | None | Undefined
@@ -177,6 +177,17 @@ class CompareParserArgs(ParserArgs):
 @dataclass
 class RTParserArgs(ParserArgs):
     model_name: str
+    dependency_mode: Literal["supervised", "input", "standard"] | Undefined
+    combined_loss: bool | Undefined
+    distr_mode: Literal["att", "att-n"] | Undefined
+    length_weighted: bool | Undefined
+    include_current: bool | Undefined
+    global_distr: bool | Undefined
+    batch_size: int | Undefined
+    loss_alpha: float | None | Undefined
+    losses: dict[str, float | int] | None | Undefined
+    arc_loss_weighted: bool | Undefined
+
     shift: int
     only_content_words_cost: bool
     only_content_words_left: bool

@@ -840,61 +840,108 @@ def create_parser() -> argparse.ArgumentParser:
     data_group = rt_parser.add_argument_group('data')
     data_group.add_argument(
         '--dataset_name', type=str, help='name of the dataset to load',
-        default='Wikitext_processed')
+        default=Undefined)
     data_group.add_argument(
-        '--max_len_train', type=argtypes.OptNone(int), default=40,
-        help='maximum number of tokens in training set')
+        '--max_len_train', type=argtypes.OptNone(int), default=Undefined,
+        help='Does nothing. TODO')
     data_group.add_argument(
-        '--max_len_eval_test', type=argtypes.OptNone(int), default=None,
-        help='maximum number of tokens in eval set')
+        '--max_len_eval_test', type=argtypes.OptNone(int), default=Undefined,
+        help='Does nothing. TODO')
     data_group.add_argument(
         '--masked', type=argtypes.str_to_bool, default=True,
         help=(
-            'Whether to include dependencies in dataset. Necessary for'
-            ' dependency parsing setting.'))
+            'Does nothing. TODO'))
     data_group.add_argument(
-        '--triangulate', type=int, default=0,
-        help='TODO')
+        '--triangulate', type=int, default=Undefined,
+        help='Does nothing. TODO')
     data_group.add_argument(
-        '--vocab_size', type=argtypes.OptNone(int), default=50_000,
+        '--vocab_size', type=argtypes.OptNone(int), default=Undefined,
         help=(
-            'number of most frequent tokens to embed; all other '
-            'tokens are replaced with an UNK token;'
-            'can be None when loading existing token_mapper'))
+            'Does nothing. TODO'))
     data_group.add_argument(
-        '--first_k', type=argtypes.OptNone(int), default=None,
-        help='only load first k sentences of the training set')
+        '--first_k', type=argtypes.OptNone(int), default=Undefined,
+        help='Does nothing. TODO')
     data_group.add_argument(
-        '--first_k_eval_test', type=argtypes.OptNone(int), default=None,
-        help='only load first k sentences of the eval and test sets')
+        '--first_k_eval_test', type=argtypes.OptNone(int), default=Undefined,
+        help='Does nothing. TODO')
     data_group.add_argument(
-        '--connect_with_dummy', type=argtypes.str_to_bool, default=True,
+        '--connect_with_dummy', type=argtypes.str_to_bool, default=Undefined,
         help=(
-            'Establish an arc to a dummy token when there is no '
-            'parent/child among the precedents?'))
+            'Does nothing. TODO'))
     data_group.add_argument(
-        '--connect_with_self', type=argtypes.str_to_bool, default=False,
+        '--connect_with_self', type=argtypes.str_to_bool, default=Undefined,
         help=(
-            'Establish a recursive arc to the token itself when there '
-            'is not parent/child among the precedents?'))
+            'Does nothing. TODO'))
     data_group.add_argument(
         '--masks_setting', type=str, choices=(
             "complete", "current", "next", "both"),
-        default="current",
+        default=Undefined,
         help=('What dependencies to assign to the current token.'))
-
-    # # # Model parser group
-    model_group = rt_parser.add_argument_group('model')
-    model_group.add_argument(
-        '--model_name', type=str,
-        help=(
-            'The trained model for computing surprisal and other metrics.'
-            ' Must be in ./models. "hug:<name>" loads a huggingface model.'))
-    model_group.add_argument(
+    data_group.add_argument(
         '--mapper', type=str, default="processed/Wikitext_processed/mapper",
+        help='Path to tokeniser. hug:<name> loads a huggingface tokeniser.')
+
+    # # # Trainer parser group
+    trainer_group = rt_parser.add_argument_group('trainer')
+    trainer_group.add_argument(
+        '--model_name', type=argtypes.OptNone(str),
+        default=None,
         help=(
-            'The path to the tokeniser for the model.'
-            ' "hug:<name>" loads a huggingface tokeniser.'))
+            "model name. Is equal to experiment name if None."
+            " hug:<name> loads a hugginface model."))
+    trainer_group.add_argument(
+        '--dependency_mode', type=str,
+        choices=("supervised", "input", "standard"),
+        default=Undefined,
+        help="how to use dependency information")
+    trainer_group.add_argument(
+        '--combined_loss', type=argtypes.str_to_bool,
+        default=Undefined,
+        help=(
+            "whether to use combined loss for unsupervised"
+            " memory cost learning"))
+    trainer_group.add_argument(
+        '--distr_mode', type=str,
+        default=Undefined, choices=("att", "att-n"),
+        help="mode for calculation attention distribution for combined loss")
+    trainer_group.add_argument(
+        '--global_distr', type=argtypes.str_to_bool,
+        default=Undefined,
+        help=(
+            "Whether to compute the distribution for the combined loss"
+            " globally or as an average of per-head distributions."))
+    trainer_group.add_argument(
+        '--include_current', type=argtypes.str_to_bool,
+        default=Undefined,
+        help=(
+            "Include attention to current item (diagonal) when computing"
+            "the attention distribution for attention losses."))
+    trainer_group.add_argument(
+        '--length_weighted', type=argtypes.str_to_bool,
+        default=Undefined,
+        help=(
+            "Normalise attention entropy loss by length of left "
+            "context (maximum entropy). The scores are mapped to an "
+            "the interval [0, 1]."))
+    trainer_group.add_argument(
+        '--batch_size', type=int, default=Undefined,
+        help=(
+            "batch size; in case of multiple GPUs it is "
+            "chunked across the devices"))
+    trainer_group.add_argument(
+        '--loss_alpha', type=argtypes.OptNone(float), default=Undefined,
+        help=(
+            "loss weight for supervised learning; 1.0 is only "
+            "language model training while 0.0 is only arc training"))
+    trainer_group.add_argument(
+        '--losses', type=argtypes.OptNone(
+            argtypes.StrToDict(str, float)), default=Undefined,
+        help=(
+            "Dictionary of losses for combined loss setting "
+            "and their weights. Must include 'lm'."))
+    trainer_group.add_argument(
+        '--arc_loss_weighted', type=argtypes.str_to_bool, default=Undefined,
+        help="Overrepresent arcs against non-arcs in arc loss calculation")
 
     # # # Cost parser group
     cost_group = rt_parser.add_argument_group('cost')

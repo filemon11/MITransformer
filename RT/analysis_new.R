@@ -24,6 +24,7 @@ rm(list=ls())
 args = commandArgs(trailingOnly=TRUE)
 corpus <- args[3]
 spillover <- as.numeric(args[4])
+additionalname <- args[5]
 
 if (corpus == "frank_SP" || corpus == "naturalstories") {
   corpus_type <- "SP"
@@ -41,8 +42,11 @@ candidates <- c("surprisal", "demberg", "first_dependent_distance")
 # candidates <- c("surprisal", "demberg", "predicted_first_dependent_distance", "expected_distance", "attention_entropy")
 baseline_predictors <- c("frequency", "length")
 
-data_dir <- paste("data/", corpus, "_preprocessed_", sep="")
+data_dir <- paste("data/", corpus, "_", additionalname, "_preprocessed_", sep="")
 num.models = as.numeric(args[2])
+if (num.models == 0) {
+  num.models <- 1
+}
 # load data
 
 datasets <- list()
@@ -80,7 +84,13 @@ remove_outliers <- function(data, cols){
 
 excluded_vars <- c(goals, "WorkerId", "item")
 for (x in 0:(num.models-1)) {
-  data <- read.csv(paste(data_dir, args[1], "_", x, ".csv", sep=""))
+  if (as.numeric(args[2]) == 0) {
+    data <- read.csv(paste(data_dir, args[1], ".csv", sep=""))
+  }
+  else {
+    data <- read.csv(paste(data_dir, args[1], "_", x, ".csv", sep=""))
+  }
+
   # Get names of numeric columns
   numeric_cols <- names(data)[sapply(data, is.numeric)]
   # Subset to numeric columns you want to scale

@@ -760,7 +760,7 @@ class MITransformer(nn.Module):
             additional_stacked[key] = stacked  # type: ignore
 
         out_logits = None
-        if return_arc_logits == 0:
+        if return_arc_logits:
             out_logits = combine_scores(att_logits)
 
         return x, out_logits, additional_stacked

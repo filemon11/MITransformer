@@ -9,3 +9,5 @@ from .metrics import (  # noqa: F401
     SupervisedMetric, EvalMetric, SupervisedEvalMetric,
     MetricWriter
 )
+from .functions import (  # noqa: F401
+    inverse_sigmoid, select_true, unpad)

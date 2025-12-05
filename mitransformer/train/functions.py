@@ -90,8 +90,8 @@ def unpad_masks(masks: torch.Tensor, labels: torch.Tensor,
     unpadded_list: list[torch.Tensor] = []
     for sentence, sen_labels in zip(masks, labels):
         unpadded_list.append(
-            sentence[:, sen_labels != ignore_index][
-                :, :, sen_labels != ignore_index])
+            sentence[..., sen_labels != ignore_index, :][
+                ..., :, sen_labels != ignore_index])
     return unpadded_list
 
 

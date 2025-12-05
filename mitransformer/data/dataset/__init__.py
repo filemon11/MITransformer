@@ -14,3 +14,8 @@ from .abstrdefs import (  # noqa: F401
     NLPDataset, MaskedDataset, TokenisedDataset
 )
 from .utils import MasksSetting  # noqa: F401
+from .functions import (  # noqa: F401
+    load_conllu_from_str, get_tokens, get_head_list, get_space_after,
+    get_deprels, TokenList, Sequence,
+    head_list_to_adjacency_matrix, shift_masks
+)
