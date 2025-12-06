@@ -12,4 +12,4 @@ do
 done
 
 cd RT
-Rscript --vanilla analysis_new.R ${model} ${model_count} ${corpus} ${shift} '' > results/log_${model}.log
+Rscript --vanilla analysis_legacy.R ${model} ${model_count} ${corpus} ${shift} > results/log_${model}.log

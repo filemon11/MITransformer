@@ -80,12 +80,12 @@ def main_rt(
 
     # TODO change cd
     subprocess.run([
-        "cd", "RT", ";",
-        "Rscript", "--vanilla", "analysis_new.R",
+        "Rscript", "--vanilla", "RT/analysis_new.R",
         f"{model_name}",
         "0",
         f"{corpus}",
         f"{arguments.shift}",
-        f"{arguments.name}"
-        # f"> RT/results/log_${model_name}.log"
+        "RT/data",
+        f"{arguments.name}",
+        f"> RT/results/log_${model_name}.log"
         ])
