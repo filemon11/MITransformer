@@ -176,6 +176,9 @@ class CompareParserArgs(ParserArgs):
 
 @dataclass
 class RTParserArgs(ParserArgs):
+    n_runs: int
+    lme: bool
+
     model_name: str
     dependency_mode: Literal["supervised", "input", "standard"] | Undefined
     combined_loss: bool | Undefined

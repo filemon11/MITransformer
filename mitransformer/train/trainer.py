@@ -590,6 +590,7 @@ class LMTrainer():
             return_att=(
                 self.config.combined_loss
                 and self.config.distr_mode == "att"))
+
         self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
 
@@ -1123,12 +1124,16 @@ class LMTrainer():
                 additional_key: models.AdditionalKeys
                 for additional_key in ("proj_states", "att"):
                     if additional_key in additional:  # type: ignore
+                        num_after_square = 0
+                        if additional_key in ("proj_states",):
+                            num_after_square = 1
                         unpadded_additional[additional_key].extend(
                             functions.unpad_masks(
                                 additional[
                                     additional_key].swapaxes(  # type: ignore
                                         0, 1),
-                                labels, ignore_index))
+                                labels, ignore_index,
+                                num_after_square=num_after_square))
         return (
             unpadded_logits, dict(unpadded_arc_logits),
             cast(AdditionalPrediction, unpadded_additional))

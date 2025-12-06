@@ -151,6 +151,8 @@ compute_deltalogliks <- function(datasets, to_predict, predict_from, baseline) {
   slopes <- get_slopes(c("1"), c("WorkerId"))
 
   for (data in datasets) {
+    data <- as.data.frame(data)
+
     # ---------------------- Step 1 ----------------------
     formula_str <- paste(to_predict, " ~ ", paste(c(baseline, slopes), collapse=" + "))
     s0 <- lmer(as.formula(formula_str),

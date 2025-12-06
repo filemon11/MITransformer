@@ -1,13 +1,40 @@
 from ... import readingtimes
 from .. import parsing
 import subprocess
+import tqdm
+import copy
 
 from typing import cast
 
 
+def main_rt_multiple(
+        arguments: "parsing.RTParserArgs",
+        word_size: int) -> None:
+
+    for n_run in tqdm.tqdm(range(arguments.n_runs), desc="Runs"):
+        run_arguments = copy.copy(arguments)
+        run_arguments.model_name = f"{arguments.model_name}_{n_run}"
+        run_arguments.lme = False
+        parsing.args_logic(run_arguments)
+
+        main_rt(run_arguments, word_size)
+
+    if arguments.lme:
+        subprocess.run([
+            "Rscript", "--vanilla", "RT/analysis_new.R",
+            f"{arguments.model_name}",
+            f"{arguments.n_runs}",
+            f"{arguments.dataset_name}",
+            f"{arguments.shift}",
+            "RT/data",
+            f"{arguments.name}",
+            f"> RT/results/log_${arguments.model_name}.log"
+            ])
+
+
 def main_rt(
         arguments: "parsing.RTParserArgs",
-        world_size: int):
+        world_size: int) -> None:
     assert world_size == 1, "Multiprocessing for RT evaluation not implemented"
     # TODO: implement multiprocessing to be able to produce psycholinguistic
     # estimations during training.
@@ -78,14 +105,14 @@ def main_rt(
     # a number of models and then running the evaluation
     # only once
 
-    # TODO change cd
-    subprocess.run([
-        "Rscript", "--vanilla", "RT/analysis_new.R",
-        f"{model_name}",
-        "0",
-        f"{corpus}",
-        f"{arguments.shift}",
-        "RT/data",
-        f"{arguments.name}",
-        f"> RT/results/log_${model_name}.log"
-        ])
+    if arguments.lme:
+        subprocess.run([
+            "Rscript", "--vanilla", "RT/analysis_new.R",
+            f"{model_name}",
+            "0",
+            f"{corpus}",
+            f"{arguments.shift}",
+            "RT/data",
+            f"{arguments.name}",
+            f"> RT/results/log_${model_name}.log"
+            ])

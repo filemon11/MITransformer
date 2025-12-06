@@ -86,12 +86,16 @@ def unpad(
 
 
 def unpad_masks(masks: torch.Tensor, labels: torch.Tensor,
-                ignore_index: int) -> list[torch.Tensor]:
+                ignore_index: int, num_after_square: int = 0
+                ) -> list[torch.Tensor]:
     unpadded_list: list[torch.Tensor] = []
     for sentence, sen_labels in zip(masks, labels):
         unpadded_list.append(
-            sentence[..., sen_labels != ignore_index, :][
-                ..., :, sen_labels != ignore_index])
+            sentence[
+                (Ellipsis, sen_labels != ignore_index, slice(None))
+                + (slice(None),)*num_after_square][
+                (Ellipsis, slice(None), sen_labels != ignore_index)
+                + (slice(None),)*num_after_square])
     return unpadded_list
 
 

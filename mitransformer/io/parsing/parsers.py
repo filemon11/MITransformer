@@ -836,11 +836,25 @@ def create_parser() -> argparse.ArgumentParser:
     rt_parser = subparsers.add_parser(
         "rt", help="RT mode")
 
+    settings_group = rt_parser.add_argument_group('settings_group')
+    settings_group.add_argument(
+        '--lme', type=bool,
+        default=True,
+        help=("Run linear mixed effects evaluation."))
+    settings_group.add_argument(
+        '--n_runs', type=int,
+        default=1,
+        help=(
+            "Number of model runs to evaluate. If 1, then model_name must "
+            "contain the full model name. If >1, then the models must be "
+            "named according to the "
+            "scheme <model_name>_<run> starting with 0."))
+
     # # # Data parser group
     data_group = rt_parser.add_argument_group('data')
     data_group.add_argument(
         '--dataset_name', type=str, help='name of the dataset to load',
-        default=Undefined)
+        default="naturalstories")
     data_group.add_argument(
         '--max_len_train', type=argtypes.OptNone(int), default=Undefined,
         help='Does nothing. TODO')
