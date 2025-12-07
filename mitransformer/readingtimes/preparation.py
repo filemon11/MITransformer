@@ -4,6 +4,7 @@ Linearity-of-surprisal-on-RT/blob/main/Preparing%20Corpora/get_frequency.py"""
 
 
 import pandas as pd
+import os
 
 from ..train import LMTrainer
 from ..data import (
@@ -13,7 +14,7 @@ from .frame import SplitFrame, UnsplitFrame
 from ..utils.params import Params
 
 from typing import (
-    Iterable, Literal)
+    Iterable, Literal, overload)
 
 '''
 The input files are the meta data (text without RT) of the corpus
@@ -35,15 +36,15 @@ WNUM_COL = "zone"
 Corpus = Literal["naturalstories", "zuco", "frank_SP", "frank_ET"]
 
 
-def corpus_to_csv(
+def corpus_to_df(
         corpus: Corpus,
-        input_file: str, output_file: str,
+        input_file: str,
         token_col: str = TOKEN_COL,
         text_id_col: str = TEXT_ID_COL,
         wnum_col: str = WNUM_COL,
         token_mapper_dir: str | None = None,
         make_lower: bool = True
-        ) -> None:
+        ) -> pd.DataFrame:
     corpus_to_func: dict[Corpus, CorpusLoader] = {
         "naturalstories": load_natural_stories,
         "zuco": load_zuco,
@@ -63,17 +64,75 @@ def corpus_to_csv(
         text_id_col: text_ids,
         wnum_col: wnums})
 
-    df.to_csv(output_file, index=False)
+    return df
 
 
-def process(
-        input_file: str, output_file: str,
-        model_dir: str, token_mapper_dir: str,
-        raw: bool = True,
-        world_size: int = 1,
+@overload
+def io_corpus_convert(
+        model_dir: str,
+        corpus: Corpus,
+        input_file: str,
+        output_file: None = None,
         token_col: str = TOKEN_COL,
         text_id_col: str = TEXT_ID_COL,
         wnum_col: str = WNUM_COL,
+        token_mapper_dir: None = None,
+        ) -> pd.DataFrame:
+    ...
+
+
+@overload
+def io_corpus_convert(
+        model_dir: str,
+        corpus: Corpus,
+        input_file: str,
+        output_file: str,
+        token_col: str = TOKEN_COL,
+        text_id_col: str = TEXT_ID_COL,
+        wnum_col: str = WNUM_COL,
+        token_mapper_dir: None = None,
+        ) -> None:
+    ...
+
+
+def io_corpus_convert(
+        model_dir: str,
+        corpus: Corpus,
+        input_file: str,
+        output_file: str | None = None,
+        token_col: str = TOKEN_COL,
+        text_id_col: str = TEXT_ID_COL,
+        wnum_col: str = WNUM_COL,
+        token_mapper_dir: str | None = None
+        ) -> pd.DataFrame | None:
+    if os.path.split(model_dir)[1][:4] == "hug:":
+        df = corpus_to_df(
+            corpus,
+            input_file,
+            token_col, text_id_col,
+            wnum_col, token_mapper_dir,
+            make_lower=False)
+    else:
+        # Convert original format to sensible csv
+        df = corpus_to_df(
+            corpus,
+            input_file,
+            token_col, text_id_col,
+            wnum_col, token_mapper_dir)
+
+    if output_file is None:
+        return df
+    df.to_csv(output_file, index=False)
+    return None
+
+
+@overload
+def process(
+        input_file: str | pd.DataFrame,
+        output_file: str,
+        model_dir: str, token_mapper_dir: str,
+        world_size: int = 1,
+        token_col: str = TOKEN_COL,
         baseline_metrics: Iterable[str] = ("frequency", "length"),
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
@@ -82,38 +141,59 @@ def process(
         corpus: Corpus = "naturalstories",
         trainer_args: Params | None = None
         ) -> None:
+    ...
 
-    if model_dir[:4] == "hug:" and token_mapper_dir[:4] == "hug:":
-        corpus_to_csv(
-            corpus,
-            input_file, output_file,
-            token_col, text_id_col,
-            wnum_col, None if raw else token_mapper_dir,
-            make_lower=False)
+
+@overload
+def process(
+        input_file: str | pd.DataFrame,
+        output_file: None,
+        model_dir: str, token_mapper_dir: str,
+        world_size: int = 1,
+        token_col: str = TOKEN_COL,
+        baseline_metrics: Iterable[str] = ("frequency", "length"),
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False,
+        masks_setting: MasksSetting = "current",
+        shift: int = 0,
+        corpus: Corpus = "naturalstories",
+        trainer_args: Params | None = None
+        ) -> pd.DataFrame:
+    ...
+
+
+def process(
+        input_file: str | pd.DataFrame,
+        output_file: str | None,
+        model_dir: str, token_mapper_dir: str,
+        world_size: int = 1,
+        token_col: str = TOKEN_COL,
+        baseline_metrics: Iterable[str] = ("frequency", "length"),
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False,
+        masks_setting: MasksSetting = "current",
+        shift: int = 0,
+        corpus: Corpus = "naturalstories",
+        trainer_args: Params | None = None
+        ) -> pd.DataFrame | None:
+
+    if isinstance(input_file, str):
+        # Add baseline predictors
+        input_file = pd.read_csv(
+            input_file, keep_default_na=False, na_values=[''])
     else:
-        # Convert original format to sensible csv
-        corpus_to_csv(
-            corpus,
-            input_file, output_file,
-            token_col, text_id_col,
-            wnum_col, None if raw else token_mapper_dir)
+        input_file.fillna("NaN")
 
-    # Add baseline predictors
+    words = input_file["word"]
+    sentence_ids: None | pd.Series = None
+    if corpus != "naturalstories":
+        sentence_ids = input_file["item"]
+
     orig_frame = UnsplitFrame(
-        pd.read_csv(
-            output_file, keep_default_na=False, na_values=['']),
-        {"word_col": token_col}, tokenised=False)
-    # print(orig_frame.df["word"].to_list()); raise Exception
+        input_file, {"word_col": token_col}, tokenised=False)
 
     for metric in baseline_metrics:
         orig_frame.add_(metric)
-
-    df = pd.read_csv(output_file, keep_default_na=False, na_values=[''])
-    words = df["word"]
-
-    sentence_ids: None | pd.Series = None
-    if corpus != "naturalstories":
-        sentence_ids = df["item"]
 
     # Add surprisal
     frame = SplitFrame(tokenised=True)
@@ -165,7 +245,10 @@ def process(
             # truncate first word for which we do not have a probability
 
         unsplit_frame = frame.unsplit()
+        if output_file is None:
+            return unsplit_frame.df
         unsplit_frame.df.to_csv(output_file, index=False)
+        return None
 
     else:
         additional = {} if trainer_args is None else trainer_args.to_dict()
@@ -242,4 +325,7 @@ def process(
         frame.truncate_(right=1)
 
         unsplit_frame = frame.unsplit()
+        if output_file is None:
+            return unsplit_frame.df
         unsplit_frame.df.to_csv(output_file, index=False)
+        return None

@@ -37,9 +37,13 @@ if __name__ == "__main__":
 
     out_file = f"RT/data/{corpus}_candidates_{model_name}.csv"
 
+    preparation.io_corpus_convert(
+        model_name, corpus, in_file,
+        output_file=out_file)
+
     preparation.process(
-        in_file, out_file, model_name, mapper,
-        raw=True, corpus=corpus, shift=shift,
+        out_file, out_file, model_name, mapper,
+        corpus=corpus, shift=shift,
         only_content_words_cost=only_content_words_cost,
         only_content_words_left=only_content_words_left)
 

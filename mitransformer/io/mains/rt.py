@@ -1,6 +1,5 @@
 from ... import readingtimes
 from .. import parsing
-import subprocess
 import tqdm
 import copy
 
@@ -57,16 +56,34 @@ def main_rt(
         in_file = corpus_to_infile[corpus]  # type: ignore
     except KeyError:
         raise Exception(f"Corpus {corpus} unknown.")
+    assert corpus in readingtimes.CORPORA
     corpus = cast(readingtimes.Corpus, corpus)
-
-    out_file = f"RT/data/{corpus}_{arguments.name}_candidates_{model_name}.csv"
 
     assert arguments.masked, (
         "--masked cannot be False. Dependencies are needed for computing"
         " costs.")
-    readingtimes.process(
-        in_file, out_file, model_name, mapper,
-        raw=True, corpus=corpus,
+
+    # Load measurements
+    corpus_to_rt_infile: dict[readingtimes.Corpus, str] = {
+        "naturalstories": "RT/data/processed_RTs.tsv",
+        "zuco": "zuco/training_data.csv",
+        "frank_ET": "frank/eyetracking.RT.txt",
+        "frank_SP": "frank/selfpacedreading.RT.txt"
+    }
+    measurements = readingtimes.prepare_RTs(
+        corpus_to_rt_infile[corpus],
+        corpus=corpus)
+
+    # Load candidates
+    corpus_df = readingtimes.io_corpus_convert(
+        model_name, corpus, in_file)
+    # Note: we are loading the RT data twice: once for
+    # the lme eval and once for collecting the input of the
+    # LM. We might want to unify this process
+
+    candidates = readingtimes.process(
+        corpus_df, None, model_name, mapper,
+        corpus=corpus,
         only_content_words_cost=only_content_words_cost,
         only_content_words_left=only_content_words_left,
         world_size=world_size,
@@ -74,24 +91,12 @@ def main_rt(
         trainer_args=arguments
         )
 
-    corpus_to_rt_infile: dict[readingtimes.Corpus, str] = {
-        "naturalstories": "RT/data/processed_RTs.tsv",
-        "zuco": "zuco/training_data.csv",
-        "frank_ET": "frank/eyetracking.RT.txt",
-        "frank_SP": "frank/selfpacedreading.RT.txt"
-    }
-    readingtimes.prepare_RTs(
-        corpus_to_rt_infile[corpus],
-        f"RT/data/{corpus}_{arguments.name}_metrics.csv",
-        corpus=corpus)
-
-    subprocess.run([
-        "Rscript", "--vanilla", "RT/preproc.R",
-        f"RT/data/{corpus}_{arguments.name}_candidates_{model_name}.csv",
-        f"RT/data/{corpus}_{arguments.name}_metrics.csv",
-        f"RT/data/{corpus}_{arguments.name}_preprocessed_{model_name}.csv",
-        "ET" if corpus in ("frank_ET", "zuco") else "SP"])
-    # TODO: implement the script above in python
+    readingtimes.join(
+        measurements,
+        candidates,
+        "ET" if corpus in readingtimes.ET_CORPORA else "SP",
+        f"RT/data/{corpus}_{arguments.name}_preprocessed_{model_name}.csv"
+    )
 
     if arguments.lme:
         readingtimes.lme(
