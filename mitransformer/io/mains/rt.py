@@ -17,22 +17,17 @@ def main_rt_multiple(
     for n_run in tqdm.tqdm(range(arguments.n_runs), desc="Runs"):
         run_arguments = copy.copy(arguments)
         if not arguments.model_name.startswith("hug:"):
-            run_arguments.model_name = f"{arguments.model_name}_{n_run}" 
+            run_arguments.model_name = f"{arguments.model_name}_{n_run}"
         run_arguments.lme = False
         parsing.args_logic(run_arguments)
 
         main_rt(run_arguments, word_size)
 
     if arguments.lme:
-        with open(f'RT/results/log_{arguments.model_name}.log', 'w') as f:
-            subprocess.run([
-                "Rscript", "--vanilla", "RT/analysis_new.R",
-                f"{arguments.model_name}",
-                f"{arguments.n_runs}",
-                f"{arguments.dataset_name}",
-                f"{arguments.shift}",
-                "RT/data",
-                f"{arguments.name}"], stdout=f)
+        readingtimes.lme(
+            arguments.model_name, arguments.dataset_name,
+            arguments.name, arguments.n_runs, arguments.shift,
+            f'RT/results/log_{arguments.model_name}.log')
 
 
 def main_rt(
@@ -48,11 +43,6 @@ def main_rt(
     only_content_words_cost = arguments.only_content_words_cost
     only_content_words_left = arguments.only_content_words_left
     mapper = arguments.mapper
-    try:
-        mapper = arguments.mapper
-        # hug:<name> loads a huggingface tokeniser
-    except IndexError:
-        mapper = "processed/Wikitext_processed/mapper"
     # TODO unclear; does this mean the model must have been trained
     # on Wikitext?
     # Is the mapper not a model property that can be loaded?
@@ -104,12 +94,7 @@ def main_rt(
     # TODO: implement the script above in python
 
     if arguments.lme:
-        with open(f'RT/results/log_{arguments.model_name}.log', 'w') as f:
-            subprocess.run([
-                "Rscript", "--vanilla", "RT/analysis_new.R",
-                f"{model_name}",
-                "0",
-                f"{corpus}",
-                f"{arguments.shift}",
-                "RT/data",
-                f"{arguments.name}"], stdout=f)
+        readingtimes.lme(
+            model_name, corpus,
+            arguments.name, 0, arguments.shift,
+            f'RT/results/log_{arguments.model_name}.log')
