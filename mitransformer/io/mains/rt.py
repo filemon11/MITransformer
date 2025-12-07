@@ -10,26 +10,29 @@ from typing import cast
 def main_rt_multiple(
         arguments: "parsing.RTParserArgs",
         word_size: int) -> None:
+    assert not (
+        arguments.model_name.startswith("hug:") and arguments.n_runs > 1), (
+        "Evaluating more than one huggingface model is not supported.")
 
     for n_run in tqdm.tqdm(range(arguments.n_runs), desc="Runs"):
         run_arguments = copy.copy(arguments)
-        run_arguments.model_name = f"{arguments.model_name}_{n_run}"
+        if not arguments.model_name.startswith("hug:"):
+            run_arguments.model_name = f"{arguments.model_name}_{n_run}" 
         run_arguments.lme = False
         parsing.args_logic(run_arguments)
 
         main_rt(run_arguments, word_size)
 
     if arguments.lme:
-        subprocess.run([
-            "Rscript", "--vanilla", "RT/analysis_new.R",
-            f"{arguments.model_name}",
-            f"{arguments.n_runs}",
-            f"{arguments.dataset_name}",
-            f"{arguments.shift}",
-            "RT/data",
-            f"{arguments.name}",
-            f"> RT/results/log_${arguments.model_name}.log"
-            ])
+        with open(f'RT/results/log_{arguments.model_name}.log', 'w') as f:
+            subprocess.run([
+                "Rscript", "--vanilla", "RT/analysis_new.R",
+                f"{arguments.model_name}",
+                f"{arguments.n_runs}",
+                f"{arguments.dataset_name}",
+                f"{arguments.shift}",
+                "RT/data",
+                f"{arguments.name}"], stdout=f)
 
 
 def main_rt(
@@ -98,21 +101,15 @@ def main_rt(
         f"RT/data/{corpus}_{arguments.name}_metrics.csv",
         f"RT/data/{corpus}_{arguments.name}_preprocessed_{model_name}.csv",
         "ET" if corpus in ("frank_ET", "zuco") else "SP"])
-
-    # Evaluation
-    # TODO: introduce option to evaluate several models
-    # by creating a new main function and iterating over
-    # a number of models and then running the evaluation
-    # only once
+    # TODO: implement the script above in python
 
     if arguments.lme:
-        subprocess.run([
-            "Rscript", "--vanilla", "RT/analysis_new.R",
-            f"{model_name}",
-            "0",
-            f"{corpus}",
-            f"{arguments.shift}",
-            "RT/data",
-            f"{arguments.name}",
-            f"> RT/results/log_${model_name}.log"
-            ])
+        with open(f'RT/results/log_{arguments.model_name}.log', 'w') as f:
+            subprocess.run([
+                "Rscript", "--vanilla", "RT/analysis_new.R",
+                f"{model_name}",
+                "0",
+                f"{corpus}",
+                f"{arguments.shift}",
+                "RT/data",
+                f"{arguments.name}"], stdout=f)

@@ -490,6 +490,8 @@ class LMTrainer():
                     device, non_blocking=True)
             elif isinstance(value, dict):
                 new_batch[key] = cls.batch_to(value, device)  # type: ignore
+            else:
+                new_batch[key] = value  # type: ignore
         return new_batch  # type: ignore
 
     def get_metric(
@@ -656,7 +658,7 @@ class LMTrainer():
             additional_losses=additional_losses,
             weights=self.config.losses)
 
-        loss = metric.loss
+        loss: torch.Tensor = metric.loss
         metric.detach_()
         metric.to_("cpu")
 
@@ -1054,7 +1056,10 @@ class LMTrainer():
             make_prob: bool = False,
             only_true: bool = False,
             dataset_name: str | None = None,
-            token_mapper: data.TokenMapper | None = None
+            token_mapper: data.TokenMapper | None = None,
+            return_arc_logits: bool | None = None,
+            return_proj_states: bool | None = None,
+            return_att: bool | None = None
             ) -> tuple[
                 list[torch.Tensor], dict[str, list[torch.Tensor]],
                 AdditionalPrediction]:
@@ -1089,15 +1094,21 @@ class LMTrainer():
             for batch in tqdm(loader, desc="Batches"):
                 batch = self.batch_to(batch, device=self.config.device)
 
+                if return_arc_logits is None:
+                    return_arc_logits = not self.config.combined_loss
+                if return_proj_states is None:
+                    return_proj_states = (
+                        self.config.combined_loss
+                        and self.config.distr_mode == "att-n")
+                if return_att is None:
+                    return_att = (
+                        self.config.combined_loss
+                        and self.config.distr_mode == "att")
                 logits, arc_logits, additional = self.transformerlm(
                     **batch,
-                    return_arc_logits=not self.config.combined_loss,
-                    return_proj_states=(
-                        self.config.combined_loss
-                        and self.config.distr_mode == "att-n"),
-                    return_att=(
-                        self.config.combined_loss
-                        and self.config.distr_mode == "att"))
+                    return_arc_logits=return_arc_logits,
+                    return_proj_states=return_proj_states,
+                    return_att=return_att)
 
                 self.run_hooks(batch, (logits, arc_logits))
                 labels = batch["label_ids"]

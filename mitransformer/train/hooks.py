@@ -99,8 +99,8 @@ class AttentionPlotHook(Hook[data.TokenisedMaskedBatch]):
                         input["idx"], att_mats, input["masks"][head_type],
                         input["label_ids"], input["input_ids"]):
 
-                    att_p = F.softmax(att_p, dim=-1)
-                    att_g = F.softmax(att_g, dim=-1)
+                    att_p = F.softmax(att_p.to(torch.float), dim=-1)
+                    att_g = F.softmax(att_g.to(torch.float), dim=-1)
 
                     if self.ignore_idx is not None:
                         att_p = att_p[:, labels != self.ignore_idx][

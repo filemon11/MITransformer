@@ -65,6 +65,6 @@ def main(arguments: "parsing.ParserArgs") -> None:
                 case "rt":
                     assert isinstance(arguments, parsing.RTParserArgs)
                     info(arguments.rank, logger, "Launching model comparison.")
-                    mains.main_rt(arguments, n_devices)
+                    mains.main_rt_multiple(arguments, n_devices)
                 case _:
                     raise Exception(f"Unknown mode: '{mode}'")

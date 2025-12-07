@@ -126,7 +126,7 @@ class SplitTokMetricMakerHeadlist(SplitTokConlluDatasetMetricMaker):
             dataset: CoNLLUDataset | None = None, *args, **kwargs
             ) -> tuple[pd.Series, dict[str, Any]]:
         return self._call_method(
-            df, dataset, "headlist", get_head_list, trim=False)
+            df, dataset, "heads", get_head_list, trim=False)
 
 
 class SplitTokMetricMakerDeprels(SplitTokConlluDatasetMetricMaker):
@@ -251,7 +251,8 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             pred_probs, attention_logits, _ = trainer.predict(
                 dataset,
                 make_prob=True,
-                only_true=True)
+                only_true=True,
+                return_arc_logits=True)
             probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
             assert all(len(p) == len(t) for p, t in zip(probs, df["word"])), (
                 ([(len(p), len(t)) for p, t in zip(probs, df["word"])]))

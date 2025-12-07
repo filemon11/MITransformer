@@ -238,7 +238,6 @@ class MemMapDepDataset(
                     functions.head_list_to_adjacency_matrix(heads)))
 
         masks = functions.shift_masks(self.masks_setting, masks)
-
         return sentence.FastMaskedSentence(
             idx=np.array(idx),
             masks=masks,
@@ -370,15 +369,11 @@ class MemMapWindowDataset(MemMapDepDataset):
                     self.token_mapper.dummy_id, self.token_mapper.root_id]),
                 data[i:i+self.max_len, 0]))
         heads = data[i:i+self.max_len, 1]
-        # print(heads)
         heads = heads + np.arange(heads.shape[-1])+1
         heads[heads == np.arange(heads.shape[-1])+1] = 0
-        # print(heads)
         heads[heads < 0] = -1  # make archs out of the window attend to dummy
-        # print(heads)
         heads = heads + 1
         heads = np.concat((np.array([0, 0]), heads))
-        # print(heads, self.token_mapper.decode([ids.tolist()])[0])
 
         masks: dict[str, npt.NDArray[np.bool_] | None] = dict()
         if self.transform_mask is not None:

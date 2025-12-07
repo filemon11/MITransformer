@@ -845,10 +845,7 @@ def create_parser() -> argparse.ArgumentParser:
         '--n_runs', type=int,
         default=1,
         help=(
-            "Number of model runs to evaluate. If 1, then model_name must "
-            "contain the full model name. If >1, then the models must be "
-            "named according to the "
-            "scheme <model_name>_<run> starting with 0."))
+            "Number of model runs to evaluate."))
 
     # # # Data parser group
     data_group = rt_parser.add_argument_group('data')
