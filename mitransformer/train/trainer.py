@@ -903,9 +903,6 @@ class LMTrainer():
                     self.init_hooks(eval, "eval", epoch, token_mapper)
                     eval_metric = self._eval(eval)
 
-                    self.init_hooks(train, "train", epoch, token_mapper)
-                    self.transformerlm.train()
-
                     self.log_metric(eval_metric, total_steps, "eval")
                     info(
                         self.config.rank, logger,
@@ -942,6 +939,11 @@ class LMTrainer():
                             >= self.train_config.max_steps):
                         break_training = True
                         break
+
+                    # Set this here, so that trainer is in eval
+                    # mode in outside loop (i.e. when using yield)
+                    self.init_hooks(train, "train", epoch, token_mapper)
+                    self.transformerlm.train()
 
         if pbar_steps is not None:
             pbar_steps.close()

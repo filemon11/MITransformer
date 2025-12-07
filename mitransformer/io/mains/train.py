@@ -14,11 +14,31 @@ from copy import copy
 from mitransformer.utils.logmaker import (
     getLogger, info)
 
-from typing import Iterator
+from typing import Iterator, Tuple, overload, Literal
 
 import time
 
 logger = getLogger(__name__)
+
+
+@overload
+def main_train(
+        arguments: "parsing.TrainParserArgs",
+        world_size: int,
+        iterate: Literal[False] = False,
+        data_provider: DataProvider | None = None
+        ) -> Tuple[LMTrainer, Result]:
+    ...
+
+
+@overload
+def main_train(
+        arguments: "parsing.TrainParserArgs",
+        world_size: int,
+        iterate: Literal[True],
+        data_provider: DataProvider | None = None
+        ) -> Tuple[LMTrainer, Iterator[Result]]:
+    ...
 
 
 def main_train(
@@ -26,7 +46,9 @@ def main_train(
         world_size: int,
         iterate: bool = False,
         data_provider: DataProvider | None = None
-        ) -> Iterator[Result]:
+        ) -> (
+            Tuple[LMTrainer, Iterator[Result]]
+            | Tuple[LMTrainer, Result]):
 
     # device: where to execute computation
     if world_size > 1:
@@ -97,15 +119,14 @@ def main_train(
             info(
                 arguments.rank, logger,
                 f"Generated model output sample: {generated}")
-        yield metrics  # type: ignore
+        return (trainer, metrics)
 
     # Hyperopt setting
     else:
-        for metrics in trainer.train_iter(**data_provider.datasets):
-            yield metrics
-
-    del trainer
-    del data_provider
+        generator = (metrics for metrics in trainer.train_iter(
+            **data_provider.datasets
+        ))
+        return (trainer, generator)
 
 
 MeanStdDict = dict[str, tuple[float, float]]
@@ -140,11 +161,11 @@ def main_train_multiple(
         parsing.args_logic(run_arguments)  # also sets seed
 
         metrics_list.append(
-            tuple(next(main_train(
+            tuple(main_train(
                 run_arguments,
                 world_size,
                 iterate=False,
-                data_provider=data_provider)).values()))  # type: ignore
+                data_provider=data_provider)[1].values()))  # type: ignore
 
     means_and_stds = tuple(
         sum_and_std_metrics(seq)

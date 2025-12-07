@@ -111,7 +111,7 @@ class Objective:
         arguments.seed = arguments.seed + trial.number
         parsing.args_logic(arguments)
 
-        train_iterator = train.main_train(
+        _, train_iterator = train.main_train(
             arguments, self.n_devices,
             iterate=True,
             data_provider=self.data_provider)
