@@ -3,36 +3,10 @@ import pandas as pd
 from . import correlation, spill, utils, statistics
 
 from typing import (
-    TypedDict, List, Literal)
+    List, Literal)
 
 from ...utils.logmaker import getLogger, info
 logger = getLogger(__name__)
-
-
-class ModelProps(TypedDict):
-    negloglik: float
-    negloglik_per_row: float
-    aic: float
-    aic_per_row: float
-    coef: pd.DataFrame
-    cov_pars: pd.DataFrame
-
-
-class ComparisonProps(TypedDict):
-    delta_negloglik: float
-    delta_negloglik_per_row: float
-    delta_aic: float
-    delta_aic_per_row: float
-    lr_stat: float
-    dof: float
-    p_value: float
-    props0: ModelProps
-    props1: ModelProps
-
-
-class AggregateComparison(TypedDict):
-    mean: ComparisonProps
-    std: ComparisonProps
 
 
 # ------------------------------------------------------------------

@@ -1147,9 +1147,22 @@ class LMTrainer():
                                         0, 1),
                                 labels, ignore_index,
                                 num_after_square=num_after_square))
+
+        # This should collect the data across all processes.
+        # The distributed sampler chunked it in an interleaved
+        # fashion and did not shuffle it, so getting back
+        # the correct order should be just a matter of interleaving
+        # the lists of results. TODO: test
+        unpadded_logits = self.gather_list(
+            unpadded_logits, interleave=True)
+        unpadded_arc_logits_out = self.gather_dict_of_lists(
+            dict(unpadded_arc_logits), interleave=True)
+        unpadded_additional_out = self.gather_dict_of_lists(
+            dict(unpadded_additional), interleave=True)
+
         return (
-            unpadded_logits, dict(unpadded_arc_logits),
-            cast(AdditionalPrediction, unpadded_additional))
+            unpadded_logits, unpadded_arc_logits_out,
+            cast(AdditionalPrediction, unpadded_additional_out))
 
     def generate(
             self, token_mapper: data.TokenMapper,
@@ -1236,12 +1249,26 @@ class LMTrainer():
         else:
             return tensor
 
-    def gather_list[T](self, seq: list[T]) -> list[T]:
+    def gather_list[T](
+            self, seq: list[T], interleave: bool = False) -> list[T]:
         # TODO: This is not ordered. Introduce a way to order this.
         if self.use_ddp:
-            return [item for se in self.gather_ddp(seq) for item in se]
+            lists = self.gather_ddp(seq)
+            if interleave:
+                return [item for tup in zip(*lists) for item in tup]
+            return [item for seq in lists for item in seq]
         else:
             return seq
+
+    def gather_dict_of_lists[K, T](
+            self, mapping: dict[K, list[T]], interleave: bool = False
+            ) -> dict[K, list[T]]:
+        if self.use_ddp:
+            return {
+                key: self.gather_list(seq, interleave=interleave)
+                for key, seq in mapping.items()}
+        else:
+            return mapping
 
     def log_metric(
             self, metric: metrics.LMMetric,

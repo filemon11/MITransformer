@@ -31,6 +31,7 @@ LANG = "en"
 TOKEN_COL = "word"
 TEXT_ID_COL = "item"
 WNUM_COL = "zone"
+BASELINE_METRICS = ("frequency", "length")
 
 
 Corpus = Literal["naturalstories", "zuco", "frank_SP", "frank_ET"]
@@ -126,6 +127,29 @@ def io_corpus_convert(
     return None
 
 
+def get_conllu_frame(
+        df: pd.DataFrame,
+        corpus: str,
+        word_col: str = "word") -> SplitFrame:
+    words = df[word_col]
+    sentence_ids: None | pd.Series = None
+    if corpus != "naturalstories":
+        sentence_ids = df["item"]
+
+    # Add surprisal
+    frame = SplitFrame(tokenised=True)
+    frame.add_(
+        "conllu",
+        words=words, sentence_ids=sentence_ids)  # dataset attribute missing
+    frame.add_(
+        "space_after", "word",
+        "position", "head",
+        "pos", "deprel")
+    # TODO: subsume all above under conllu
+
+    return frame
+
+
 @overload
 def process(
         input_file: str | pd.DataFrame,
@@ -133,7 +157,7 @@ def process(
         model_dir: str, token_mapper_dir: str,
         world_size: int = 1,
         token_col: str = TOKEN_COL,
-        baseline_metrics: Iterable[str] = ("frequency", "length"),
+        baseline_metrics: Iterable[str] = BASELINE_METRICS,
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
         masks_setting: MasksSetting = "current",
@@ -151,7 +175,7 @@ def process(
         model_dir: str, token_mapper_dir: str,
         world_size: int = 1,
         token_col: str = TOKEN_COL,
-        baseline_metrics: Iterable[str] = ("frequency", "length"),
+        baseline_metrics: Iterable[str] = BASELINE_METRICS,
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
         masks_setting: MasksSetting = "current",
@@ -168,7 +192,7 @@ def process(
         model_dir: str, token_mapper_dir: str,
         world_size: int = 1,
         token_col: str = TOKEN_COL,
-        baseline_metrics: Iterable[str] = ("frequency", "length"),
+        baseline_metrics: Iterable[str] = BASELINE_METRICS,
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
         masks_setting: MasksSetting = "current",
@@ -184,27 +208,15 @@ def process(
     else:
         input_file.fillna("NaN")
 
-    words = input_file["word"]
-    sentence_ids: None | pd.Series = None
-    if corpus != "naturalstories":
-        sentence_ids = input_file["item"]
-
     orig_frame = UnsplitFrame(
         input_file, {"word_col": token_col}, tokenised=False)
 
     for metric in baseline_metrics:
         orig_frame.add_(metric)
 
-    # Add surprisal
-    frame = SplitFrame(tokenised=True)
-    frame.add_(
-        "conllu",
-        words=words, sentence_ids=sentence_ids)  # dataset attribute missing
-    frame.add_(
-        "space_after", "word",
-        "position", "head",
-        "pos", "deprel")
-    # TODO: subsume all above under conllu
+    # Create conllu frame
+    frame = get_conllu_frame(
+        input_file, corpus, word_col=token_col)
 
     # Surprisal
     transform = TransformMaskHeadChild(
@@ -234,7 +246,7 @@ def process(
         frame.untokenise_()
 
         split_frame = orig_frame.split([
-            len(sentence) for sentence in frame.df["word"]])
+            len(sentence) for sentence in frame.df[token_col]])
 
         frame = split_frame | frame
         frame = frame.include_spillover(shift)
@@ -310,7 +322,7 @@ def process(
         frame.untokenise_()
 
         split_frame = orig_frame.split([
-            len(sentence) for sentence in frame.df["word"]])
+            len(sentence) for sentence in frame.df[token_col]])
 
         # # for debugging
         # for sen1, sen2 in zip(frame.df["word"], split_frame.df["word"]):
