@@ -1230,6 +1230,19 @@ class LMTrainer():
         else:
             return metric
 
+    def gather_batched_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.use_ddp:
+            return torch.concat(self.gather_ddp(tensor))
+        else:
+            return tensor
+
+    def gather_list[T](self, seq: list[T]) -> list[T]:
+        # TODO: This is not ordered. Introduce a way to order this.
+        if self.use_ddp:
+            return [item for se in self.gather_ddp(seq) for item in se]
+        else:
+            return seq
+
     def log_metric(
             self, metric: metrics.LMMetric,
             epoch: int,
