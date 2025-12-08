@@ -1,13 +1,15 @@
 
 import subprocess
 
+from . import evaluation
+
 from typing import overload
 
 ANALYSIS_SCRIPT = "RT/analysis_new.R"
 
 
 @overload
-def lme(
+def lme_legacy(
         model_name: str,
         dataset_name: str,
         additional_name: str,
@@ -18,7 +20,7 @@ def lme(
 
 
 @overload
-def lme(
+def lme_legacy(
         model_name: str,
         dataset_name: str,
         additional_name: str,
@@ -28,7 +30,7 @@ def lme(
     ...
 
 
-def lme(
+def lme_legacy(
         model_name: str,
         dataset_name: str,
         additional_name: str,
@@ -45,9 +47,21 @@ def lme(
             "RT/data",
             f"{additional_name}"]
     if log_at is None:
-        return subprocess.run(
+        s = subprocess.run(
             arguments, encoding='utf-8', stdout=subprocess.PIPE).stdout
+        return s
     else:
         with open(log_at, 'w') as f:
             subprocess.run(arguments, stdout=f)
         return None
+
+
+def lme(
+        model_name: str,
+        dataset_name: str,
+        additional_name: str,
+        n_runs: int = 1,
+        shift: int = 0) -> None | str:
+    evaluation.run(
+        model_name, n_runs, dataset_name, shift, "RT/data", additional_name)
+    return None

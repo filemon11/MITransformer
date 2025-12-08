@@ -25,8 +25,7 @@ def main_rt_multiple(
     if arguments.lme:
         readingtimes.lme(
             arguments.model_name, arguments.dataset_name,
-            arguments.name, arguments.n_runs, arguments.shift,
-            f'RT/results/log_{arguments.model_name}.log')
+            arguments.name, arguments.n_runs, arguments.shift)
 
 
 def main_rt(
@@ -101,5 +100,4 @@ def main_rt(
     if arguments.lme:
         readingtimes.lme(
             model_name, corpus,
-            arguments.name, 0, arguments.shift,
-            f'RT/results/log_{arguments.model_name}.log')
+            arguments.name, 0, arguments.shift)
