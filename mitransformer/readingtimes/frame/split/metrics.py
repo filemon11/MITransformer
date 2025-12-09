@@ -3,7 +3,7 @@ import nltk  # type: ignore
 import numpy as np
 import numpy.typing as npt
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM  # type: ignore
 from ....train.losses import entropy
 
 
@@ -269,6 +269,13 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 make_prob=True,
                 only_true=True,
                 return_arc_logits=True)
+
+            if trainer.config.device != "cpu":
+                attention_logits = {
+                    key: [tensor.to("cpu") for tensor in tensorlist]
+                    for key, tensorlist in attention_logits.items()}
+                pred_probs = [tensor.to("cpu") for tensor in pred_probs]
+
             probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
             assert all(len(p) == len(t) for p, t in zip(probs, df["word"])), (
                 ([(len(p), len(t)) for p, t in zip(probs, df["word"])]))

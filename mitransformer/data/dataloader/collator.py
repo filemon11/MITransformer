@@ -83,7 +83,6 @@ class Collate(CollateBase):
                         continue
 
                     if isinstance(dictionary[key][0], np.ndarray):
-                        print([i.shape for i in dictionary[key]])
                         dictionary[key] = torch.from_numpy(
                             np.stack(dictionary[key]).astype(np.int64))
 
@@ -146,7 +145,6 @@ class PaddingCollate(Collate):
                 else:
                     raise Exception("Unknown type. Given:",
                                     type(new_sentence[key]))
-                print(new_sentence[key].shape)
             for key, b in self.pad_mask_with.items():
                 for mask_k, mask in new_sentence[key].items():  # type: ignore
                     new_mask = np.full((max_lens[key], max_lens[key]), b)

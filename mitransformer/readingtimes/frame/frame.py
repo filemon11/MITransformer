@@ -277,8 +277,8 @@ def unsplit_df(
     for colname in df.columns:
         if colname in not_to_unsplit:
             continue
+        values = [item for sen in df[colname] for item in sen]
         try:
-            values = [item for sen in df[colname] for item in sen]
             unsplit_df[colname] = values
         except ValueError:
             print(

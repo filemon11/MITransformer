@@ -29,7 +29,7 @@ def prevent_sentence_boundary_detection(doc):
 
 nlp_wo_sentseg = en_core_web_trf.load()
 nlp_wo_sentseg.add_pipe("conll_formatter", last=True)
-nlp_wo_sentseg.tokenizer.add_special_case(
+nlp_wo_sentseg.tokenizer.add_special_case(  # type: ignore
     "<unk>", [{ORTH: "<unk>"}])  # type: ignore
 
 nlp_wo_sentseg.add_pipe(

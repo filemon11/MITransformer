@@ -291,10 +291,11 @@ class LMTrainer():
 
     def run_hooks(
             self, input: data.IdBatch | data.MaskIdBatch,
-            output: tuple[torch.Tensor, dict[str, torch.Tensor]]
+            output: tuple[torch.Tensor, dict[str, torch.Tensor] | None]
             ) -> None:
         for hook in self.hooks:
-            hook(input, output)
+            assert output[1] is not None
+            hook(input, output)  # type: ignore
 
     def init_hooks(
             self, dataloader: data.DataLoader, dataset_name: str,
@@ -582,7 +583,7 @@ class LMTrainer():
         batch = self.batch_to(batch, device=self.config.device)
 
         additional: models.AdditionalResults
-        arc_logits: dict[str, torch.Tensor]
+        arc_logits: dict[str, torch.Tensor] | None
         logits, arc_logits, additional = self.transformerlm(
             **batch,
             return_arc_logits=not self.config.combined_loss,
@@ -606,6 +607,7 @@ class LMTrainer():
         num_arc_instances: int | None = None
         if self.train_config.dependency_mode == "supervised":
             assert "masks" in batch
+            assert arc_logits is not None
             batch = cast(data.MaskIdBatch, batch)
             score_pair = self.prepare_scores(
                 arc_logits, batch["masks"])
@@ -690,6 +692,7 @@ class LMTrainer():
         batch = self.batch_to(batch, device=self.config.device)
 
         additional: models.AdditionalResults
+        arc_logits: None | dict[str, torch.Tensor]
         logits, arc_logits, additional = self.transformerlm(
             **batch,
             return_arc_logits=not self.config.combined_loss,
@@ -725,6 +728,7 @@ class LMTrainer():
         att_entropy = None
         num_arc_instances = None
         if mode == "supervised":
+            assert arc_logits is not None
             assert "masks" in batch
             batch = cast(data.MaskIdBatch, batch)
             score_pair = self.prepare_scores(
@@ -1010,10 +1014,10 @@ class LMTrainer():
                     loader.dataset.keys_for_padding["label_ids"],
                     perform_opt=(po := functions.check_perform_opt(
                         self.train_config.gradient_acc, i))))
+                del batch
                 if po:
                     yield metrics.sum_metrics(metrics_list)
                     metrics_list = list()
-                del batch
 
         if self.train_config.use_steps:
             for e in iterate():
@@ -1091,7 +1095,7 @@ class LMTrainer():
             # eval loop: no backprop on this data, to avoid storing
             # all intermediate variable
             logits: torch.Tensor
-            arc_logits: dict[str, torch.Tensor]
+            arc_logits: dict[str, torch.Tensor] | None
             additional: models.AdditionalResults
             for batch in tqdm(loader, desc="Batches"):
                 batch = self.batch_to(batch, device=self.config.device)
