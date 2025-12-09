@@ -1,4 +1,4 @@
-from ... import readingtimes
+from ... import readingtimes, data
 from .. import parsing
 import tqdm
 import copy
@@ -45,14 +45,8 @@ def main_rt(
     # on Wikitext?
     # Is the mapper not a model property that can be loaded?
 
-    corpus_to_infile: dict[readingtimes.Corpus, str] = {
-        "naturalstories": "naturalstories-master/words.tsv",
-        "zuco": "zuco/training_data.csv",
-        "frank_ET": "frank/stimuli.txt",
-        "frank_SP": "frank/stimuli.txt",
-    }
     try:
-        in_file = corpus_to_infile[corpus]  # type: ignore
+        in_file = data.rt_corpus_to_measurements_file[corpus]  # type: ignore
     except KeyError:
         raise Exception(f"Corpus {corpus} unknown.")
     assert corpus in readingtimes.CORPORA
@@ -63,14 +57,8 @@ def main_rt(
         " costs.")
 
     # Load measurements
-    corpus_to_rt_infile: dict[readingtimes.Corpus, str] = {
-        "naturalstories": "RT/data/processed_RTs.tsv",
-        "zuco": "zuco/training_data.csv",
-        "frank_ET": "frank/eyetracking.RT.txt",
-        "frank_SP": "frank/selfpacedreading.RT.txt"
-    }
     measurements = readingtimes.prepare_RTs(
-        corpus_to_rt_infile[corpus],
+        data.rt_corpus_to_measurements_file[corpus],
         corpus=corpus)
 
     # Load candidates

@@ -29,12 +29,14 @@ class MetricWriter(SummaryWriter):
                     pass
 
     def add_params(
-            self, params: dict[str, Any], metric: base.Metric,
+            self, params: dict[str, Any], metric: base.Metric | dict[str, Any],
             run_name: Optional[str] = None,
             global_step: Optional[int] = None) -> None:
+        metric_dict = (
+            metric.to_dict() if isinstance(metric, base.Metric) else metric)
         self.add_hparams(
             {k: v for k, v in params.items() if utils.check_type(v)},
-            {f"_{k}": v for k, v in metric.to_dict().items()
+            {k: v for k, v in metric_dict.items()
                 if utils.check_numeral(v)},
             run_name=run_name,
             global_step=global_step,

@@ -22,3 +22,6 @@ from .parse import (  # noqa: F401
 )
 from .corpora import (  # noqa: F401
     load_natural_stories, load_zuco, load_frank, CorpusLoader)
+from .rtdata import (   # noqa: F401
+    rt_corpus_to_measurements_file, rt_corpus_to_text_file
+    )

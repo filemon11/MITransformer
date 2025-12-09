@@ -12,7 +12,7 @@ from ...lingutils import (
     UntokSplitHead, UntokSplitFirst, untokenise,
     pos_merge, TAGSET, CONTENT_POS)
 from ....data import (
-    CoNLLUDataset, parse_list_of_words_with_spacy, TokenMapper,
+    CoNLLUDataset, SentenceDataset, parse_list_of_words_with_spacy, TokenMapper,
     parse_list_of_sentences_with_spacy)
 from ....data.dataset import (
     load_conllu_from_str, get_tokens, get_head_list, get_space_after,
@@ -188,7 +188,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
 
     def __call__(
             self, df: pd.DataFrame,
-            token_mapper_dir: str,
+            token_mapper_dir: TokenMapper | str,
             transform: TransformMaskHeadChild,
             trainer: LMTrainer | str,
             dataset: CoNLLUDataset | None = None,
@@ -200,10 +200,15 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             assert self.conllu_col is not None
 
             tokenlists: Sequence[TokenList] = df[self.conllu_col].tolist()
-            dataset = CoNLLUDataset.from_conllu(
-                tokenlists, transform, masks_setting=masks_setting)
+            # dataset = CoNLLUDataset.from_conllu(
+            #     tokenlists, transform, masks_setting=masks_setting)
+            dataset = SentenceDataset.from_conllu(
+                tokenlists)
 
         if isinstance(trainer, str):
+            assert isinstance(token_mapper_dir, str), (
+                "Cannot provide TokenMapper class for huggingface model. "
+                "Please specify a huggingface tokeniser via 'hug:<name>'.")
             assert trainer[:4] == "hug:" and token_mapper_dir[:4] == "hug:"
 
             tokeniser = AutoTokenizer.from_pretrained(token_mapper_dir[4:])
@@ -245,7 +250,11 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 "masks_setting": masks_setting}
 
         else:
-            token_mapper: TokenMapper = TokenMapper.load(token_mapper_dir)
+            if isinstance(token_mapper_dir, str):
+                token_mapper: TokenMapper = TokenMapper.load(token_mapper_dir)
+            else:
+                token_mapper = token_mapper_dir
+
             dataset.map_to_ids(token_mapper)
 
             pred_probs, attention_logits, _ = trainer.predict(

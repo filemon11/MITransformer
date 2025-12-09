@@ -155,6 +155,19 @@ class UnsplitFrame(Frame):
             self.add_(
                 *args[1:])
 
+    def reload_(
+            self,
+            *args: str | tuple[str, str],
+            **kwargs) -> None:
+        self.add_(*args, **kwargs)
+
+#     def remove_(
+#             self,
+#             *args: str) -> None:
+#
+#         assert len(args) > 0
+#         self.df.drop(columns=args, axis=1, inplace=True)
+
     def split(self, lengths: Iterable[int]) -> "SplitFrame":
         ends = [item for le in lengths for item in [False]*(le-1)+[True]]
         new_df = split_df(self.df, ends)
@@ -380,6 +393,37 @@ class SplitFrame(Frame):
             self.add_(
                 *args[1:])
 
+    def reload_(
+            self,
+            *args: str | tuple[str, str],
+            **kwargs) -> None:
+
+        self.add_override_additional(**kwargs)
+
+        assert len(args) > 0
+
+        alt_name: None | str
+        if isinstance(args[0], str):
+            coltype = args[0]
+            alt_name = None
+        else:
+            coltype = args[0][0]
+            alt_name = args[0][1]
+
+        colname = alt_name if alt_name is not None else coltype
+        colkey = f"{colname}_col"
+
+        self.add_column_(
+            colkey, colname,
+            *self.generators[coltype][0](**self.colnames)(
+                self.df, **self.additional),
+            self.generators[coltype][1],
+            self.generators[coltype][3])
+
+        if len(args) > 1:
+            self.add_(
+                *args[1:])
+
     def shift_(
             self,
             amount: int) -> None:
@@ -407,6 +451,11 @@ class SplitFrame(Frame):
             self.untok_funcs
             )
         self.tokenised = False
+
+    def untokenise(self) -> Self:
+        new_frame = self.copy()
+        new_frame.untokenise_()
+        return new_frame
 
     def unsplit(self) -> UnsplitFrame:
         names_to_not_unsplit = {

@@ -92,7 +92,6 @@ class Collate(CollateBase):
 
         output_dict: dict[str, Any] = dict(output)
         dict_to_torch(output_dict, self.keys_to_torch)
-
         return output_dict
 
 
@@ -160,5 +159,4 @@ class PaddingCollate(Collate):
                     new_sentence[key][mask_k] = new_mask  # type: ignore
 
             new_sentence_list.append(new_sentence)
-
         return super().__call__(new_sentence_list)

@@ -9,12 +9,14 @@ import argparse
 from . import argtypes
 from ...utils import logmaker
 from ...utils.params import Undefined
+from ... import readingtimes
+from ...readingtimes.lme import parse as lmeparse
 
 logger = logmaker.getLogger(__name__)
 optuna.logging.enable_propagation()  # Propagate logs to the root logger.
 optuna.logging.disable_default_handler()  # Stop showing logs in sys.stderr.
 
-torch.autograd.set_detect_anomaly(True)
+torch.autograd.set_detect_anomaly(False)
 
 
 # TODO: for hyperopt spaces, specify whether we have a continuous space,
@@ -335,6 +337,21 @@ def create_parser() -> argparse.ArgumentParser:
         '--n_trials', type=int,
         default=25,
         help="how many trials to run")
+    hyperopt_parser.add_argument(
+        '--psyling_dataset', type=str, choices=readingtimes.CORPORA,
+        help='name of the dataset for psycholinguistic evaluation',
+        default="naturalstories")
+    hyperopt_parser.add_argument(
+        '--shift', type=int, default=0,
+        help=(
+            'Argument for adding spillover versions of the metrics.'
+            ' Adds shifted versions up to the shift value provided.'))
+    hyperopt_parser.add_argument(
+        '--lme_formula', type=lmeparse, default=lmeparse(
+            "RT ~ length + frequency + surprisal + (surprisal|WorkerId)"),
+        help=(
+            'Formula for fitting linear mixed effects model for '
+            'optimisation for for loglik.'))
 
     # Fixed Data parser group
     hyperopt_fixed_data_group = hyperopt_parser.add_argument_group('data')
@@ -851,6 +868,7 @@ def create_parser() -> argparse.ArgumentParser:
     data_group = rt_parser.add_argument_group('data')
     data_group.add_argument(
         '--dataset_name', type=str, help='name of the dataset to load',
+        choices=readingtimes.CORPORA,
         default="naturalstories")
     data_group.add_argument(
         '--max_len_train', type=argtypes.OptNone(int), default=Undefined,

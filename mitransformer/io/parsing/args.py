@@ -2,9 +2,11 @@ import torch
 
 from ...data import (
     MasksSetting)
+from ...readingtimes import Corpus
 from ...models import (
     TransformerDescription)
 from ...utils.params import Params, Undefined
+from ...readingtimes.lme import ParseResult as LMEParseResults
 
 import random
 import os
@@ -89,10 +91,14 @@ class TrainParserArgs(ParserArgs):
 
 @dataclass
 class HyperoptParserArgs(ParserArgs):
-    optimise: Literal["perplexity", "uas", "loss", "lm_loss", "arc_loss"]
+    optimise: Literal[
+        "perplexity", "uas", "loss", "lm_loss", "arc_loss", "loglik"]
     n_warmup_steps: int
     n_startup_trials: int
     n_trials: int
+    psyling_dataset: Corpus
+    lme_formula: LMEParseResults
+    shift: int
 
     dependency_mode: Literal["supervised", "input", "standard"]
     combined_loss: bool

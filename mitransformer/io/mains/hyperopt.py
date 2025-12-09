@@ -17,16 +17,25 @@ optuna.logging.disable_default_handler()  # Stop showing logs in sys.stderr.
 def main_hyperopt(
         arguments: "parsing.HyperoptParserArgs",
         world_size: int) -> None:
-    direction = (
-        "minimize" if minimise[arguments.optimise.lower().split(":")[0]]
-        else "maximize")
+    if arguments.optimise == "loglik":
+        direction = "maximize"
+    else:
+        direction = (
+            "minimize" if minimise[arguments.optimise.lower().split(":")[0]]
+            else "maximize")
 
     study: None | optuna.Study = None
     ld = os.path.join("./runs", f"{arguments.name}_hyperopt")
     with ddp.new_pg(
             world_size, "gloo") as pg, metric_writer(log_dir=ld) as writer:
-        objective: hyperoptlib.Objective = hyperoptlib.Objective(
-            world_size, arguments, writer, pg)
+        objective: hyperoptlib.Objective
+        if arguments.optimise == "loglik":
+            objective = hyperoptlib.PsyLingObjective(
+                world_size, arguments, writer, pg)
+        else:
+            objective = hyperoptlib.Objective(
+                world_size, arguments, writer, pg)
+
         if arguments.rank == 0 or arguments.rank is None:
             study = optuna.create_study(
                 study_name=arguments.name,

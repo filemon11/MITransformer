@@ -1159,7 +1159,6 @@ class LMTrainer():
             dict(unpadded_arc_logits), interleave=True)
         unpadded_additional_out = self.gather_dict_of_lists(
             dict(unpadded_additional), interleave=True)
-
         return (
             unpadded_logits, unpadded_arc_logits_out,
             cast(AdditionalPrediction, unpadded_additional_out))
