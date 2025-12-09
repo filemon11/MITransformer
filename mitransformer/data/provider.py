@@ -382,7 +382,8 @@ class DataProvider():
                 details["dirs"] = details["dirs"][0:2]  # type: ignore
 
         self.details = details
-        self.datasets = load_dataset(details, **self.config.to_dict())
+        self.datasets: MaskedDatasetDict | DatasetDict = load_dataset(
+            details, **self.config.to_dict())
 
         info(
             rank, logger,

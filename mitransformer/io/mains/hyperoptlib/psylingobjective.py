@@ -86,11 +86,24 @@ class PsyLingObjective(objective.Objective):
 
         for step, metrics in enumerate(train_iterator, start=1):
             # Handle pruning based on the intermediate value.
+            transform = None
+
+            # somehow this is ill-typed. Provider is assigned
+            # dataloader by Objective parent class
+            if isinstance(
+                    self.data_provider.datasets[
+                        "train"].dataset,  # type: ignore
+                    data.MemMapDepDataset):
+                transform = self.data_provider.datasets[  # type: ignore
+                    "train"].dataset.transform_mask
+
             self.frame.add_(
                 *(self.lme_formula[
                     "covariates"] - set(readingtimes.BASELINE_METRICS)),
+                masked=self.arguments.masked,
                 token_mapper_dir=self.data_provider.datasets["token_mapper"],
-                transform=None, trainer=trainer, masks_setting="current")
+                transform=transform, trainer=trainer,
+                masks_setting=self.arguments.masks_setting)
             # TODO: allow unmasked dataset to be used
             # TODO: implement candidates
 
@@ -123,11 +136,15 @@ class PsyLingObjective(objective.Objective):
             # TODO: decide plausible lme structure
 
             # Get optimisation metric
-            negloglik = readingtimes.get_model_props(
+            loglik = -readingtimes.get_model_props(
                 lme, len(unsplit_frame.df))["negloglik"]
 
+            # Add to metric writer
+            trainer.writer.custom_add_scalar(
+                "loglik", loglik, step, "psyling_eval")
+
             trial.report(
-                -negloglik,
+                loglik,
                 step)
 
             if trial.should_prune():
@@ -142,7 +159,7 @@ class PsyLingObjective(objective.Objective):
             self.writer.add_params(
                 arguments.to_dict(),
                 {
-                    "loglik": -negloglik,
+                    "loglik": loglik,
                     **metrics["eval"].to_dict()},
                 run_name=str(trial.number),
                 global_step=arguments.eval_interval*step)
@@ -152,4 +169,4 @@ class PsyLingObjective(objective.Objective):
         if should_prune:
             raise optuna.exceptions.TrialPruned()
 
-        return -negloglik
+        return loglik

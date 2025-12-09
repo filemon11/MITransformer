@@ -12,7 +12,8 @@ from ...lingutils import (
     UntokSplitHead, UntokSplitFirst, untokenise,
     pos_merge, TAGSET, CONTENT_POS)
 from ....data import (
-    CoNLLUDataset, SentenceDataset, parse_list_of_words_with_spacy, TokenMapper,
+    CoNLLUDataset, SentenceDataset, parse_list_of_words_with_spacy,
+    TokenMapper,
     parse_list_of_sentences_with_spacy)
 from ....data.dataset import (
     load_conllu_from_str, get_tokens, get_head_list, get_space_after,
@@ -189,21 +190,25 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
     def __call__(
             self, df: pd.DataFrame,
             token_mapper_dir: TokenMapper | str,
-            transform: TransformMaskHeadChild,
             trainer: LMTrainer | str,
-            dataset: CoNLLUDataset | None = None,
+            dataset: CoNLLUDataset | SentenceDataset | None = None,
+            masked: bool = True,
+            transform: TransformMaskHeadChild | None = None,
             masks_setting: Literal[
-            "current", "next"] = "current", *args, **kwargs
+            "current", "next"] | None = "current", *args, **kwargs
             ) -> tuple[pd.Series, dict[str, Any]]:
-
         if dataset is None:
             assert self.conllu_col is not None
 
             tokenlists: Sequence[TokenList] = df[self.conllu_col].tolist()
-            # dataset = CoNLLUDataset.from_conllu(
-            #     tokenlists, transform, masks_setting=masks_setting)
-            dataset = SentenceDataset.from_conllu(
-                tokenlists)
+            if masked:
+                assert masks_setting is not None
+                assert transform is not None
+                dataset = CoNLLUDataset.from_conllu(
+                    tokenlists, transform, masks_setting=masks_setting)
+            else:
+                dataset = SentenceDataset.from_conllu(
+                    tokenlists)
 
         if isinstance(trainer, str):
             assert isinstance(token_mapper_dir, str), (
@@ -215,6 +220,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             model = AutoModelForCausalLM.from_pretrained(trainer[4:])
             tokeniser.pad_token_id = tokeniser.eos_token_id
 
+            assert dataset is not None
             joined_sentences = [" ".join(sen[2:-1]) for sen in dataset.tokens]
             inputs = tokeniser(
                 joined_sentences, return_tensors="pt",
@@ -255,6 +261,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             else:
                 token_mapper = token_mapper_dir
 
+            assert dataset is not None
             dataset.map_to_ids(token_mapper)
 
             pred_probs, attention_logits, _ = trainer.predict(

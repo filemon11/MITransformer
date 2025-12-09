@@ -18,15 +18,19 @@ class MetricWriter(SummaryWriter):
                 flattened = flatten(value.to_dict())
                 for k2, v2 in flattened.items():
                     try:
-                        self.add_scalar(f"{k2}/{split}", float(v2), epoch)
+                        self.custom_add_scalar(k2, float(v2), epoch, split)
                     except Exception:
                         pass
             else:
                 try:
-                    self.add_scalar(f"{key}/{split}", float(value), epoch)
+                    self.custom_add_scalar(key, float(value), epoch, split)
                 except Exception:
                     # non-scalar values are ignored
                     pass
+
+    def custom_add_scalar(
+            self, key: str, value: float, epoch: int, split: str) -> None:
+        self.add_scalar(f"{key}/{split}", value, epoch)
 
     def add_params(
             self, params: dict[str, Any], metric: base.Metric | dict[str, Any],
@@ -36,7 +40,7 @@ class MetricWriter(SummaryWriter):
             metric.to_dict() if isinstance(metric, base.Metric) else metric)
         self.add_hparams(
             {k: v for k, v in params.items() if utils.check_type(v)},
-            {k: v for k, v in metric_dict.items()
+            {f"_{k}": v for k, v in metric_dict.items()
                 if utils.check_numeral(v)},
             run_name=run_name,
             global_step=global_step,

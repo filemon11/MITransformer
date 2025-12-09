@@ -246,7 +246,7 @@ def add_column_(
         # Assert that number of rows matches
         assert len(list_frame) == len(content), (
             f"Number of dataframe rows ({len(list_frame)}) and "
-            f"number of new content elements ({len(content)}) do"
+            f"number of new content elements ({len(content)}) do "
             "not match.")
 
         # # Assert that number elements in each sentence matches

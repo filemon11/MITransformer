@@ -1,6 +1,6 @@
 from ....train.metrics import (
     MetricWriter)
-from ....data import get_loader
+from ....data import get_loader, DataProvider
 from ... import parsing
 from .. import functions, train
 from . import sampler
@@ -27,8 +27,7 @@ class Objective:
         self.writer = writer
         self.pg = pg
 
-        self.data_provider = None
-        self.datasets = None
+        self.data_provider: None | DataProvider = None
 
         # TODO: do not use try but check if any of the relevant arguments are
         # Hyperopt spaces
