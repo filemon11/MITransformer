@@ -29,12 +29,10 @@ class PsyLingObjective(objective.Objective):
             "Initialised objective with lme formula "
             f"{arguments.lme_formula['formula']}")
 
-        self.corpus: readingtimes.Corpus = arguments.psyling_dataset
-        self.shift = 1
-
         # Load candidates
         psyling_df = readingtimes.io_corpus_convert(
-            "custom", self.corpus, data.rt_corpus_to_text_file[self.corpus])
+            "custom", arguments.psyling_dataset,
+            data.rt_corpus_to_text_file[arguments.psyling_dataset])
         psyling_df.fillna("NaN")
 
         orig_frame = readingtimes.UnsplitFrame(
@@ -45,7 +43,7 @@ class PsyLingObjective(objective.Objective):
 
         # Create conllu frame
         self.frame = readingtimes.get_conllu_frame(
-            psyling_df, self.corpus)
+            psyling_df, arguments.psyling_dataset)
         # omits undefined args
 
         self.split_frame = orig_frame.split([
@@ -54,8 +52,8 @@ class PsyLingObjective(objective.Objective):
 
         # Load measurements
         self.measurements = readingtimes.prepare_RTs(
-            data.rt_corpus_to_measurements_file[self.corpus],
-            corpus=self.corpus)
+            data.rt_corpus_to_measurements_file[arguments.psyling_dataset],
+            corpus=arguments.psyling_dataset)
 
         self.lme_formula = arguments.lme_formula
 
@@ -84,6 +82,7 @@ class PsyLingObjective(objective.Objective):
 
         assert self.data_provider is not None
 
+        loglik: None | float = None
         for step, metrics in enumerate(train_iterator, start=1):
             # Handle pruning based on the intermediate value.
             transform = None
@@ -94,8 +93,8 @@ class PsyLingObjective(objective.Objective):
                     self.data_provider.datasets[
                         "train"].dataset,  # type: ignore
                     data.MemMapDepDataset):
-                transform = self.data_provider.datasets[  # type: ignore
-                    "train"].dataset.transform_mask
+                transform = self.data_provider.datasets[
+                    "train"].dataset.transform_mask  # type: ignore
 
             self.frame.add_(
                 *(self.lme_formula[
@@ -112,7 +111,7 @@ class PsyLingObjective(objective.Objective):
             # of token surprisals.
             untok_frame = self.frame.untokenise()
             frame = self.split_frame | untok_frame
-            frame = frame.include_spillover(self.shift)
+            frame = frame.include_spillover(self.arguments.shift)
             frame.truncate_(right=1)
             unsplit_frame = frame.unsplit()
 
@@ -124,7 +123,8 @@ class PsyLingObjective(objective.Objective):
             joined = readingtimes.join(
                 self.measurements,
                 unsplit_frame.df,
-                "ET" if self.corpus in readingtimes.ET_CORPORA else "SP")
+                "ET" if self.arguments.psyling_dataset
+                in readingtimes.ET_CORPORA else "SP")
 
             # Fit lme
             lme, _ = readingtimes.fit_gpboost(
@@ -143,6 +143,9 @@ class PsyLingObjective(objective.Objective):
             trainer.writer.custom_add_scalar(
                 "loglik", loglik, step, "psyling_eval")
 
+            info(
+                arguments.rank, logger,
+                f"Psyling eval loglik: {loglik}")
             trial.report(
                 loglik,
                 step)
@@ -153,7 +156,7 @@ class PsyLingObjective(objective.Objective):
 
             self.frame.reload_("surprisal")
 
-        assert metrics is not None, (
+        assert loglik is not None and metrics is not None, (
             "eval_interval is larger than total number of steps")
         if self.writer is not None:
             self.writer.add_params(
