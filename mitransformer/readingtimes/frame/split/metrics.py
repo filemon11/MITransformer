@@ -5,7 +5,7 @@ import numpy.typing as npt
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM  # type: ignore
 from ....train.losses import entropy
-
+from ....train import attdistr, losses
 
 from ...lingutils import (
     UntokSplitFunc, UntokSplitAdd,
@@ -24,7 +24,8 @@ from ....train import LMTrainer, inverse_sigmoid, select_true, unpad
 
 from abc import ABC, abstractmethod
 
-from typing import Type, Any, Iterable, Callable, Literal, Collection
+from typing import (
+    Type, Any, Iterable, Callable, Literal, Collection, Tuple)
 
 LANG = "en"
 
@@ -255,6 +256,10 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 "trainer": trainer,
                 "masks_setting": masks_setting}
 
+            # TODO: add additional output: att (maybe even projected version
+            # if using the modified GPT2 model and loading
+            # huggingface weights.)
+
         else:
             if isinstance(token_mapper_dir, str):
                 token_mapper: TokenMapper = TokenMapper.load(token_mapper_dir)
@@ -264,7 +269,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             assert dataset is not None
             dataset.map_to_ids(token_mapper)
 
-            pred_probs, attention_logits, _ = trainer.predict(
+            pred_probs, attention_logits, additional = trainer.predict(
                 dataset,
                 make_prob=True,
                 only_true=True,
@@ -276,6 +281,11 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                     for key, tensorlist in attention_logits.items()}
                 pred_probs = [tensor.to("cpu") for tensor in pred_probs]
 
+                for key, tensorlist in additional.items():
+                    additional[key] = [  # type: ignore
+                        tensor.to("cpu")
+                        for tensor in tensorlist]  # type: ignore
+
             probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
             assert all(len(p) == len(t) for p, t in zip(probs, df["word"])), (
                 ([(len(p), len(t)) for p, t in zip(probs, df["word"])]))
@@ -285,7 +295,8 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 "transform": transform,
                 "token_mapper_dir": token_mapper_dir,
                 "trainer": trainer,
-                "masks_setting": masks_setting}
+                "masks_setting": masks_setting,
+                **additional}
 
 
 class SplitTokMetricMakerMask(SplitTokMetricMaker):
@@ -589,7 +600,7 @@ class SplitTokMetricMakerExpectedDistance(SplitTokMetricMaker):
         }
 
 
-class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
+class SplitTokMetricMakerAttentionEntropyOld(SplitTokMetricMaker):
     def __init__(
             self, mask_col: str,
             *args, **kwargs):
@@ -606,7 +617,7 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
             for i in range(len(list(attention_logits.values())[0]))]
 
         return pd.Series([
-            generate_attention_entropy(
+            generate_attention_entropy_old(
                 att_mat,
                 gov_name=gov_name,
                 dep_name=dep_name)
@@ -1142,7 +1153,7 @@ def generate_expected_distance(
     return cost[2:].numpy()
 
 
-def generate_attention_entropy(
+def generate_attention_entropy_old(
         attention_matrices: dict[str, torch.Tensor],
         gov_name: str = "head_current",
         dep_name: str = "child_current"
@@ -1162,6 +1173,45 @@ def generate_attention_entropy(
     _entropy = entropy(masks).mean(0)
 
     return _entropy[2:].numpy()
+
+
+def generate_attention_entropy(
+        arc_distr_mode: Literal["att", "att-n"],  # TODO: save this and the resulting arc_distribution
+        att: torch.Tensor | None = None,
+        proj_states: torch.Tensor | None = None,
+        include_current: bool = False,
+        length_weighted: bool = True
+        ) -> Tuple[npt.NDArray, torch.Tensor]:
+    assert att is not None or proj_states is not None, (
+        "Must provide either 'att' or 'proj_states.'")
+    if arc_distr_mode == "att":
+        assert att is not None, (
+            "Must provide 'att' for 'att' mode.")
+    if arc_distr_mode == "att-n":
+        assert proj_states is not None, (
+        "Must provide 'proj_states' for 'att-n' mode.")
+    # TODO: overload (theoretically unnecessary as long as
+    # we don't get any type hints for the high-level .add_ function)
+
+    # TODO: it does not make sense to calculate this separately
+    # once for every sentence. Batching is faster. Maybe get
+    # non-split version from trainer.predict and split after running
+    # the candidate functions?
+
+    # TODO: type definitions for arc_distribution are too restrictive.
+    # Why should we provide att if we don't need it?
+    arc_distribution = attdistr.arc_distribution(
+            {"att": att, "proj_states": proj_states},  # type: ignore
+            mode=arc_distr_mode,
+            without_diagonal=not include_current,
+            without_dummy_prefixes=2)
+
+    attention_entropy = losses.get_attention_entropy(
+        arc_distribution, to_ignore="triangular", reduction="none",
+        include_current=include_current, length_weighted=length_weighted
+    )
+
+    return attention_entropy[2:].numpy(), arc_distribution
 
 
 def generate_kl_divergence(
@@ -1473,8 +1523,8 @@ gen_and_untok: dict[str, tuple[
         "demberg": (
             SplitTokMetricMakerDemberg,
             True, UntokSplitHead, True),
-        "attention_entropy": (
-            SplitTokMetricMakerAttentionEntropy,
+        "attention_entropy_old": (
+            SplitTokMetricMakerAttentionEntropyOld,
             True, UntokSplitHead, True),
     }
 

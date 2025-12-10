@@ -120,7 +120,7 @@ def get_attention_entropy(
         prefix_dummies: int = 2) -> torch.Tensor:
     """input shape [..., S, S]
     with S: sequence length.
-    output shape: scalar if reduction is 'mean' or 'sum', else [..., S].
+    output shape: [...] if reduction is 'mean' or 'sum', else [..., S].
 
     Assumes normalised distribution."""
 
