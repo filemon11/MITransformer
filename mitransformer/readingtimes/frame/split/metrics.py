@@ -25,7 +25,7 @@ from ....train import LMTrainer, inverse_sigmoid, select_true, unpad
 from abc import ABC, abstractmethod
 
 from typing import (
-    Type, Any, Iterable, Callable, Literal, Collection, Tuple)
+    Type, Any, Iterable, Callable, Literal, Collection)
 
 LANG = "en"
 
@@ -627,6 +627,130 @@ class SplitTokMetricMakerAttentionEntropyOld(SplitTokMetricMaker):
         }
 
 
+class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
+    def __init__(
+            self,
+            *args, **kwargs):
+        pass
+
+    def __call__(
+            self,
+            df: pd.DataFrame,
+            arc_distr: Iterable[torch.Tensor] | None = None,
+            arc_distr_mode: Literal["att", "att-n"] | None = None,
+            att: Iterable[torch.Tensor] | None = None,
+            proj_states: Iterable[torch.Tensor] | None = None,
+            include_current: bool = False,
+            length_weighted: bool = True,
+            *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
+
+        if arc_distr is None:
+            assert arc_distr_mode is not None, (
+                "'arc_distr_mode' must be specified if 'arc_distr' "
+                "is not provided.")
+            assert att is not None or proj_states is not None, (
+                "Must provide either 'att' or 'proj_states.'")
+
+            if arc_distr_mode == "att":
+                assert att is not None, (
+                    "Must provide 'att' for 'att' mode.")
+                arc_distr = [
+                    attdistr.arc_distribution(
+                        {"att": a.view(
+                            -1, a.shape[-2], a.shape[-1])},  # type: ignore
+                        mode=arc_distr_mode,
+                        without_diagonal=not include_current,
+                        without_dummy_prefixes=2)
+                    for a in att]
+            else:
+                assert proj_states is not None, (
+                    "Must provide 'proj_states' for 'att-n' mode.")
+                arc_distr = [
+                    attdistr.arc_distribution(
+                        {"proj_states": p.view(
+                            -1, p.shape[-2], p.shape[-1])},  # type: ignore
+                        mode=arc_distr_mode,
+                        without_diagonal=not include_current,
+                        without_dummy_prefixes=2)
+                    for p in proj_states]
+        entropy: list[np.ndarray] = [
+            losses.attention_entropy_loss(
+                ad, to_ignore_mask="triangular",
+                reduction="none",
+                include_current=include_current,
+                length_weighted=length_weighted
+                )[2:].numpy() for ad in arc_distr]
+
+        return pd.Series(entropy), {
+            "arc_distr": arc_distr,
+            "arc_distr_mode": arc_distr_mode,
+            "att": att,
+            "proj_states": proj_states,
+            "include_current": include_current,
+            "length_weighted": length_weighted
+        }
+
+
+class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
+    def __init__(
+            self,
+            *args, **kwargs):
+        pass
+
+    def __call__(
+            self,
+            df: pd.DataFrame,
+            arc_distr: Iterable[torch.Tensor] | None = None,
+            arc_distr_mode: Literal["att", "att-n"] | None = None,
+            att: Iterable[torch.Tensor] | None = None,
+            proj_states: Iterable[torch.Tensor] | None = None,
+            include_current: bool = False,
+            *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
+
+        if arc_distr is None:
+            assert arc_distr_mode is not None, (
+                "'arc_distr_mode' must be specified if 'arc_distr' "
+                "is not provided.")
+            assert att is not None or proj_states is not None, (
+                "Must provide either 'att' or 'proj_states.'")
+
+            if arc_distr_mode == "att":
+                assert att is not None, (
+                    "Must provide 'att' for 'att' mode.")
+                arc_distr = [
+                    attdistr.arc_distribution(
+                        {"att": a.view(
+                            -1, a.shape[-2], a.shape[-1])},  # type: ignore
+                        mode=arc_distr_mode,
+                        without_diagonal=not include_current,
+                        without_dummy_prefixes=2)
+                    for a in att]
+            else:
+                assert proj_states is not None, (
+                    "Must provide 'proj_states' for 'att-n' mode.")
+                arc_distr = [
+                    attdistr.arc_distribution(
+                        {"proj_states": p.view(
+                            -1, p.shape[-2], p.shape[-1])},  # type: ignore
+                        mode=arc_distr_mode,
+                        without_diagonal=not include_current,
+                        without_dummy_prefixes=2)
+                    for p in proj_states]
+
+        distance: list[np.ndarray] = [
+            losses.distance_loss(
+                ad, to_ignore_mask="triangular", reduction="none"
+                )[2:].numpy() for ad in arc_distr]
+
+        return pd.Series(distance), {
+            "arc_distr": arc_distr,
+            "arc_distr_mode": arc_distr_mode,
+            "att": att,
+            "proj_states": proj_states,
+            "include_current": include_current,
+        }
+
+
 class SplitTokMetricMakerKLDivergence(SplitTokMetricMaker):
     def __init__(
             self, mask_col: str, *args, **kwargs):
@@ -1175,45 +1299,6 @@ def generate_attention_entropy_old(
     return _entropy[2:].numpy()
 
 
-def generate_attention_entropy(
-        arc_distr_mode: Literal["att", "att-n"],  # TODO: save this and the resulting arc_distribution
-        att: torch.Tensor | None = None,
-        proj_states: torch.Tensor | None = None,
-        include_current: bool = False,
-        length_weighted: bool = True
-        ) -> Tuple[npt.NDArray, torch.Tensor]:
-    assert att is not None or proj_states is not None, (
-        "Must provide either 'att' or 'proj_states.'")
-    if arc_distr_mode == "att":
-        assert att is not None, (
-            "Must provide 'att' for 'att' mode.")
-    if arc_distr_mode == "att-n":
-        assert proj_states is not None, (
-        "Must provide 'proj_states' for 'att-n' mode.")
-    # TODO: overload (theoretically unnecessary as long as
-    # we don't get any type hints for the high-level .add_ function)
-
-    # TODO: it does not make sense to calculate this separately
-    # once for every sentence. Batching is faster. Maybe get
-    # non-split version from trainer.predict and split after running
-    # the candidate functions?
-
-    # TODO: type definitions for arc_distribution are too restrictive.
-    # Why should we provide att if we don't need it?
-    arc_distribution = attdistr.arc_distribution(
-            {"att": att, "proj_states": proj_states},  # type: ignore
-            mode=arc_distr_mode,
-            without_diagonal=not include_current,
-            without_dummy_prefixes=2)
-
-    attention_entropy = losses.get_attention_entropy(
-        arc_distribution, to_ignore="triangular", reduction="none",
-        include_current=include_current, length_weighted=length_weighted
-    )
-
-    return attention_entropy[2:].numpy(), arc_distribution
-
-
 def generate_kl_divergence(
         masks: dict[str, np.ndarray],
         attention_matrices: dict[str, torch.Tensor],
@@ -1526,6 +1611,12 @@ gen_and_untok: dict[str, tuple[
         "attention_entropy_old": (
             SplitTokMetricMakerAttentionEntropyOld,
             True, UntokSplitHead, True),
+        "attention_entropy": (
+            SplitTokMetricMakerAttentionEntropy,
+            True, UntokSplitAdd, True),  # TODO: choose correct untok
+        "attention_distance": (
+            SplitTokMetricMakerAttentionDistance,
+            True, UntokSplitAdd, True),  # TODO: choose correct untok
     }
 
 

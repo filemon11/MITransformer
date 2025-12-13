@@ -37,7 +37,7 @@ class MetricWriter(SummaryWriter):
             run_name: Optional[str] = None,
             global_step: Optional[int] = None) -> None:
         metric_dict = (
-            metric.to_dict() if isinstance(metric, base.Metric) else metric)
+            metric if isinstance(metric, dict) else metric.to_dict())
         self.add_hparams(
             {k: v for k, v in params.items() if utils.check_type(v)},
             {f"_{k}": v for k, v in metric_dict.items()

@@ -377,6 +377,9 @@ class LMTrainer():
         if len(self.config.losses) == 1:
             return out_dict
 
+        additional = {
+            key: attdistr.merge_layer_heads(tensor)  # type: ignore
+            for key, tensor in additional.items()}
         arc_distribution = attdistr.arc_distribution(
             additional, mode=self.config.distr_mode,
             without_diagonal=not self.config.include_current,
@@ -390,7 +393,7 @@ class LMTrainer():
                         self.attention_entropy_loss(
                             arc_distribution, to_ignore_mask, input_ids,
                             ignore_index, reduction))
-                case "distance":
+                case "attention_distance":
                     out_dict[f"{loss}_loss"] = (
                         self.distance_loss(
                             arc_distribution, to_ignore_mask, input_ids,

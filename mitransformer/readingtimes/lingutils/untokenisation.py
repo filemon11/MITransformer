@@ -99,6 +99,16 @@ def untokenise(
 
 @overload
 def untokenise(
+    items: Iterable[Addable],
+    space_after: Iterable[bool],
+    mode: Literal["mean"],
+    additional: None = None,
+    punctuation: set[str] = ...,
+) -> Iterable[Addable]: ...
+
+
+@overload
+def untokenise(
     items: Iterable[Multipliable],
     space_after: Iterable[bool],
     mode: Literal["mult"] = "mult",
@@ -142,7 +152,8 @@ def untokenise(
 def untokenise(
     items: Iterable[T],
     space_after: Iterable[bool],
-    mode: Literal["mult", "add", "last", "first", "pos", "head"] = "mult",
+    mode: Literal[
+        "mult", "add", "last", "first", "pos", "head", "mean"] = "mult",
     additional: Optional[Iterable[Any]] = None,
     punctuation: set[str] = set(),
 ) -> Iterable[T]:
@@ -220,6 +231,28 @@ def untokenise(
         return selected[0], selected[1], (
             num_in, left_dist, right_dist, left_elem, right_elem), None
 
+    def mean_full(
+            current: tuple[T, Any, Memory, Memory, int],
+            new: tuple[T, Any],
+            ) -> tuple[T, Any, Memory, Memory]:
+
+        curr_val, _, short_mem, _, _ = current
+        new_val, _ = new
+
+        if short_mem is None:
+            # First element: initialize sum & count
+            total = curr_val + new_val
+            count = 2
+        else:
+            total, count = short_mem
+            total = total + new_val
+            count += 1
+
+        # Running mean (do not finalize until space_after=True)
+        mean_val = total / count
+
+        return mean_val, None, (total, count), None
+
     match mode:
         case "add":
             func: FullFunc = promote_func(add_simple)
@@ -233,6 +266,8 @@ def untokenise(
             func = pos_full  # type: ignore
         case "head":
             func = head_full  # type: ignore
+        case "mean":
+            func = mean_full  # type: ignore
         case _:
             raise ValueError(f"Unsupported mode: {mode}")
 
@@ -341,6 +376,20 @@ class UntokSplitAdd(UntokSplitFunc):
         it = [list(untokenise(
             untok_df[self.col][i],
             untok_df[self.space_after_col][i], "add"))
+                for i in range(len(untok_df))]
+        return it
+
+
+class UntokSplitMean(UntokSplitFunc):
+    def __init__(
+            self, col: str, space_after_col: str,
+            *args, **kwargs):
+        super().__init__(col, space_after_col)
+
+    def __call__(self, untok_df: pd.DataFrame) -> Sequence:
+        it = [list(untokenise(
+            untok_df[self.col][i],
+            untok_df[self.space_after_col][i], "mean"))
                 for i in range(len(untok_df))]
         return it
 

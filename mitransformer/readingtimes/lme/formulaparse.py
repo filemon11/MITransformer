@@ -59,9 +59,9 @@ def parse(formula: str) -> ParseResult:
     formula_components = [
         f"({' + '.join([str(i) for i in s])}|{group})"
         for group, s in random_effects.items()]
-    formula = (
-        f"{to_predict} ~ {' + '.join(covariates)} "
-        f"{' + '.join(formula_components)}")
+    formula = " + ".join((
+        f"{to_predict} ~ {' + '.join(covariates)} ",
+        f"{' + '.join(formula_components)}"))
 
     return {
         "groups": groups,

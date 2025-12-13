@@ -39,7 +39,8 @@ class PsyLingObjective(objective.Objective):
             psyling_df, {"word_col": readingtimes.TOKEN_COL}, tokenised=False)
 
         for metric in readingtimes.BASELINE_METRICS:
-            orig_frame.add_(metric)
+            orig_frame.add_(
+                metric)
 
         # Create conllu frame
         self.frame = readingtimes.get_conllu_frame(
@@ -97,12 +98,19 @@ class PsyLingObjective(objective.Objective):
                     "train"].dataset.transform_mask  # type: ignore
 
             self.frame.add_(
-                *(self.lme_formula[
-                    "covariates"] - set(readingtimes.BASELINE_METRICS)),
+                "surprisal",
                 masked=self.arguments.masked,
                 token_mapper_dir=self.data_provider.datasets["token_mapper"],
                 transform=transform, trainer=trainer,
                 masks_setting=self.arguments.masks_setting)
+
+            self.frame.add_(
+                *(self.lme_formula[
+                    "covariates"] - set(
+                        readingtimes.BASELINE_METRICS) - {"surprisal"}),
+                arc_distr_mode=self.arguments.distr_mode,
+                include_current=self.arguments.include_current,
+                length_weighted=self.arguments.length_weighted)
             # TODO: allow unmasked dataset to be used
             # TODO: implement candidates
 
@@ -111,6 +119,7 @@ class PsyLingObjective(objective.Objective):
             # of token surprisals.
             untok_frame = self.frame.untokenise()
             frame = self.split_frame | untok_frame
+
             frame = frame.include_spillover(self.arguments.shift)
             frame.truncate_(right=1)
             unsplit_frame = frame.unsplit()

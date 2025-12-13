@@ -23,22 +23,21 @@ def attention_entropy_loss(
     output shape
     [B, S] if reduction = 'none'
     else scalar"""
-    probs = arc_distributions
 
     if to_ignore_mask is not None and to_ignore_mask != "triangular":
         to_ignore_mask = to_ignore_mask.sum(0).to(torch.bool)  # type: ignore
 
     if global_distr:
-        probs = get_head_averaged_distribution(probs)
+        arc_distributions = get_head_averaged_distribution(arc_distributions)
         # [B, H, S, S] -> [B, S, S]
 
     entropy = get_attention_entropy(
-        probs, to_ignore_mask, reduction="none",
+        arc_distributions, to_ignore_mask, reduction="none",
         include_current=include_current, length_weighted=length_weighted,
         prefix_dummies=prefix_dummies)  # -> [B, S] or [B, H, S]
 
     if not global_distr:
-        entropy = entropy.mean(1)  # [B, H, S] -> [B, S]
+        entropy = entropy.mean(-2)  # [B, H, S] -> [B, S]
 
     if input_ids is not None:
         entropy[input_ids == ignore_index] = 0
@@ -107,7 +106,7 @@ def get_head_averaged_distribution(
         probs: torch.Tensor
         ) -> torch.Tensor:
     """input: [B, H, S, S]"""
-    probs = probs.mean(1)  # [B, S, S]
+    probs = probs.mean(-3)  # [B, S, S]
     return probs
 
 

@@ -277,7 +277,8 @@ def unsplit_df(
     for colname in df.columns:
         if colname in not_to_unsplit:
             continue
-        values = [item for sen in df[colname] for item in sen]
+        values = [
+            item for sen in df[colname] for item in sen]
         try:
             unsplit_df[colname] = values
         except ValueError:
@@ -388,7 +389,6 @@ class SplitFrame(Frame):
             self.generators[coltype][1],
             self.generators[coltype][3],
             untok)
-
         if len(args) > 1:
             self.add_(
                 *args[1:])

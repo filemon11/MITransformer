@@ -37,31 +37,20 @@ def arc_distribution(
         without_dummy_prefixes: int = 0
         ) -> torch.Tensor:
     """additional can contain:
-    att (required): (l b mh s s mhe)
-    proj_states: (l b mh s s mhe)
+    att (required): (... s s)
+    proj_states: (... s s mhe)
 
-    returns: (b lmh s s)
+    returns: (... s s)
     """
-
-    def merge_layer_heads(stack: torch.Tensor) -> torch.Tensor:
-        # input: (l b mh ...)
-
-        stack = stack.transpose(0, 1)
-        # (l b mh ...) -> (b l mh ...)
-        stack = stack.contiguous().view(
-            stack.shape[0], stack.shape[1]*stack.shape[2], *stack.shape[3:])
-        # (b l mh ...) -> (b lmh ...)
-        return stack
 
     match mode:
         case "att":
             assert "att" in additional.keys()
-            att = merge_layer_heads(additional["att"])  # type: ignore
+            att = additional["att"]  # type: ignore
 
         case "att-n":
             assert "proj_states" in additional.keys()
-            proj_states = merge_layer_heads(
-                additional["proj_states"])  # type: ignore
+            proj_states = additional["proj_states"]  # type: ignore
             att = normalize_by_norms(proj_states)
 
         case _:
@@ -70,3 +59,15 @@ def arc_distribution(
     return normalise(
         att, without_diagonal=without_diagonal,
         without_dummy_prefixes=without_dummy_prefixes)
+
+
+def merge_layer_heads(stack: torch.Tensor) -> torch.Tensor:
+    """input: (l b mh ...)
+    (b lmh ...) """
+
+    stack = stack.transpose(0, 1)
+    # (l b mh ...) -> (b l mh ...)
+    stack = stack.contiguous().view(
+        stack.shape[0], stack.shape[1]*stack.shape[2], *stack.shape[3:])
+    # (b l mh ...) -> (b lmh ...)
+    return stack
