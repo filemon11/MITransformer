@@ -83,6 +83,7 @@ class PsyLingObjective(objective.Objective):
 
         assert self.data_provider is not None
 
+        add_method = self.frame.add_
         loglik: None | float = None
         for step, metrics in enumerate(train_iterator, start=1):
             # Handle pruning based on the intermediate value.
@@ -97,14 +98,16 @@ class PsyLingObjective(objective.Objective):
                 transform = self.data_provider.datasets[
                     "train"].dataset.transform_mask  # type: ignore
 
-            self.frame.add_(
+            add_method(
                 "surprisal",
                 masked=self.arguments.masked,
                 token_mapper_dir=self.data_provider.datasets["token_mapper"],
                 transform=transform, trainer=trainer,
                 masks_setting=self.arguments.masks_setting)
-
-            self.frame.add_(
+            print("other", self.lme_formula[
+                    "covariates"])
+            # raise Exception
+            add_method(
                 *(self.lme_formula[
                     "covariates"] - set(
                         readingtimes.BASELINE_METRICS) - {"surprisal"}),
@@ -123,6 +126,7 @@ class PsyLingObjective(objective.Objective):
             frame = frame.include_spillover(self.arguments.shift)
             frame.truncate_(right=1)
             unsplit_frame = frame.unsplit()
+            print(unsplit_frame.df.head(n=10))
 
             # Joining
             # This may take some time. Should we precompute this,
@@ -163,7 +167,7 @@ class PsyLingObjective(objective.Objective):
                 should_prune = True
                 break
 
-            self.frame.reload_("surprisal")
+            add_method = self.frame.reload_
 
         assert loglik is not None and metrics is not None, (
             "eval_interval is larger than total number of steps")

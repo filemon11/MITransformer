@@ -644,12 +644,10 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
             length_weighted: bool = True,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
 
-        if arc_distr is None:
+        if att is not None or proj_states is not None:
             assert arc_distr_mode is not None, (
                 "'arc_distr_mode' must be specified if 'arc_distr' "
                 "is not provided.")
-            assert att is not None or proj_states is not None, (
-                "Must provide either 'att' or 'proj_states.'")
 
             if arc_distr_mode == "att":
                 assert att is not None, (
@@ -668,11 +666,16 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
                 arc_distr = [
                     attdistr.arc_distribution(
                         {"proj_states": p.view(
-                            -1, p.shape[-2], p.shape[-1])},  # type: ignore
+                            -1, p.shape[-3], p.shape[-2], p.shape[-1])},  # type: ignore
                         mode=arc_distr_mode,
                         without_diagonal=not include_current,
                         without_dummy_prefixes=2)
                     for p in proj_states]
+        else:
+            assert arc_distr is not None, (
+                "'arc_distr' is not provided. You need to specify 'arc_distr'"
+                "or 'att'/'proj_states' (for reloading)."
+            )
         entropy: list[np.ndarray] = [
             losses.attention_entropy_loss(
                 ad, to_ignore_mask="triangular",
@@ -707,12 +710,10 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
             include_current: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
 
-        if arc_distr is None:
+        if att is not None or proj_states is not None:
             assert arc_distr_mode is not None, (
                 "'arc_distr_mode' must be specified if 'arc_distr' "
                 "is not provided.")
-            assert att is not None or proj_states is not None, (
-                "Must provide either 'att' or 'proj_states.'")
 
             if arc_distr_mode == "att":
                 assert att is not None, (
@@ -731,12 +732,16 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
                 arc_distr = [
                     attdistr.arc_distribution(
                         {"proj_states": p.view(
-                            -1, p.shape[-2], p.shape[-1])},  # type: ignore
+                            -1, p.shape[-3], p.shape[-2], p.shape[-1])},  # type: ignore
                         mode=arc_distr_mode,
                         without_diagonal=not include_current,
                         without_dummy_prefixes=2)
                     for p in proj_states]
-
+        else:
+            assert arc_distr is not None, (
+                "'arc_distr' is not provided. You need to specify 'arc_distr'"
+                "or 'att'/'proj_states' (for reloading)."
+            )
         distance: list[np.ndarray] = [
             losses.distance_loss(
                 ad, to_ignore_mask="triangular", reduction="none"

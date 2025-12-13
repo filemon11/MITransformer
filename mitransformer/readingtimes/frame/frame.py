@@ -421,7 +421,7 @@ class SplitFrame(Frame):
             self.generators[coltype][3])
 
         if len(args) > 1:
-            self.add_(
+            self.reload_(
                 *args[1:])
 
     def shift_(

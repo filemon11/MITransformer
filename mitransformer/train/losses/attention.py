@@ -55,13 +55,13 @@ def distance_loss(
         global_distr: bool = True,
         prefix_dummies: int = 2,
         ) -> torch.Tensor:
-    """input shape [B, H, S, S] with
+    """input shape [..., H, S, S] with
     H: number of heads,
     B: batch size,
     S: sequence length.
 
     output shape
-    [B, S] if reduction = 'none'
+    [..., S] if reduction = 'none'
     else scalar"""
 
     if to_ignore_mask is not None:
@@ -74,7 +74,7 @@ def distance_loss(
 
     if global_distr:
         probs = get_head_averaged_distribution(probs)
-        # [B, H, S, S] -> [B, S, S]
+        # [..., H, S, S] -> [..., S, S]
 
     s = probs.shape[-1]
     r = torch.arange(1, s+1-prefix_dummies, device=probs.device)
@@ -87,14 +87,14 @@ def distance_loss(
     dist_mat = -1 * (r.repeat(s, 1) - r.reshape(-1, 1))     # + 1
     dist_mat = torch.tril(dist_mat)      # dist_mat.log())
     dist_mat[..., :prefix_dummies] = 0
-
-    dist_mat = dist_mat.unsqueeze(0)  # -> [B, S, S] or [B, H, S, S]
+    # [S, S]
 
     distances = dist_mat*probs
-    cost = (distances).sum(-1)  # -> [B, S] or [B, H, S]
+    # [..., S, S] or [..., H, S, S]
+    cost = (distances).sum(-1)  # -> [..., S] or [..., H, S]
 
     if not global_distr:
-        cost = cost.mean(1)  # [B, H, S] -> [B, S]
+        cost = cost.mean(-2)  # [..., H, S] -> [..., S]
 
     if input_ids is not None:
         cost[input_ids == ignore_index] = 0

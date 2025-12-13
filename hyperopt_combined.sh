@@ -29,7 +29,7 @@ prefix="--standalone --nnodes=1 --nproc-per-node=${N_GPUS} -m mitransformer.__ma
 
 general_params="--n_workers ${THREADS_PER_GPU} --device ${DEVICE} --use_ddp ${USE_DDP}"
 general_hyperopt_params='--optimise loglik --masked 0 --combined=True --losses {lm:0.5;0.8,attention_entropy:0.1,attention_distance:0.1} --first_k 10000 --first_k_eval_test 10000 --batch_size 100 --gradient_acc 2 --epochs 1 --early_stop_after 4 --n_trials=10 --eval_interval 2 --n_warmup_steps 2 --n_startup_trials 3 --use_steps 1 --max_steps none'
-hyperopt_selection='--lme_formula RT~length+frequency+surprisal+attention_entropy+(surprisal|WorkerId) --layer_design (0,) --width 4 --depth 4 --n_embd 400;800 --dropout_attn 0.0 --dropout_resid 0.0;0.6 --dropout_ff 0.0;0.6 --dropout_embd 0.0;0.6 --dropout_lstm 0.0;0.6 --learning_rate 1e-4;1e-2 --d_ff_factor 4;10 --bias 0 --use_dual_fixed 0'
+hyperopt_selection='--lme_formula RT~length+frequency+surprisal+attention_entropy+attention_distance+(surprisal|WorkerId) --layer_design (0,) --width 4 --depth 4 --n_embd 400;800 --dropout_attn 0.0 --dropout_resid 0.0;0.6 --dropout_ff 0.0;0.6 --dropout_embd 0.0;0.6 --dropout_lstm 0.0;0.6 --learning_rate 1e-4;1e-2 --d_ff_factor 4;10 --bias 0 --use_dual_fixed 0'
 
 core="${general_params} hyperopt ${hyperopt_selection} ${general_hyperopt_params}"
 
