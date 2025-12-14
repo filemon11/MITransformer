@@ -104,9 +104,6 @@ class PsyLingObjective(objective.Objective):
                 token_mapper_dir=self.data_provider.datasets["token_mapper"],
                 transform=transform, trainer=trainer,
                 masks_setting=self.arguments.masks_setting)
-            print("other", self.lme_formula[
-                    "covariates"])
-            # raise Exception
             add_method(
                 *(self.lme_formula[
                     "covariates"] - set(
@@ -126,7 +123,6 @@ class PsyLingObjective(objective.Objective):
             frame = frame.include_spillover(self.arguments.shift)
             frame.truncate_(right=1)
             unsplit_frame = frame.unsplit()
-            print(unsplit_frame.df.head(n=10))
 
             # Joining
             # This may take some time. Should we precompute this,

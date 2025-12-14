@@ -641,7 +641,7 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
             att: Iterable[torch.Tensor] | None = None,
             proj_states: Iterable[torch.Tensor] | None = None,
             include_current: bool = False,
-            length_weighted: bool = True,
+            length_weighted: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
 
         if att is not None or proj_states is not None:
@@ -708,6 +708,7 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
             att: Iterable[torch.Tensor] | None = None,
             proj_states: Iterable[torch.Tensor] | None = None,
             include_current: bool = False,
+            length_weighted: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
 
         if att is not None or proj_states is not None:
@@ -744,7 +745,9 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
             )
         distance: list[np.ndarray] = [
             losses.distance_loss(
-                ad, to_ignore_mask="triangular", reduction="none"
+                ad, to_ignore_mask="triangular",
+                reduction="none",
+                length_weighted=length_weighted
                 )[2:].numpy() for ad in arc_distr]
 
         return pd.Series(distance), {
@@ -753,6 +756,7 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
             "att": att,
             "proj_states": proj_states,
             "include_current": include_current,
+            "length_weighted": length_weighted
         }
 
 

@@ -4,11 +4,21 @@ from . import utils
 from typing import Literal
 
 
+def shift_ignore_mask(mask: torch.Tensor) -> torch.Tensor:
+    """
+    input/outputs: [..., S].
+    Prepends 'False' to front of sequence and cuts of last element"""
+
+    mask[..., 1:] = mask[..., :-1].clone()
+    mask[..., 0] = False
+    return mask
+
+
 def attention_entropy_loss(
         arc_distributions: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
         reduction: Literal["sum", "mean", "none"] = "mean",
-        input_ids: torch.Tensor | None = None,
+        label_ids: torch.Tensor | None = None,
         ignore_index: int = -100,
         global_distr: bool = True,
         include_current: bool = True,
@@ -39,8 +49,8 @@ def attention_entropy_loss(
     if not global_distr:
         entropy = entropy.mean(-2)  # [B, H, S] -> [B, S]
 
-    if input_ids is not None:
-        entropy[input_ids == ignore_index] = 0
+    if label_ids is not None:
+        entropy[shift_ignore_mask(label_ids == ignore_index)] = 0
 
     reduced = utils.reduce(entropy, reduction)
     return reduced
@@ -50,9 +60,10 @@ def distance_loss(
         probs: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
         reduction: Literal["sum", "mean", "none"] = "mean",
-        input_ids: torch.Tensor | None = None,
+        label_ids: torch.Tensor | None = None,
         ignore_index: int = -100,
         global_distr: bool = True,
+        length_weighted: bool = False,
         prefix_dummies: int = 2,
         ) -> torch.Tensor:
     """input shape [..., H, S, S] with
@@ -91,15 +102,30 @@ def distance_loss(
 
     distances = dist_mat*probs
     # [..., S, S] or [..., H, S, S]
-    cost = (distances).sum(-1)  # -> [..., S] or [..., H, S]
+
+    distances = (distances).sum(-1)  # -> [..., S] or [..., H, S]
 
     if not global_distr:
-        cost = cost.mean(-2)  # [..., H, S] -> [..., S]
+        distances = distances.mean(-2)  # [..., H, S] -> [..., S]
 
-    if input_ids is not None:
-        cost[input_ids == ignore_index] = 0
+    if length_weighted:
+        norm_vector = torch.arange(
+            0, distances.shape[-1]-prefix_dummies,
+            dtype=torch.float,
+            device=distances.device)
 
-    return utils.reduce(cost, reduction)
+        if prefix_dummies > 0:
+            prefix = torch.zeros(prefix_dummies, device=distances.device)
+            norm_vector = torch.concat(
+                (prefix, norm_vector))
+
+        norm_vector = norm_vector.clamp(min=1e-4)
+
+        distances = torch.div(distances, norm_vector)
+
+    if label_ids is not None:
+        distances[shift_ignore_mask(label_ids == ignore_index)] = 0
+    return utils.reduce(distances, reduction)
 
 
 def get_head_averaged_distribution(
@@ -124,6 +150,7 @@ def get_attention_entropy(
     Assumes normalised distribution."""
 
     entropy = utils.entropy(probs, "none")
+    # [..., S, S]
     del probs
 
     if to_ignore is not None:
@@ -136,32 +163,30 @@ def get_attention_entropy(
         else:
             entropy[to_ignore] = 0  # type: ignore
 
+    entropy = entropy.sum(-1)
+    # [..., S]
+
     if length_weighted:
         start_at = 1 if include_current else 0
         norm_vector = torch.arange(
-            start_at, entropy.shape[-2]+start_at-prefix_dummies,
+            start_at, entropy.shape[-1]+start_at-prefix_dummies,
             dtype=torch.float,
             device=entropy.device)
 
         if prefix_dummies > 0:
             prefix = torch.zeros(prefix_dummies, device=entropy.device)
             norm_vector = torch.concat(
-                (prefix, norm_vector)).unsqueeze(0).t()
-        # [S, S] ([[1], [2], [3], ...])
+                (prefix, norm_vector))
+        # [S] ([0?, ..., 1, 2, 3, ...])
         norm_vector = torch.log2(norm_vector).clamp(min=1e-4)
 
         entropy = torch.div(entropy, norm_vector)
-
-        # prevent numerical problem for one-item
-        # distribution
-        entropy = torch.div(entropy, norm_vector)
-        entropy[..., (1-start_at)+prefix_dummies, prefix_dummies] = 1
+        # [..., S]
 
         del norm_vector
 
-    entropy = entropy.sum(-1)
+        # prevent numerical problem for one-item
+        # distribution
+        entropy[..., (1-start_at)+prefix_dummies] = 1
 
-    # TODO: ignore padding tokens
-
-    reduced = utils.reduce(entropy, reduction)
-    return reduced
+    return utils.reduce(entropy, reduction)

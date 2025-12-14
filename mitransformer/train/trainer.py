@@ -334,7 +334,7 @@ class LMTrainer():
     def attention_entropy_loss(
             self, arc_distributions: torch.Tensor,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
-            input_ids: torch.Tensor | None = None,
+            label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
             reduction: Literal["sum", "mean"] = "mean",
             ) -> torch.Tensor:
@@ -344,25 +344,26 @@ class LMTrainer():
             include_current=self.config.include_current,
             length_weighted=self.config.length_weighted,
             prefix_dummies=2,
-            input_ids=input_ids, ignore_index=ignore_index)
+            label_ids=label_ids, ignore_index=ignore_index)
 
     def distance_loss(
             self, arc_distributions: torch.Tensor,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
-            input_ids: torch.Tensor | None = None,
+            label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
             reduction: Literal["sum", "mean"] = "mean",
             ) -> torch.Tensor:
         return losses.distance_loss(
             arc_distributions, to_ignore_mask, reduction=reduction,
             global_distr=self.config.global_distr,
+            length_weighted=self.config.length_weighted,
             prefix_dummies=2,
-            input_ids=input_ids, ignore_index=ignore_index)
+            label_ids=label_ids, ignore_index=ignore_index)
 
     def attention_losses(
             self, additional: models.AdditionalResults,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
-            input_ids: torch.Tensor | None = None,
+            label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
             reduction: Literal["sum", "mean"] = "mean"
             ) -> dict[str, torch.Tensor]:
@@ -391,12 +392,14 @@ class LMTrainer():
                 case "attention_entropy":
                     out_dict[f"{loss}_loss"] = (
                         self.attention_entropy_loss(
-                            arc_distribution, to_ignore_mask, input_ids,
+                            arc_distribution, to_ignore_mask,
+                            label_ids,
                             ignore_index, reduction))
                 case "attention_distance":
                     out_dict[f"{loss}_loss"] = (
                         self.distance_loss(
-                            arc_distribution, to_ignore_mask, input_ids,
+                            arc_distribution, to_ignore_mask,
+                            label_ids,
                             ignore_index, reduction))
                 case "lm":
                     pass
@@ -649,7 +652,7 @@ class LMTrainer():
             additional_losses = self.attention_losses(
                 additional, to_ignore_mask="triangular",
                 reduction="sum",
-                input_ids=batch["input_ids"], ignore_index=ignore_index)
+                label_ids=batch["label_ids"], ignore_index=ignore_index)
         del additional
 
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
@@ -797,7 +800,7 @@ class LMTrainer():
                 additional,
                 to_ignore_mask="triangular",
                 reduction="sum",
-                input_ids=batch["input_ids"],
+                label_ids=batch["label_ids"],
                 ignore_index=ignore_index)
 
         metric = self.get_metric(
