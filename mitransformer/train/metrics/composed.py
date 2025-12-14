@@ -96,5 +96,5 @@ def DynamicWeightedEvalMetric(loss_names: Sequence):
             **TrainMetric.fields,
             **EvalMetric.fields}}
     )
-    _dynamic_weighted_metric_cache[key] = new_class
+    _dynamic_weighted_eval_metric_cache[key] = new_class
     return new_class
