@@ -99,15 +99,12 @@ class PsyLingObjective(objective.Objective):
                     "train"].dataset.transform_mask  # type: ignore
 
             add_method(
-                "surprisal",
+                *{"surprisal"} | set(self.lme_formula[
+                    "covariates"]) - set(readingtimes.BASELINE_METRICS),
                 masked=self.arguments.masked,
                 token_mapper_dir=self.data_provider.datasets["token_mapper"],
                 transform=transform, trainer=trainer,
-                masks_setting=self.arguments.masks_setting)
-            add_method(
-                *(self.lme_formula[
-                    "covariates"] - set(
-                        readingtimes.BASELINE_METRICS) - {"surprisal"}),
+                masks_setting=self.arguments.masks_setting,
                 arc_distr_mode=self.arguments.distr_mode,
                 include_current=self.arguments.include_current,
                 length_weighted=self.arguments.length_weighted)

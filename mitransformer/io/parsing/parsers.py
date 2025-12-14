@@ -506,7 +506,7 @@ def create_parser() -> argparse.ArgumentParser:
         '--losses',
         type=argtypes.OptNone(
             argtypes.HyperoptSpace(argtypes.StrToDict(
-                str, argtypes.HyperoptSpace(float)))),
+                str, argtypes.HyperoptSpace(argtypes.OptNone(float))))),
         # TODO: sampler is not choosing from tuples and dicts yet.
         # Maybe it will be necessary to encode spaces into
         # a separate class because currently the sampler
@@ -809,7 +809,8 @@ def create_parser() -> argparse.ArgumentParser:
             "language model training while 0.0 is only arc training"))
     trainer_group.add_argument(
         '--losses', type=argtypes.OptNone(
-            argtypes.StrToDict(str, float)), default=Undefined,
+            argtypes.StrToDict(str, argtypes.OptNone(float))),
+        default=Undefined,
         help=(
             "Dictionary of losses for combined loss setting "
             "and their weights. Must include 'lm'."))
@@ -964,7 +965,8 @@ def create_parser() -> argparse.ArgumentParser:
             "language model training while 0.0 is only arc training"))
     trainer_group.add_argument(
         '--losses', type=argtypes.OptNone(
-            argtypes.StrToDict(str, float)), default=Undefined,
+            argtypes.StrToDict(str, argtypes.OptNone(float))),
+        default=Undefined,
         help=(
             "Dictionary of losses for combined loss setting "
             "and their weights. Must include 'lm'."))
