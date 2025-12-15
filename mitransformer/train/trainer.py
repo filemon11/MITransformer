@@ -35,6 +35,8 @@ N = TypeVar("N")
 K = TypeVar("K")
 V = TypeVar("V")
 
+torch.autograd.set_detect_anomaly(True)
+
 
 class AdditionalPrediction(TypedDict):
     proj_states: NotRequired[list[torch.Tensor]]
@@ -387,6 +389,7 @@ class LMTrainer():
             global_distr=self.config.global_distr,
             length_weighted=self.config.length_weighted,
             prefix_dummies=2,
+            include_current=self.config.include_current,
             label_ids=label_ids, ignore_index=ignore_index)
 
     def attention_losses(

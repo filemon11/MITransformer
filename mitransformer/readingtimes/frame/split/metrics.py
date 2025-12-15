@@ -884,7 +884,8 @@ class SplitTokMetricMakerAttentionActivation(SplitTokMetricMaker):
             losses.attention_activation_loss(
                 ad, to_ignore_mask="triangular",
                 reduction="none",
-                length_weighted=length_weighted
+                length_weighted=length_weighted,
+                include_current=include_current
                 )[2:].numpy() for ad in arc_distr]
 
         return pd.Series(difference), {

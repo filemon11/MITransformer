@@ -167,11 +167,11 @@ def attention_difference_loss(
     P = torch.cumsum(probs, dim=-1)
     Pi = torch.cumsum(probs * idx, dim=-1)
 
-    total_P = P[:, -1]
-    total_Pi = Pi[:, -1]
+    total_P = P[..., -1]
+    total_Pi = Pi[..., -1]
 
     left = idx * P - Pi
-    right = (total_Pi[:, None] - Pi) - (total_P[:, None] - P) * idx
+    right = (total_Pi[..., None] - Pi) - (total_P[..., None] - P) * idx
 
     # distance matrix applied row-wise
     D = left + right
@@ -220,7 +220,8 @@ def attention_activation_loss(
         ignore_index: int = -100,
         global_distr: bool = True,
         length_weighted: bool = False,
-        prefix_dummies: int = 2
+        prefix_dummies: int = 2,
+        include_current: bool = True,
         ) -> torch.Tensor:
     """input shape [..., H, S, S] with
     H: number of heads,
@@ -241,50 +242,40 @@ def attention_activation_loss(
 
     if global_distr:
         probs = get_head_averaged_distribution(probs)
-        # [..., H, S, S] -> [..., S, S]
+        # [..., H, S, S] -> [..., S, S]y
 
-    cont = 1 - probs  # continuation probabilities
-    cont = cont.tril(-1)
+    cost = torch.zeros(
+        [*probs.shape[:-2], probs.shape[-1]],
+        device=probs.device, dtype=probs.dtype)
+    weight = torch.zeros(
+        [*probs.shape[:-2], probs.shape[-2]],
+        device=probs.device, dtype=probs.dtype)
 
-    # Start fresh after the prefix
-    cost = torch.zeros_like(probs)
+    for i in range(prefix_dummies, probs.shape[-2]):
+        weight[..., i] = torch.sum(
+            (probs[..., i, :] * cost), dim=-1)
 
-    if prefix_dummies < probs.shape[-1]:
-        # cumulative product starting from prefix_dummies
-        cp = torch.cumprod(cont[..., prefix_dummies:], dim=-1)
+        mask = torch.arange(
+            cost.shape[-1], device=cost.device) < (i + int(include_current))
 
-        # cumulative sum for cost
-        cost_sub = torch.cumsum(
-            torch.cat(
-                [torch.zeros_like(cp[..., :1]), cp[..., :-1]],
-                dim=-1
-            ),
-            dim=-1
-        )
+        updated = (1 - probs[..., i, :]) * (cost + 1)
+        cost = torch.where(mask, updated, cost)
 
-        # insert back into full cost tensor
-        cost[..., prefix_dummies:] = cost_sub
-
-    # final weighted sum
-    weight = torch.sum(probs * cost, dim=-1)
-
-    print(weight[..., 0, :10]) # TODO: fix this. Weight at position 2+prefix_dummies should always be 0 because no weight could have accumulated but is approx. 0.25
     if not global_distr:
         weight = weight.mean(-2)  # [..., H, S] -> [..., S]
 
     if length_weighted:
         norm_vector = torch.arange(
-            0, weight.shape[-1]-prefix_dummies,
+            0, weight.shape[-1]-prefix_dummies-2+int(include_current),
             dtype=weight.dtype,
             device=weight.device)
 
-        if prefix_dummies > 0:
-            prefix = torch.zeros(
-                prefix_dummies,
-                device=weight.device,
-                dtype=weight.dtype)
-            norm_vector = torch.concat(
-                (prefix, norm_vector))
+        prefix = torch.zeros(
+            prefix_dummies+2-int(include_current),
+            device=weight.device,
+            dtype=weight.dtype)
+        norm_vector = torch.concat(
+            (prefix, norm_vector))
 
         norm_vector = norm_vector.clamp(min=1e-4)
 

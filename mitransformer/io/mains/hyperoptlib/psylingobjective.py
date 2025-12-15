@@ -166,10 +166,12 @@ class PsyLingObjective(objective.Objective):
             "eval_interval is larger than total number of steps")
 
         arg_dict = arguments.to_dict()
+        additional_dict = {}
         for key, value in arg_dict.items():
             if isinstance(value, dict):
                 for inner_key, inner_val in value.items():
-                    arg_dict[f"{key}_{inner_key}"] = inner_val
+                    additional_dict[f"{key}_{inner_key}"] = inner_val
+        arg_dict |= additional_dict
 
         if self.writer is not None:
             self.writer.add_params(
