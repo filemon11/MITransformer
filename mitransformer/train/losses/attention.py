@@ -56,7 +56,7 @@ def attention_entropy_loss(
     return reduced
 
 
-def distance_loss(
+def attention_distance_loss(
         probs: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
         reduction: Literal["sum", "mean", "none"] = "mean",
@@ -80,6 +80,7 @@ def distance_loss(
         else:
             to_ignore_mask = to_ignore_mask.sum(  # type: ignore
                 0).to(torch.bool)
+            probs = probs.clone()
             probs[to_ignore_mask] = 0
 
     if global_distr:
@@ -125,6 +126,175 @@ def distance_loss(
     if label_ids is not None:
         distances[shift_ignore_mask(label_ids == ignore_index)] = 0
     return utils.reduce(distances, reduction)
+
+
+def attention_difference_loss(
+        probs: torch.Tensor,
+        to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
+        reduction: Literal["sum", "mean", "none"] = "mean",
+        label_ids: torch.Tensor | None = None,
+        ignore_index: int = -100,
+        global_distr: bool = True,
+        length_weighted: bool = False,
+        prefix_dummies: int = 2,
+        include_current: bool = True,
+        ) -> torch.Tensor:
+    """input shape [..., H, S, S] with
+    H: number of heads,
+    B: batch size,
+    S: sequence length.
+
+    output shape
+    [..., S] if reduction = 'none'
+    else scalar"""
+    if to_ignore_mask is not None:
+        if to_ignore_mask == "triangular":
+            probs = torch.tril(probs)
+        else:
+            to_ignore_mask = to_ignore_mask.sum(  # type: ignore
+                0).to(torch.bool)
+            probs = probs.clone()
+            probs[to_ignore_mask] = 0
+
+    if global_distr:
+        probs = get_head_averaged_distribution(probs)
+        # [..., H, S, S] -> [..., S, S]
+
+    idx = torch.arange(
+        probs.shape[-1], device=probs.device, dtype=probs.dtype)
+
+    # Prefix sums along columns
+    P = torch.cumsum(probs, dim=-1)
+    Pi = torch.cumsum(probs * idx, dim=-1)
+
+    total_P = P[:, -1]
+    total_Pi = Pi[:, -1]
+
+    left = idx * P - Pi
+    right = (total_Pi[:, None] - Pi) - (total_P[:, None] - P) * idx
+
+    # distance matrix applied row-wise
+    D = left + right
+
+    # pair consecutive rows
+    difference = torch.sum(
+        probs[..., :-1, :] * D[..., 1:, :], dim=-1)   # [..., S-1]
+
+    zeros = torch.zeros(
+        [*difference.shape[:-1], 1],
+        device=difference.device, dtype=difference.dtype)
+
+    difference = torch.cat((zeros, difference), dim=-1)
+
+    if not global_distr:
+        difference = difference.mean(-2)  # [..., H, S] -> [..., S]
+
+    if length_weighted:
+        norm_vector = torch.arange(
+            0, difference.shape[-1]-prefix_dummies-int(not include_current),
+            dtype=difference.dtype,
+            device=difference.device)
+
+        if prefix_dummies + int(not include_current) > 0:
+            prefix = torch.zeros(
+                prefix_dummies + int(not include_current),
+                device=difference.device,
+                dtype=difference.dtype)
+            norm_vector = torch.concat(
+                (prefix, norm_vector))
+
+        norm_vector = norm_vector.clamp(min=1e-4)
+
+        difference = torch.div(difference, norm_vector)
+
+    if label_ids is not None:
+        difference[shift_ignore_mask(label_ids == ignore_index)] = 0
+    return utils.reduce(difference, reduction)
+
+
+def attention_activation_loss(
+        probs: torch.Tensor,
+        to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
+        reduction: Literal["sum", "mean", "none"] = "mean",
+        label_ids: torch.Tensor | None = None,
+        ignore_index: int = -100,
+        global_distr: bool = True,
+        length_weighted: bool = False,
+        prefix_dummies: int = 2
+        ) -> torch.Tensor:
+    """input shape [..., H, S, S] with
+    H: number of heads,
+    B: batch size,
+    S: sequence length.
+
+    output shape
+    [..., S] if reduction = 'none'
+    else scalar"""
+    if to_ignore_mask is not None:
+        if to_ignore_mask == "triangular":
+            probs = torch.tril(probs)
+        else:
+            to_ignore_mask = to_ignore_mask.sum(  # type: ignore
+                0).to(torch.bool)
+            probs = probs.clone()
+            probs[to_ignore_mask] = 0
+
+    if global_distr:
+        probs = get_head_averaged_distribution(probs)
+        # [..., H, S, S] -> [..., S, S]
+
+    cont = 1 - probs  # continuation probabilities
+    cont = cont.tril(-1)
+
+    # Start fresh after the prefix
+    cost = torch.zeros_like(probs)
+
+    if prefix_dummies < probs.shape[-1]:
+        # cumulative product starting from prefix_dummies
+        cp = torch.cumprod(cont[..., prefix_dummies:], dim=-1)
+
+        # cumulative sum for cost
+        cost_sub = torch.cumsum(
+            torch.cat(
+                [torch.zeros_like(cp[..., :1]), cp[..., :-1]],
+                dim=-1
+            ),
+            dim=-1
+        )
+
+        # insert back into full cost tensor
+        cost[..., prefix_dummies:] = cost_sub
+
+    # final weighted sum
+    weight = torch.sum(probs * cost, dim=-1)
+
+    print(weight[..., 0, :10]) # TODO: fix this. Weight at position 2+prefix_dummies should always be 0 because no weight could have accumulated but is approx. 0.25
+    if not global_distr:
+        weight = weight.mean(-2)  # [..., H, S] -> [..., S]
+
+    if length_weighted:
+        norm_vector = torch.arange(
+            0, weight.shape[-1]-prefix_dummies,
+            dtype=weight.dtype,
+            device=weight.device)
+
+        if prefix_dummies > 0:
+            prefix = torch.zeros(
+                prefix_dummies,
+                device=weight.device,
+                dtype=weight.dtype)
+            norm_vector = torch.concat(
+                (prefix, norm_vector))
+
+        norm_vector = norm_vector.clamp(min=1e-4)
+
+        weight = torch.div(weight, norm_vector)
+
+    # print(weight[..., :6])
+
+    if label_ids is not None:
+        weight[shift_ignore_mask(label_ids == ignore_index)] = 0
+    return utils.reduce(weight, reduction)
 
 
 def get_head_averaged_distribution(

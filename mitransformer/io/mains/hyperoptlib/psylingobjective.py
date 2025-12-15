@@ -164,9 +164,16 @@ class PsyLingObjective(objective.Objective):
 
         assert loglik is not None and metrics is not None, (
             "eval_interval is larger than total number of steps")
+
+        arg_dict = arguments.to_dict()
+        for key, value in arg_dict.items():
+            if isinstance(value, dict):
+                for inner_key, inner_val in value.items():
+                    arg_dict[f"{key}_{inner_key}"] = inner_val
+
         if self.writer is not None:
             self.writer.add_params(
-                arguments.to_dict(),
+                arg_dict,
                 {
                     "loglik": loglik,
                     **metrics["eval"].to_dict()},

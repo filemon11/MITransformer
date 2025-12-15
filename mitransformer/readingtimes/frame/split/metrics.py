@@ -746,13 +746,148 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
                 "or 'att'/'proj_states' (for reloading)."
             )
         distance: list[np.ndarray] = [
-            losses.distance_loss(
+            losses.attention_distance_loss(
                 ad, to_ignore_mask="triangular",
                 reduction="none",
                 length_weighted=length_weighted
                 )[2:].numpy() for ad in arc_distr]
 
         return pd.Series(distance), {
+            "arc_distr": arc_distr,
+            "arc_distr_mode": arc_distr_mode,
+            "att": att,
+            "proj_states": proj_states,
+            "include_current": include_current,
+            "length_weighted": length_weighted
+        }
+
+
+class SplitTokMetricMakerAttentionDifference(SplitTokMetricMaker):
+    def __init__(
+            self,
+            *args, **kwargs):
+        pass
+
+    def __call__(
+            self,
+            df: pd.DataFrame,
+            arc_distr: Iterable[torch.Tensor] | None = None,
+            arc_distr_mode: Literal["att", "att-n"] | None = None,
+            att: Iterable[torch.Tensor] | None = None,
+            proj_states: Iterable[torch.Tensor] | None = None,
+            include_current: bool = False,
+            length_weighted: bool = False,
+            *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
+
+        if att is not None or proj_states is not None:
+            assert arc_distr_mode is not None, (
+                "'arc_distr_mode' must be specified if 'arc_distr' "
+                "is not provided.")
+
+            if arc_distr_mode == "att":
+                assert att is not None, (
+                    "Must provide 'att' for 'att' mode.")
+                arc_distr = [
+                    attdistr.arc_distribution(
+                        {"att": a.view(
+                            -1, a.shape[-2], a.shape[-1])},  # type: ignore
+                        mode=arc_distr_mode,
+                        without_diagonal=not include_current,
+                        without_dummy_prefixes=2)
+                    for a in att]
+            else:
+                assert proj_states is not None, (
+                    "Must provide 'proj_states' for 'att-n' mode.")
+                arc_distr = [
+                    attdistr.arc_distribution(
+                        {"proj_states": p.view(
+                            -1, p.shape[-3],
+                            p.shape[-2], p.shape[-1])},  # type: ignore
+                        mode=arc_distr_mode,
+                        without_diagonal=not include_current,
+                        without_dummy_prefixes=2)
+                    for p in proj_states]
+        else:
+            assert arc_distr is not None, (
+                "'arc_distr' is not provided. You need to specify 'arc_distr'"
+                "or 'att'/'proj_states' (for reloading)."
+            )
+        difference: list[np.ndarray] = [
+            losses.attention_difference_loss(
+                ad, to_ignore_mask="triangular",
+                reduction="none",
+                length_weighted=length_weighted,
+                include_current=include_current
+                )[2:].numpy() for ad in arc_distr]
+
+        return pd.Series(difference), {
+            "arc_distr": arc_distr,
+            "arc_distr_mode": arc_distr_mode,
+            "att": att,
+            "proj_states": proj_states,
+            "include_current": include_current,
+            "length_weighted": length_weighted
+        }
+
+
+class SplitTokMetricMakerAttentionActivation(SplitTokMetricMaker):
+    def __init__(
+            self,
+            *args, **kwargs):
+        pass
+
+    def __call__(
+            self,
+            df: pd.DataFrame,
+            arc_distr: Iterable[torch.Tensor] | None = None,
+            arc_distr_mode: Literal["att", "att-n"] | None = None,
+            att: Iterable[torch.Tensor] | None = None,
+            proj_states: Iterable[torch.Tensor] | None = None,
+            include_current: bool = False,
+            length_weighted: bool = False,
+            *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
+
+        if att is not None or proj_states is not None:
+            assert arc_distr_mode is not None, (
+                "'arc_distr_mode' must be specified if 'arc_distr' "
+                "is not provided.")
+
+            if arc_distr_mode == "att":
+                assert att is not None, (
+                    "Must provide 'att' for 'att' mode.")
+                arc_distr = [
+                    attdistr.arc_distribution(
+                        {"att": a.view(
+                            -1, a.shape[-2], a.shape[-1])},  # type: ignore
+                        mode=arc_distr_mode,
+                        without_diagonal=not include_current,
+                        without_dummy_prefixes=2)
+                    for a in att]
+            else:
+                assert proj_states is not None, (
+                    "Must provide 'proj_states' for 'att-n' mode.")
+                arc_distr = [
+                    attdistr.arc_distribution(
+                        {"proj_states": p.view(
+                            -1, p.shape[-3],
+                            p.shape[-2], p.shape[-1])},  # type: ignore
+                        mode=arc_distr_mode,
+                        without_diagonal=not include_current,
+                        without_dummy_prefixes=2)
+                    for p in proj_states]
+        else:
+            assert arc_distr is not None, (
+                "'arc_distr' is not provided. You need to specify 'arc_distr'"
+                "or 'att'/'proj_states' (for reloading)."
+            )
+        difference: list[np.ndarray] = [
+            losses.attention_activation_loss(
+                ad, to_ignore_mask="triangular",
+                reduction="none",
+                length_weighted=length_weighted
+                )[2:].numpy() for ad in arc_distr]
+
+        return pd.Series(difference), {
             "arc_distr": arc_distr,
             "arc_distr_mode": arc_distr_mode,
             "att": att,
@@ -1627,6 +1762,12 @@ gen_and_untok: dict[str, tuple[
             True, UntokSplitAdd, True),  # TODO: choose correct untok
         "attention_distance": (
             SplitTokMetricMakerAttentionDistance,
+            True, UntokSplitAdd, True),  # TODO: choose correct untok
+        "attention_difference": (
+            SplitTokMetricMakerAttentionDifference,
+            True, UntokSplitAdd, True),  # TODO: choose correct untok
+        "attention_activation": (
+            SplitTokMetricMakerAttentionActivation,
             True, UntokSplitAdd, True),  # TODO: choose correct untok
     }
 

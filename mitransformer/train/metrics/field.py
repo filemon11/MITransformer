@@ -85,6 +85,8 @@ uas = MetricField(0.0, minimise=False, reduce_by="num")
 att_entropy = MetricField(None, reduce_by="num")
 
 attention_entropy_loss = loss("num")
-distance_loss = loss("num")
+attention_distance_loss = loss("num")
+attention_difference_loss = loss("num")
+attention_activation_loss = loss("num")
 
 weight = MetricField(1.0, static=True)

@@ -346,14 +346,43 @@ class LMTrainer():
             prefix_dummies=2,
             label_ids=label_ids, ignore_index=ignore_index)
 
-    def distance_loss(
+    def attention_distance_loss(
             self, arc_distributions: torch.Tensor,
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
             reduction: Literal["sum", "mean"] = "mean",
             ) -> torch.Tensor:
-        return losses.distance_loss(
+        return losses.attention_distance_loss(
+            arc_distributions, to_ignore_mask, reduction=reduction,
+            global_distr=self.config.global_distr,
+            length_weighted=self.config.length_weighted,
+            prefix_dummies=2,
+            label_ids=label_ids, ignore_index=ignore_index)
+
+    def attention_difference_loss(
+            self, arc_distributions: torch.Tensor,
+            to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
+            label_ids: torch.Tensor | None = None,
+            ignore_index: int = -100,
+            reduction: Literal["sum", "mean"] = "mean",
+            ) -> torch.Tensor:
+        return losses.attention_difference_loss(
+            arc_distributions, to_ignore_mask, reduction=reduction,
+            global_distr=self.config.global_distr,
+            length_weighted=self.config.length_weighted,
+            include_current=self.config.include_current,
+            prefix_dummies=2,
+            label_ids=label_ids, ignore_index=ignore_index)
+
+    def attention_activation_loss(
+            self, arc_distributions: torch.Tensor,
+            to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
+            label_ids: torch.Tensor | None = None,
+            ignore_index: int = -100,
+            reduction: Literal["sum", "mean"] = "mean",
+            ) -> torch.Tensor:
+        return losses.attention_activation_loss(
             arc_distributions, to_ignore_mask, reduction=reduction,
             global_distr=self.config.global_distr,
             length_weighted=self.config.length_weighted,
@@ -397,7 +426,19 @@ class LMTrainer():
                             ignore_index, reduction))
                 case "attention_distance":
                     out_dict[f"{loss}_loss"] = (
-                        self.distance_loss(
+                        self.attention_distance_loss(
+                            arc_distribution, to_ignore_mask,
+                            label_ids,
+                            ignore_index, reduction))
+                case "attention_difference":
+                    out_dict[f"{loss}_loss"] = (
+                        self.attention_difference_loss(
+                            arc_distribution, to_ignore_mask,
+                            label_ids,
+                            ignore_index, reduction))
+                case "attention_activation":
+                    out_dict[f"{loss}_loss"] = (
+                        self.attention_activation_loss(
                             arc_distribution, to_ignore_mask,
                             label_ids,
                             ignore_index, reduction))
