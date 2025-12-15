@@ -1,5 +1,6 @@
 import torch
 
+from . import hyperopt
 from ...data import (
     MasksSetting)
 from ...readingtimes import Corpus
@@ -94,11 +95,14 @@ class HyperoptParserArgs(ParserArgs):
     optimise: Literal[
         "perplexity", "uas", "loss", "lm_loss", "arc_loss", "loglik"]
     n_warmup_steps: int
-    n_startup_trials: int
+    sampler_startup_trials: int
+    pruner_startup_trials: int
     n_trials: int
     psyling_dataset: Corpus
     lme_formula: LMEParseResults
     shift: int
+    sampler: Literal["tpe", "random"]
+    pruner: Literal["hyperband", "median"]
 
     dependency_mode: Literal["supervised", "input", "standard"]
     combined_loss: bool
@@ -111,16 +115,18 @@ class HyperoptParserArgs(ParserArgs):
     epochs: int
     gradient_acc: int | None
 
-    distr_mode: Literal["att", "att-n"] | list[Literal["att", "att-n"]]
-    length_weighted: bool | list[bool]
-    include_current: bool | list[bool]
-    global_distr: bool | list[bool]
-    learning_rate: float | tuple[float, float] | list[float]
-    loss_alpha: float | tuple[float, float] | list[float | None] | None
-    losses: list[dict[str, float | int]] | dict[str, float | int] | None
+    distr_mode: Literal["att", "att-n"] | hyperopt.Choices[
+        Literal["att", "att-n"]]
+    length_weighted: bool | hyperopt.Choices[bool]
+    include_current: bool | hyperopt.Choices[bool]
+    global_distr: bool | hyperopt.Choices[bool]
+    learning_rate: float | hyperopt.Range | hyperopt.Choices[float]
+    loss_alpha: float | hyperopt.Range | hyperopt.Choices[float | None] | None
+    losses: list[dict[
+        str, float | int | None]] | dict[str, float | int | None] | None
 
-    arc_loss_weighted: bool | list[bool]
-    discriminative: bool | list[bool]
+    arc_loss_weighted: bool | hyperopt.Choices[bool]
+    discriminative: bool | hyperopt.Choices[bool]
 
     block_size: int
     overlay_causal: bool
@@ -128,26 +134,30 @@ class HyperoptParserArgs(ParserArgs):
     transformer_description: (
         TransformerDescription
         | list[TransformerDescription])
-    layer_design: tuple[str, ...] | list[tuple[str, ...]]
-    use_standard: bool | list[bool]
-    width: int | tuple[int, int] | list[int]
-    depth: int | tuple[int, int] | list[int]
-    unrestricted_before: int | tuple[int, int] | list[int]
-    unrestricted_after: int | tuple[int, int] | list[int]
-    d_ff_factor: int | tuple[int, int] | list[int]
-    dropout: float | tuple[int, int] | list[int | None] | None
-    dropout_attn: float | tuple[int, int] | list[int | None] | None
-    dropout_resid: float | tuple[int, int] | list[int | None] | None
-    dropout_ff: float | tuple[int, int] | list[int | None] | None
-    dropout_embd: float | tuple[int, int] | list[int | None] | None
-    dropout_lstm: float | tuple[int, int] | list[int | None] | None
-    use_lstm: bool | list[bool]
-    n_embd: int | tuple[int, int] | list[int]
-    use_dual_fixed: bool | list[bool]
-    bias: bool | list[bool]
+    layer_design: tuple[str, ...] | hyperopt.Choices[tuple[str, ...]]
+    use_standard: bool | hyperopt.Choices[bool]
+    width: int | hyperopt.Range | hyperopt.Choices[int]
+    depth: int | hyperopt.Range | hyperopt.Choices[int]
+    unrestricted_before: int | hyperopt.Range | hyperopt.Choices[int]
+    unrestricted_after: int | hyperopt.Range | hyperopt.Choices[int]
+    d_ff_factor: int | hyperopt.Range | hyperopt.Choices[int]
+    dropout: float | hyperopt.Range | hyperopt.Choices[float | None] | None
+    dropout_attn: float | hyperopt.Range | hyperopt.Choices[
+        float | None] | None
+    dropout_resid: float | hyperopt.Range | hyperopt.Choices[
+        float | None] | None
+    dropout_ff: float | hyperopt.Range | hyperopt.Choices[float | None] | None
+    dropout_embd: float | hyperopt.Range | hyperopt.Choices[
+        float | None] | None
+    dropout_lstm: float | hyperopt.Range | hyperopt.Choices[
+        float | None] | None
+    use_lstm: bool | hyperopt.Choices[bool]
+    n_embd: int | hyperopt.Range | hyperopt.Choices[int]
+    use_dual_fixed: bool | hyperopt.Choices[bool]
+    bias: bool | hyperopt.Choices[bool]
     pos_enc: (
         Literal["embedding", "sinusoidal"]
-        | list[Literal["embedding", "sinusoidal"]])
+        | hyperopt.Choices[Literal["embedding", "sinusoidal"]])
 
 
 @dataclass

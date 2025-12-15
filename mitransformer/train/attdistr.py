@@ -12,14 +12,19 @@ def normalise(
     if not without_diagonal and without_dummy_prefixes == 0:
         return probs
 
+    probs = probs.clamp(1e-4)
     if without_diagonal:
         probs = torch.tril(probs, diagonal=-1)
+    else:
+        probs = torch.tril(probs)
     if without_dummy_prefixes > 0:
         probs[..., :without_dummy_prefixes] = 0
-    probs = probs / probs.sum(dim=-1, keepdim=True).clamp(min=1e-4)
+    probs = probs / probs.sum(dim=-1, keepdim=True)
 
     if without_diagonal:
         probs = torch.tril(probs, diagonal=-1)
+    else:
+        probs = torch.tril(probs)
     if without_dummy_prefixes:
         probs[..., :without_dummy_prefixes] = 0
     return probs

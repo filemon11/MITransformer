@@ -666,7 +666,8 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
                 arc_distr = [
                     attdistr.arc_distribution(
                         {"proj_states": p.view(
-                            -1, p.shape[-3], p.shape[-2], p.shape[-1])},  # type: ignore
+                            -1, p.shape[-3], p.shape[-2],
+                            p.shape[-1])},  # type: ignore
                         mode=arc_distr_mode,
                         without_diagonal=not include_current,
                         without_dummy_prefixes=2)
@@ -733,7 +734,8 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
                 arc_distr = [
                     attdistr.arc_distribution(
                         {"proj_states": p.view(
-                            -1, p.shape[-3], p.shape[-2], p.shape[-1])},  # type: ignore
+                            -1, p.shape[-3],
+                            p.shape[-2], p.shape[-1])},  # type: ignore
                         mode=arc_distr_mode,
                         without_diagonal=not include_current,
                         without_dummy_prefixes=2)

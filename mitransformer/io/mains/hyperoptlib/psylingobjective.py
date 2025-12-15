@@ -99,7 +99,7 @@ class PsyLingObjective(objective.Objective):
                     "train"].dataset.transform_mask  # type: ignore
 
             add_method(
-                *{"surprisal"} | set(self.lme_formula[
+                "surprisal", *set(self.lme_formula[
                     "covariates"]) - set(readingtimes.BASELINE_METRICS),
                 masked=self.arguments.masked,
                 token_mapper_dir=self.data_provider.datasets["token_mapper"],
@@ -110,7 +110,6 @@ class PsyLingObjective(objective.Objective):
                 length_weighted=self.arguments.length_weighted)
             # TODO: allow unmasked dataset to be used
             # TODO: implement candidates
-
             # Untokenisation
             # We cannot omit this because surprisal can be a sum
             # of token surprisals.
@@ -120,6 +119,7 @@ class PsyLingObjective(objective.Objective):
             frame = frame.include_spillover(self.arguments.shift)
             frame.truncate_(right=1)
             unsplit_frame = frame.unsplit()
+            print(unsplit_frame.df.head(n=10))
 
             # Joining
             # This may take some time. Should we precompute this,

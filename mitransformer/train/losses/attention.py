@@ -74,7 +74,6 @@ def distance_loss(
     output shape
     [..., S] if reduction = 'none'
     else scalar"""
-
     if to_ignore_mask is not None:
         if to_ignore_mask == "triangular":
             probs = torch.tril(probs)

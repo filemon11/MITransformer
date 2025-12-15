@@ -329,10 +329,25 @@ def create_parser() -> argparse.ArgumentParser:
             "how many evaluations to wait before pruning can "
             "happen within a trial"))
     hyperopt_parser.add_argument(
-        '--n_startup_trials', type=int,
+        '--sampler_startup_trials', type=int,
+        default=10,
+        help=(
+            "how many trials to run with random sampling before using TPE."))
+    hyperopt_parser.add_argument(
+        '--pruner_startup_trials', type=int,
         default=5,
         help=(
             "how many trials to run before pruning can happen at all. "))
+    hyperopt_parser.add_argument(
+        '--sampler', type=str, choices=("tpe", "random"),
+        default="random",
+        help=(
+            "optuna sampler to use"))
+    hyperopt_parser.add_argument(
+        '--pruner', type=str, choices=("median", "hyperband"),
+        default="median",
+        help=(
+            "optuna pruner to use"))
     hyperopt_parser.add_argument(
         '--n_trials', type=int,
         default=25,

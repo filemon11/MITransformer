@@ -36,15 +36,41 @@ def main_hyperopt(
             objective = hyperoptlib.Objective(
                 world_size, arguments, writer, pg)
 
+        sampler: optuna.samplers.BaseSampler
+        pruner: optuna.pruners.BasePruner
+
+        match arguments.sampler:
+            case "random":
+                sampler = optuna.samplers.RandomSampler(
+                    seed=arguments.seed
+                )
+            case "tpe":
+                sampler = optuna.samplers.TPESampler(
+                    n_startup_trials=arguments.sampler_startup_trials,
+                    seed=arguments.seed,
+                    multivariate=True, group=True
+                )
+            case _:
+                raise Exception(f"Sampler {arguments.sampler} unknown.")
+
+        match arguments.pruner:
+            case "hyperband":
+                pruner = optuna.pruners.HyperbandPruner(
+                )
+            case "median":
+                pruner = optuna.pruners.MedianPruner(
+                    n_startup_trials=arguments.pruner_startup_trials,
+                    n_warmup_steps=arguments.n_warmup_steps,
+                )
+            case _:
+                raise Exception(f"Pruner {arguments.pruner} unknown.")
+
         if arguments.rank == 0 or arguments.rank is None:
             study = optuna.create_study(
                 study_name=arguments.name,
                 direction=direction,
-                sampler=optuna.samplers.RandomSampler(
-                    seed=arguments.seed),  # TODO: normal sampler
-                pruner=optuna.pruners.MedianPruner(
-                    n_warmup_steps=arguments.n_warmup_steps,
-                    n_startup_trials=arguments.n_startup_trials))
+                sampler=sampler,
+                pruner=pruner)
             study.optimize(
                 objective, n_trials=arguments.n_trials)
 
