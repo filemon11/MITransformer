@@ -34,7 +34,7 @@ hyperopt_selection='--sampler tpe --pruner hyperband --length_weighted 1 --lme_f
 core="${general_params} hyperopt ${hyperopt_selection} ${general_hyperopt_params}"
 
 torchrun ${prefix} \
-    --name hyperopt_combined2 \
+    --name hyperopt_combined3 \
     ${core} \
     --dependency_mode 'standard'
 
