@@ -314,7 +314,7 @@ class LMTrainer():
     def loss(
             self, logits: torch.Tensor, labels: torch.Tensor,
             ignore_index: int = -100,
-            reduction: Literal["sum", "mean"] = "mean"
+            reduction: Literal["sum", "mean"] = "sum"
             ) -> torch.Tensor:
         return losses.lm_loss(
             logits, labels, ignore_index,
@@ -324,7 +324,7 @@ class LMTrainer():
             self, score_preds: torch.Tensor,
             score_gold: torch.BoolTensor,
             to_ignore_mask: torch.BoolTensor | None,
-            reduction: Literal["sum", "mean"] = "mean"
+            reduction: Literal["sum", "mean"] = "sum"
             ) -> tuple[torch.Tensor, int]:
         """reduction sum takes a mean across dim 1
         of the mask"""
@@ -338,7 +338,7 @@ class LMTrainer():
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
-            reduction: Literal["sum", "mean"] = "mean",
+            reduction: Literal["sum", "none"] = "sum",
             ) -> torch.Tensor:
         return losses.attention_entropy_loss(
             arc_distributions, to_ignore_mask, reduction=reduction,
@@ -353,7 +353,7 @@ class LMTrainer():
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
-            reduction: Literal["sum", "mean"] = "mean",
+            reduction: Literal["sum", "none"] = "sum",
             ) -> torch.Tensor:
         return losses.attention_distance_loss(
             arc_distributions, to_ignore_mask, reduction=reduction,
@@ -367,7 +367,7 @@ class LMTrainer():
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
-            reduction: Literal["sum", "mean"] = "mean",
+            reduction: Literal["sum", "none"] = "sum",
             ) -> torch.Tensor:
         return losses.attention_difference_loss(
             arc_distributions, to_ignore_mask, reduction=reduction,
@@ -382,7 +382,7 @@ class LMTrainer():
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
-            reduction: Literal["sum", "mean"] = "mean",
+            reduction: Literal["sum", "none"] = "sum",
             ) -> torch.Tensor:
         return losses.attention_activation_loss(
             arc_distributions, to_ignore_mask, reduction=reduction,
@@ -397,7 +397,7 @@ class LMTrainer():
             to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
             label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
-            reduction: Literal["sum", "mean"] = "mean"
+            reduction: Literal["sum", "none"] = "sum"
             ) -> dict[str, torch.Tensor]:
         """proj_states cannot be none if mode is `att-n`.
         arc_logits have form (M, B, S, S)
@@ -448,9 +448,43 @@ class LMTrainer():
                 case "lm":
                     pass
                 case _:
-                    raise Exception(f"Additional loss '{loss}' unknown.")
+                    pass
 
         return out_dict
+
+    def cosine_loss(
+            self,
+            additional: models.AdditionalResults,
+            label_ids: torch.Tensor | None = None,
+            ignore_index: int = -100,
+            reduction: Literal["sum", "none"] = "sum",
+            ) -> torch.Tensor:
+        assert "embeddings" in additional
+        assert "activations" in additional
+        return losses.cosine_loss(
+            additional["embeddings"], additional["activations"],
+            label_ids, ignore_index, reduction=reduction,
+            prefix_dummies=2)
+
+    def additional_losses(
+            self, additional: models.AdditionalResults,
+            to_ignore_mask: torch.BoolTensor | Literal[
+                "triangular"] | None = "triangular",
+            label_ids: torch.Tensor | None = None,
+            ignore_index: int = -100,
+            reduction: Literal["sum", "none"] = "sum"
+            ) -> dict[str, torch.Tensor]:
+        additional_losses = self.attention_losses(
+            additional, to_ignore_mask=to_ignore_mask,
+            reduction=reduction,
+            label_ids=label_ids, ignore_index=ignore_index)
+        assert self.config.losses is not None
+        if "cosine" in self.config.losses.keys():
+            additional_losses["cosine"] = self.cosine_loss(
+                additional, label_ids, ignore_index=ignore_index,
+                reduction=reduction
+            )
+        return additional_losses
 
     @staticmethod
     def filter_arc_scores(
@@ -642,7 +676,17 @@ class LMTrainer():
                 and self.config.distr_mode == "att-n"),
             return_att=(
                 self.config.combined_loss
-                and self.config.distr_mode == "att"))
+                and self.config.distr_mode == "att"),
+            return_embeddings=(
+                self.config.combined_loss
+                and self.config.losses is not None
+                and "cosine" in self.config.losses
+            ),
+            return_activations=(
+                self.config.combined_loss
+                and self.config.losses is not None
+                and "cosine" in self.config.losses
+            ))
 
         self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
@@ -693,10 +737,10 @@ class LMTrainer():
                     "Scores did not align. Check keys.")
 
         elif self.config.combined_loss:
-            additional_losses = self.attention_losses(
+            additional_losses = self.additional_losses(
                 additional, to_ignore_mask="triangular",
-                reduction="sum",
-                label_ids=batch["label_ids"], ignore_index=ignore_index)
+                label_ids=batch["label_ids"], ignore_index=ignore_index,
+                reduction="sum")
         del additional
 
         num_instances = int((batch["label_ids"] != ignore_index).sum().item())
@@ -751,7 +795,17 @@ class LMTrainer():
                 and self.config.distr_mode == "att-n"),
             return_att=(
                 self.config.combined_loss
-                and self.config.distr_mode == "att"))
+                and self.config.distr_mode == "att"),
+            return_embeddings=(
+                self.config.combined_loss
+                and self.config.losses is not None
+                and "cosine" in self.config.losses
+            ),
+            return_activations=(
+                self.config.combined_loss
+                and self.config.losses is not None
+                and "cosine" in self.config.losses
+            ))
         self.run_hooks(batch, (logits, arc_logits))
         # remove from arc_scores those that should not be used...
 
@@ -840,12 +894,10 @@ class LMTrainer():
                     for key, logits_preds in score_logits.items()})
                 # can make separate list of heads
         elif self.config.combined_loss:
-            additional_losses = self.attention_losses(
-                additional,
-                to_ignore_mask="triangular",
-                reduction="sum",
-                label_ids=batch["label_ids"],
-                ignore_index=ignore_index)
+            additional_losses = self.additional_losses(
+                additional, to_ignore_mask="triangular",
+                label_ids=batch["label_ids"], ignore_index=ignore_index,
+                reduction="sum")
 
         metric = self.get_metric(
             num_instances,
@@ -1115,7 +1167,9 @@ class LMTrainer():
             token_mapper: data.TokenMapper | None = None,
             return_arc_logits: bool | None = None,
             return_proj_states: bool | None = None,
-            return_att: bool | None = None
+            return_att: bool | None = None,
+            return_embeddings: bool | None = None,
+            return_activations: bool | None = None
             ) -> tuple[
                 list[torch.Tensor], dict[str, list[torch.Tensor]],
                 AdditionalPrediction]:
@@ -1160,11 +1214,25 @@ class LMTrainer():
                     return_att = (
                         self.config.combined_loss
                         and self.config.distr_mode == "att")
+                if return_embeddings is None:
+                    return_embeddings = (
+                        self.config.combined_loss
+                        and self.config.losses is not None
+                        and "cosine" in self.config.losses
+                    )
+                if return_activations is None:
+                    return_activations = (
+                        self.config.combined_loss
+                        and self.config.losses is not None
+                        and "cosine" in self.config.losses
+                    )
                 logits, arc_logits, additional = self.transformerlm(
                     **batch,
                     return_arc_logits=return_arc_logits,
                     return_proj_states=return_proj_states,
-                    return_att=return_att)
+                    return_att=return_att,
+                    return_embeddings=return_embeddings,
+                    return_activations=return_activations)
 
                 self.run_hooks(batch, (logits, arc_logits))
                 labels = batch["label_ids"]
@@ -1201,6 +1269,18 @@ class LMTrainer():
                                         0, 1),
                                 labels, ignore_index,
                                 num_after_square=num_after_square))
+
+                for additional_key in ("embeddings", "activations"):
+                    if additional_key in additional:  # type: ignore
+                        unpadded_additional[additional_key].extend(
+                            functions.unpad(
+                                additional[additional_key],
+                                labels, ignore_index
+                            )
+                        )
+                        # probably removes embedding of <EOS> and
+                        # prediction of first padding token.
+                        # <EOS> dot pred(.) is part of loss.
 
         # This should collect the data across all processes.
         # The distributed sampler chunked it in an interleaved

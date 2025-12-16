@@ -26,3 +26,13 @@ def entropy(
     # attention: this was originally log_e
     entropy = -(probs*logprobs)
     return reduce(entropy, reduction)
+
+
+def shift_ignore_mask(mask: torch.Tensor) -> torch.Tensor:
+    """
+    input/outputs: [..., S].
+    Prepends 'False' to front of sequence and cuts of last element"""
+
+    mask[..., 1:] = mask[..., :-1].clone()
+    mask[..., 0] = False
+    return mask

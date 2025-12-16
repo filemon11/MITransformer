@@ -58,7 +58,8 @@ class CostsMetric(LMMetric, base.WeightedMetric):
         "attention_entropy_loss": field.attention_entropy_loss,
         "attention_distance_loss": field.attention_distance_loss,
         "attention_difference_loss": field.attention_difference_loss,
-        "attention_activation_loss": field.attention_activation_loss
+        "attention_activation_loss": field.attention_activation_loss,
+        "cosine_loss": field.cosine_loss,
     }
 
 

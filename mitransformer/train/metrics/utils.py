@@ -31,7 +31,8 @@ minimise = {"lm_loss": True,
             "attention_distance_loss": True,
             "attention_difference_loss": True,
             "attention_activation_loss": True,
-            "attention_entropy_loss": True
+            "attention_entropy_loss": True,
+            "cosine_loss": True,
             }
 
 

@@ -21,12 +21,15 @@ from typing import (
     Sequence, Mapping, Literal, TypedDict, NotRequired)
 
 
-AdditionalKeys = Literal["proj_states", "att"]
+AdditionalKeys = Literal[
+    "proj_states", "att", "activations", "embeddings"]
 
 
 class AdditionalResults(TypedDict):
     proj_states: NotRequired[torch.Tensor]
     att: NotRequired[torch.Tensor]
+    embeddings: NotRequired[torch.Tensor]
+    activations: NotRequired[torch.Tensor]
 
 
 def combine_scores(
@@ -704,6 +707,7 @@ class MITransformer(nn.Module):
             return_arc_logits: bool = False,
             return_proj_states: bool = False,
             return_att: bool = False,
+            return_embeddings: bool = False,
             **kwargs
             ) -> tuple[
                 torch.Tensor, None | dict[str, torch.Tensor],
@@ -728,6 +732,7 @@ class MITransformer(nn.Module):
             pos_emb = self.wpe(S)
 
         x = self.embd_dropout(tok_emb + pos_emb)
+        del pos_emb
 
         if self.lstm is not None:
             # x = self.lstm(x)[0]
@@ -763,6 +768,9 @@ class MITransformer(nn.Module):
         if return_arc_logits:
             out_logits = combine_scores(att_logits)
 
+        if return_embeddings:
+            additional_stacked["embeddings"] = tok_emb
+
         return x, out_logits, additional_stacked
 
 
@@ -797,6 +805,8 @@ class MITransformerLM(nn.Module):
             return_arc_logits: bool = False,
             return_proj_states: bool = False,
             return_att: bool = False,
+            return_embeddings: bool = False,
+            return_activations: bool = False,
             **kwargs
             ) -> tuple[
                 torch.Tensor, None | dict[str, torch.Tensor],
@@ -816,14 +826,15 @@ class MITransformerLM(nn.Module):
             input_ids, masks,
             return_arc_logits=return_arc_logits,
             return_proj_states=return_proj_states,
-            return_att=return_att)
+            return_att=return_att,
+            return_embeddings=return_embeddings)
 
         x = self.ln(x)
         logits = self.lm_head(x)
 
-        # shape (B,T,C)  B : batch, T : sequence length, C : embedding dim
+        if return_activations:
+            additional["activations"] = x
 
-        # logits = x @ self.embds
         return logits, att_logits, additional
 
     def generate(self, input_ids: torch.Tensor, max_new_tokens: int, **kwargs):

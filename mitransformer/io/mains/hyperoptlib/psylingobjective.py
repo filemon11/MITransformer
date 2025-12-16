@@ -98,9 +98,13 @@ class PsyLingObjective(objective.Objective):
                 transform = self.data_provider.datasets[
                     "train"].dataset.transform_mask  # type: ignore
 
+            to_add = ["surprisal", *set(self.lme_formula[
+                    "covariates"]) - set(readingtimes.BASELINE_METRICS)]
+            to_add = [ta for ta in to_add if "." not in ta]
+            # no spillover versions
+
             add_method(
-                "surprisal", *set(self.lme_formula[
-                    "covariates"]) - set(readingtimes.BASELINE_METRICS),
+                *to_add,
                 masked=self.arguments.masked,
                 token_mapper_dir=self.data_provider.datasets["token_mapper"],
                 transform=transform, trainer=trainer,
@@ -119,6 +123,8 @@ class PsyLingObjective(objective.Objective):
             frame = frame.include_spillover(self.arguments.shift)
             frame.truncate_(right=1)
             unsplit_frame = frame.unsplit()
+
+            print(unsplit_frame.df.head(n=10))
 
             # Joining
             # This may take some time. Should we precompute this,

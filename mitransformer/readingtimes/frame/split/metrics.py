@@ -898,6 +898,34 @@ class SplitTokMetricMakerAttentionActivation(SplitTokMetricMaker):
         }
 
 
+class SplitTokMetricMakerCosine(SplitTokMetricMaker):
+    def __init__(
+            self,
+            *args, **kwargs):
+        pass
+
+    def __call__(
+            self,
+            df: pd.DataFrame,
+            embeddings: Iterable[torch.Tensor],
+            activations: Iterable[torch.Tensor],
+            *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
+
+        cosine: list[np.ndarray] = [
+            losses.cosine_loss(
+                embeddings=emb,
+                activations=act,
+                reduction="none",
+                )[2:].numpy() for emb, act in zip(
+                    embeddings, activations
+                )]
+
+        return pd.Series(cosine), {
+            "embeddings": embeddings,
+            "activations": activations,
+        }
+
+
 class SplitTokMetricMakerKLDivergence(SplitTokMetricMaker):
     def __init__(
             self, mask_col: str, *args, **kwargs):
@@ -1769,6 +1797,9 @@ gen_and_untok: dict[str, tuple[
             True, UntokSplitAdd, True),  # TODO: choose correct untok
         "attention_activation": (
             SplitTokMetricMakerAttentionActivation,
+            True, UntokSplitAdd, True),  # TODO: choose correct untok
+        "cosine": (
+            SplitTokMetricMakerCosine,
             True, UntokSplitAdd, True),  # TODO: choose correct untok
     }
 

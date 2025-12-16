@@ -4,20 +4,10 @@ from . import utils
 from typing import Literal
 
 
-def shift_ignore_mask(mask: torch.Tensor) -> torch.Tensor:
-    """
-    input/outputs: [..., S].
-    Prepends 'False' to front of sequence and cuts of last element"""
-
-    mask[..., 1:] = mask[..., :-1].clone()
-    mask[..., 0] = False
-    return mask
-
-
 def attention_entropy_loss(
         arc_distributions: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
-        reduction: Literal["sum", "mean", "none"] = "mean",
+        reduction: Literal["sum", "none"] = "sum",
         label_ids: torch.Tensor | None = None,
         ignore_index: int = -100,
         global_distr: bool = True,
@@ -50,7 +40,7 @@ def attention_entropy_loss(
         entropy = entropy.mean(-2)  # [B, H, S] -> [B, S]
 
     if label_ids is not None:
-        entropy[shift_ignore_mask(label_ids == ignore_index)] = 0
+        entropy[utils.shift_ignore_mask(label_ids == ignore_index)] = 0
 
     reduced = utils.reduce(entropy, reduction)
     return reduced
@@ -59,7 +49,7 @@ def attention_entropy_loss(
 def attention_distance_loss(
         probs: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
-        reduction: Literal["sum", "mean", "none"] = "mean",
+        reduction: Literal["sum", "none"] = "sum",
         label_ids: torch.Tensor | None = None,
         ignore_index: int = -100,
         global_distr: bool = True,
@@ -124,14 +114,14 @@ def attention_distance_loss(
         distances = torch.div(distances, norm_vector)
 
     if label_ids is not None:
-        distances[shift_ignore_mask(label_ids == ignore_index)] = 0
+        distances[utils.shift_ignore_mask(label_ids == ignore_index)] = 0
     return utils.reduce(distances, reduction)
 
 
 def attention_difference_loss(
         probs: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
-        reduction: Literal["sum", "mean", "none"] = "mean",
+        reduction: Literal["sum", "none"] = "sum",
         label_ids: torch.Tensor | None = None,
         ignore_index: int = -100,
         global_distr: bool = True,
@@ -208,14 +198,14 @@ def attention_difference_loss(
         difference = torch.div(difference, norm_vector)
 
     if label_ids is not None:
-        difference[shift_ignore_mask(label_ids == ignore_index)] = 0
+        difference[utils.shift_ignore_mask(label_ids == ignore_index)] = 0
     return utils.reduce(difference, reduction)
 
 
 def attention_activation_loss(
         probs: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
-        reduction: Literal["sum", "mean", "none"] = "mean",
+        reduction: Literal["sum", "none"] = "sum",
         label_ids: torch.Tensor | None = None,
         ignore_index: int = -100,
         global_distr: bool = True,
@@ -281,10 +271,8 @@ def attention_activation_loss(
 
         weight = torch.div(weight, norm_vector)
 
-    # print(weight[..., :6])
-
     if label_ids is not None:
-        weight[shift_ignore_mask(label_ids == ignore_index)] = 0
+        weight[utils.shift_ignore_mask(label_ids == ignore_index)] = 0
     return utils.reduce(weight, reduction)
 
 
@@ -299,7 +287,7 @@ def get_head_averaged_distribution(
 def get_attention_entropy(
         probs: torch.Tensor,
         to_ignore: torch.Tensor | Literal["triangular"] | None = None,
-        reduction: Literal["sum", "mean", "none"] = "mean",
+        reduction: Literal["sum", "none"] = "sum",
         include_current: bool = True,
         length_weighted: bool = False,
         prefix_dummies: int = 2) -> torch.Tensor:
