@@ -11,7 +11,7 @@ def cosine_loss(
         embeddings: torch.Tensor,
         activations: torch.Tensor,
         label_ids: torch.Tensor | None = None,
-        ignore_index: int = -100,
+        ignore_index: int | None = -100,
         reduction: Literal["sum", "mean", "none"] = "mean",
         prefix_dummies: int = 2) -> torch.Tensor:
     """_summary_
@@ -45,7 +45,7 @@ def cosine_loss(
     zeros = loss.new_zeros([*loss.shape[:-1], 1])
     loss = torch.cat((zeros, loss), dim=-1)
 
-    if label_ids is not None:
+    if label_ids is not None and ignore_index is not None:
         loss[utils.shift_ignore_mask(label_ids == ignore_index)] = 0
 
     return utils.reduce(loss, reduction=reduction)

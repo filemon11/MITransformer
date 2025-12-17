@@ -41,6 +41,9 @@ torch.autograd.set_detect_anomaly(True)
 class AdditionalPrediction(TypedDict):
     proj_states: NotRequired[list[torch.Tensor]]
     att: list[torch.Tensor]
+    embeddings: list[torch.Tensor]
+    activations: list[torch.Tensor]
+    logits: list[torch.Tensor]
 
 
 class Result(TypedDict):
@@ -1169,7 +1172,8 @@ class LMTrainer():
             return_proj_states: bool | None = None,
             return_att: bool | None = None,
             return_embeddings: bool | None = None,
-            return_activations: bool | None = None
+            return_activations: bool | None = None,
+            return_logits: bool | None = None
             ) -> tuple[
                 list[torch.Tensor], dict[str, list[torch.Tensor]],
                 AdditionalPrediction]:
@@ -1237,6 +1241,14 @@ class LMTrainer():
                 self.run_hooks(batch, (logits, arc_logits))
                 labels = batch["label_ids"]
 
+                if return_logits:
+                    unpadded_additional["logits"].extend(
+                            functions.unpad(
+                                logits,
+                                labels, ignore_index
+                                )
+                            )
+
                 if make_prob:
                     logits = functions.logits_to_probs(
                         logits,
@@ -1274,7 +1286,7 @@ class LMTrainer():
                     if additional_key in additional:  # type: ignore
                         unpadded_additional[additional_key].extend(
                             functions.unpad(
-                                additional[additional_key],
+                                additional[additional_key],  # type: ignore
                                 labels, ignore_index
                             )
                         )
