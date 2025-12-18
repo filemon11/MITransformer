@@ -273,7 +273,9 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 dataset,
                 make_prob=True,
                 only_true=True,
-                return_arc_logits=True)
+                return_arc_logits=True,
+                return_logits=True,
+                return_label_ids=True)
 
             if trainer.config.device != "cpu":
                 attention_logits = {
@@ -636,10 +638,10 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
     def __call__(
             self,
             df: pd.DataFrame,
-            arc_distr: Iterable[torch.Tensor] | None = None,
+            arc_distr: Sequence[torch.Tensor] | None = None,
             arc_distr_mode: Literal["att", "att-n"] | None = None,
-            att: Iterable[torch.Tensor] | None = None,
-            proj_states: Iterable[torch.Tensor] | None = None,
+            att: Sequence[torch.Tensor] | None = None,
+            proj_states: Sequence[torch.Tensor] | None = None,
             include_current: bool = False,
             length_weighted: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
@@ -704,10 +706,10 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
     def __call__(
             self,
             df: pd.DataFrame,
-            arc_distr: Iterable[torch.Tensor] | None = None,
+            arc_distr: Sequence[torch.Tensor] | None = None,
             arc_distr_mode: Literal["att", "att-n"] | None = None,
-            att: Iterable[torch.Tensor] | None = None,
-            proj_states: Iterable[torch.Tensor] | None = None,
+            att: Sequence[torch.Tensor] | None = None,
+            proj_states: Sequence[torch.Tensor] | None = None,
             include_current: bool = False,
             length_weighted: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
@@ -771,10 +773,10 @@ class SplitTokMetricMakerAttentionDifference(SplitTokMetricMaker):
     def __call__(
             self,
             df: pd.DataFrame,
-            arc_distr: Iterable[torch.Tensor] | None = None,
+            arc_distr: Sequence[torch.Tensor] | None = None,
             arc_distr_mode: Literal["att", "att-n"] | None = None,
-            att: Iterable[torch.Tensor] | None = None,
-            proj_states: Iterable[torch.Tensor] | None = None,
+            att: Sequence[torch.Tensor] | None = None,
+            proj_states: Sequence[torch.Tensor] | None = None,
             include_current: bool = False,
             length_weighted: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
@@ -839,10 +841,10 @@ class SplitTokMetricMakerAttentionActivation(SplitTokMetricMaker):
     def __call__(
             self,
             df: pd.DataFrame,
-            arc_distr: Iterable[torch.Tensor] | None = None,
+            arc_distr: Sequence[torch.Tensor] | None = None,
             arc_distr_mode: Literal["att", "att-n"] | None = None,
-            att: Iterable[torch.Tensor] | None = None,
-            proj_states: Iterable[torch.Tensor] | None = None,
+            att: Sequence[torch.Tensor] | None = None,
+            proj_states: Sequence[torch.Tensor] | None = None,
             include_current: bool = False,
             length_weighted: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
@@ -907,8 +909,8 @@ class SplitTokMetricMakerCosine(SplitTokMetricMaker):
     def __call__(
             self,
             df: pd.DataFrame,
-            embeddings: Iterable[torch.Tensor],
-            activations: Iterable[torch.Tensor],
+            embeddings: Sequence[torch.Tensor],
+            activations: Sequence[torch.Tensor],
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
 
         cosine: list[np.ndarray] = [
@@ -923,6 +925,33 @@ class SplitTokMetricMakerCosine(SplitTokMetricMaker):
         return pd.Series(cosine), {
             "embeddings": embeddings,
             "activations": activations,
+        }
+
+
+class SplitTokMetricMakerSurprox(SplitTokMetricMaker):
+    def __init__(
+            self,
+            *args, **kwargs):
+        pass
+
+    def __call__(
+            self,
+            df: pd.DataFrame,
+            logits: Sequence[torch.Tensor],
+            label_ids: Sequence[torch.Tensor],
+            *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
+
+        surprox: list[np.ndarray] = [
+            losses.surprox_loss(
+                lgts,
+                lbl_ids,
+                reduction="none",
+                )[2:].numpy() for lgts, lbl_ids in zip(
+                    logits, label_ids)
+                ]
+
+        return pd.Series(surprox), {
+            "logits": logits
         }
 
 
@@ -1800,6 +1829,9 @@ gen_and_untok: dict[str, tuple[
             True, UntokSplitAdd, True),  # TODO: choose correct untok
         "cosine": (
             SplitTokMetricMakerCosine,
+            True, UntokSplitAdd, True),  # TODO: choose correct untok
+        "surprox": (
+            SplitTokMetricMakerSurprox,
             True, UntokSplitAdd, True),  # TODO: choose correct untok
     }
 

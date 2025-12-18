@@ -44,6 +44,7 @@ class AdditionalPrediction(TypedDict):
     embeddings: list[torch.Tensor]
     activations: list[torch.Tensor]
     logits: list[torch.Tensor]
+    label_ids: list[torch.Tensor]
 
 
 class Result(TypedDict):
@@ -469,12 +470,24 @@ class LMTrainer():
             label_ids, ignore_index, reduction=reduction,
             prefix_dummies=2)
 
+    def surprox_loss(
+            self,
+            logits: torch.Tensor,
+            label_ids: torch.Tensor,
+            ignore_index: int = -100,
+            reduction: Literal["sum", "none"] = "sum",
+            ) -> torch.Tensor:
+        return losses.surprox_loss(
+            logits, label_ids, ignore_index, reduction=reduction,
+            prefix_dummies=2)
+
     def additional_losses(
             self, additional: models.AdditionalResults,
             to_ignore_mask: torch.BoolTensor | Literal[
                 "triangular"] | None = "triangular",
             label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
+            logits: torch.Tensor | None = None,
             reduction: Literal["sum", "none"] = "sum"
             ) -> dict[str, torch.Tensor]:
         additional_losses = self.attention_losses(
@@ -487,6 +500,12 @@ class LMTrainer():
                 additional, label_ids, ignore_index=ignore_index,
                 reduction=reduction
             )
+        if "surprox" in self.config.losses.keys():
+            assert logits is not None
+            assert label_ids is not None
+            additional_losses["surprox"] = self.surprox_loss(
+                logits, label_ids,
+                ignore_index=ignore_index, reduction=reduction)
         return additional_losses
 
     @staticmethod
@@ -742,6 +761,7 @@ class LMTrainer():
         elif self.config.combined_loss:
             additional_losses = self.additional_losses(
                 additional, to_ignore_mask="triangular",
+                logits=logits,
                 label_ids=batch["label_ids"], ignore_index=ignore_index,
                 reduction="sum")
         del additional
@@ -825,7 +845,6 @@ class LMTrainer():
                 ignore_index,
                 softmax=not self.config.discriminative),
             labels, ignore_index).sum().detach().cpu().item()
-        del logits
         del labels
 
         uas_abs: None | pd.DataFrame | float = None
@@ -899,8 +918,10 @@ class LMTrainer():
         elif self.config.combined_loss:
             additional_losses = self.additional_losses(
                 additional, to_ignore_mask="triangular",
+                logits=logits,
                 label_ids=batch["label_ids"], ignore_index=ignore_index,
                 reduction="sum")
+        del logits
 
         metric = self.get_metric(
             num_instances,
@@ -1173,7 +1194,8 @@ class LMTrainer():
             return_att: bool | None = None,
             return_embeddings: bool | None = None,
             return_activations: bool | None = None,
-            return_logits: bool | None = None
+            return_logits: bool | None = None,
+            return_label_ids: bool = False
             ) -> tuple[
                 list[torch.Tensor], dict[str, list[torch.Tensor]],
                 AdditionalPrediction]:
@@ -1293,6 +1315,13 @@ class LMTrainer():
                         # probably removes embedding of <EOS> and
                         # prediction of first padding token.
                         # <EOS> dot pred(.) is part of loss.
+
+                if return_label_ids:
+                    unpadded_additional["label_ids"].extend(
+                        functions.unpad(
+                            labels, labels, ignore_index
+                        )
+                    )
 
         # This should collect the data across all processes.
         # The distributed sampler chunked it in an interleaved

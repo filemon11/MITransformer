@@ -89,5 +89,6 @@ attention_distance_loss = loss("num")
 attention_difference_loss = loss("num")
 attention_activation_loss = loss("num")
 cosine_loss = loss("num")
+surprox_loss = loss("num")
 
 weight = MetricField(1.0, static=True)

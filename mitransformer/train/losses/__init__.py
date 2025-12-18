@@ -6,3 +6,4 @@ from .attention import (  # noqa: F401
     attention_activation_loss)
 from .utils import entropy  # noqa: F401
 from .cosine import cosine_loss  # noqa: F401
+from .surprox import surprox_loss  # noqa: F401

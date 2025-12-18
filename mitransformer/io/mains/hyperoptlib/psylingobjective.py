@@ -124,7 +124,8 @@ class PsyLingObjective(objective.Objective):
             frame.truncate_(right=1)
             unsplit_frame = frame.unsplit()
 
-            print(unsplit_frame.df.head(n=10))
+            print(unsplit_frame.df[
+                ["word", "surprisal", "cosine"]].head(n=10))
 
             # Joining
             # This may take some time. Should we precompute this,

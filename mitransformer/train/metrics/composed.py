@@ -60,6 +60,7 @@ class CostsMetric(LMMetric, base.WeightedMetric):
         "attention_difference_loss": field.attention_difference_loss,
         "attention_activation_loss": field.attention_activation_loss,
         "cosine_loss": field.cosine_loss,
+        "surprox_loss": field.surprox_loss,
     }
 
 

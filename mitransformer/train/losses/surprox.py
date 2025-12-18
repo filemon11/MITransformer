@@ -6,7 +6,7 @@ from . import utils
 from typing import Literal
 
 
-def cosine_loss(
+def surprox_loss(
         logits: torch.Tensor,
         label_ids: torch.Tensor,
         ignore_index: int | None = -100,
@@ -18,8 +18,8 @@ def cosine_loss(
         label_ids[label_ids == ignore_index] = 0
 
     cost: torch.Tensor = torch.max(
-        logits, dim=-1) - torch.gather(
-            logits, -1, label_ids).squeeze(-1)  # type: ignore
+        logits, dim=-1)[0] - torch.gather(
+            logits, -1, label_ids.unsqueeze(-1)).squeeze(-1)
 
     if prefix_dummies > 1:
         cost[..., :prefix_dummies-1] = 0
