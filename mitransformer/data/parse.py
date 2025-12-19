@@ -125,9 +125,11 @@ def parse_natural_stories_with_spacy(
         tsv_file: str = TSV,
         output_dir: str = OUTPUT_DIR,
         output_file_name: str = "natural_stories_spacy.conllu",
-        min_len: int | None = None) -> None:
+        min_len: int | None = None,
+        verbose: bool = False) -> None:
     """Files should not exist or be empty"""
-    tokens = naturalstories.load_natural_stories(tsv_file)[0]
+    tokens = naturalstories.load_natural_stories(
+        tsv_file, verbose=verbose)[0]
     save_doc_as_conllu(
         parse(" ".join(tokens)),
         os.path.join(output_dir, output_file_name),

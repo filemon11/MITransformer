@@ -5,6 +5,7 @@ from ... import parsing
 from .. import train
 from . import objective, sampler
 
+import os
 import optuna
 
 from mitransformer.utils.logmaker import (
@@ -30,9 +31,13 @@ class PsyLingObjective(objective.Objective):
             f"{arguments.lme_formula['formula']}")
 
         # Load candidates
+        assert self.data_provider is not None
         psyling_df = readingtimes.io_corpus_convert(
             "custom", arguments.psyling_dataset,
-            data.rt_corpus_to_text_file[arguments.psyling_dataset])
+            data.rt_corpus_to_text_file[arguments.psyling_dataset],
+            verbose=True,
+            token_mapper_dir=os.path.join(data.dataset_details[
+                self.arguments.dataset_name]["tokmap_dir"], "mapper"))
         psyling_df.fillna("NaN")
 
         orig_frame = readingtimes.UnsplitFrame(

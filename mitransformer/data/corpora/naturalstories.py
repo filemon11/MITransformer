@@ -2,13 +2,16 @@
 from a .tsv file.
 """
 
+import tqdm
+
 from .. import tokeniser
 
 
 def load_natural_stories(
         input_file: str,
         make_lower: bool = True,
-        token_mapper_dir: str | None = None
+        token_mapper_dir: str | None = None,
+        verbose: bool = False
         ) -> tuple[list[str], list[int], list[int]]:
     """Load natural stories corpus from tsv file.
 
@@ -43,7 +46,10 @@ def load_natural_stories(
     story_ids: list[int] = []
     word_ids: list[int] = []
     with open(input_file, "r") as file:
-        for line in file:
+        for line in tqdm.tqdm(
+                file,
+                "Loading naturalstories corpus",
+                disable=not verbose):
             line.strip()
             token_id, token = line.split("\t")
             token = token[:-1]

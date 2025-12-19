@@ -53,6 +53,7 @@ def prepare_RTs_zuco(
         ) -> None | pd.DataFrame:
     df = pd.read_csv(input_file)
     df = df.rename(columns={"sentence_id": "item", "word_id": "zone"})
+    # TODO: Load correct corpus data and not aggregated over participants
     df["WorkerId"] = 1
     if output_file is None:
         return df

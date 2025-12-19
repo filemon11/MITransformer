@@ -44,7 +44,8 @@ def corpus_to_df(
         text_id_col: str = TEXT_ID_COL,
         wnum_col: str = WNUM_COL,
         token_mapper_dir: str | None = None,
-        make_lower: bool = True
+        make_lower: bool = True,
+        verbose: bool = False,
         ) -> pd.DataFrame:
     corpus_to_func: dict[Corpus, CorpusLoader] = {
         "naturalstories": load_natural_stories,
@@ -57,7 +58,8 @@ def corpus_to_df(
 
     tokens, text_ids, wnums = func(
         input_file, token_mapper_dir=token_mapper_dir,
-        make_lower=make_lower)
+        make_lower=make_lower,
+        verbose=verbose)
     # making lowercase makes no difference
 
     df = pd.DataFrame({
@@ -77,7 +79,8 @@ def io_corpus_convert(
         token_col: str = TOKEN_COL,
         text_id_col: str = TEXT_ID_COL,
         wnum_col: str = WNUM_COL,
-        token_mapper_dir: None = None,
+        token_mapper_dir: str | None = None,
+        verbose: bool = False
         ) -> pd.DataFrame:
     ...
 
@@ -91,7 +94,8 @@ def io_corpus_convert(
         token_col: str = TOKEN_COL,
         text_id_col: str = TEXT_ID_COL,
         wnum_col: str = WNUM_COL,
-        token_mapper_dir: None = None,
+        token_mapper_dir: str | None = None,
+        verbose: bool = False
         ) -> None:
     ...
 
@@ -104,7 +108,8 @@ def io_corpus_convert(
         token_col: str = TOKEN_COL,
         text_id_col: str = TEXT_ID_COL,
         wnum_col: str = WNUM_COL,
-        token_mapper_dir: str | None = None
+        token_mapper_dir: str | None = None,
+        verbose: bool = False
         ) -> pd.DataFrame | None:
     if os.path.split(model_dir)[1][:4] == "hug:":
         df = corpus_to_df(
@@ -112,14 +117,16 @@ def io_corpus_convert(
             input_file,
             token_col, text_id_col,
             wnum_col, token_mapper_dir,
-            make_lower=False)
+            make_lower=False,
+            verbose=verbose)
     else:
         # Convert original format to sensible csv
         df = corpus_to_df(
             corpus,
             input_file,
             token_col, text_id_col,
-            wnum_col, token_mapper_dir)
+            wnum_col, token_mapper_dir,
+            verbose=verbose)
 
     if output_file is None:
         return df

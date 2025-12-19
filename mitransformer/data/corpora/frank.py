@@ -1,4 +1,5 @@
 from transformers import AutoTokenizer  # type: ignore
+import tqdm
 
 from .. import tokeniser
 
@@ -6,7 +7,8 @@ from .. import tokeniser
 def load_frank(
         input_file: str,
         make_lower: bool = True,
-        token_mapper_dir: str | None = None
+        token_mapper_dir: str | None = None,
+        verbose: bool = False
         ) -> tuple[list[str], list[int], list[int]]:
     """Load natural stories corpus from tsv file.
 
@@ -47,7 +49,10 @@ def load_frank(
     with open(input_file, mode="r", encoding='cp1252') as file:
         file_iter = iter(file)
         next(file_iter)
-        for sentence_id, line in enumerate(file_iter, start=1):
+        for sentence_id, line in tqdm.tqdm(
+                enumerate(file_iter, start=1),
+                "Loading frank corpus",
+                disable=not verbose):
             sentence = line.split("\t")[1]
 
             for word_id, word in enumerate(sentence.split(), start=1):
@@ -66,5 +71,4 @@ def load_frank(
                 words.append(word)
                 sentence_ids.append(sentence_id)
                 word_ids.append(word_id)
-
     return words, sentence_ids, word_ids

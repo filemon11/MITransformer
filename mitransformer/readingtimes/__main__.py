@@ -39,7 +39,8 @@ if __name__ == "__main__":
 
     preparation.io_corpus_convert(
         model_name, corpus, in_file,
-        output_file=out_file)
+        output_file=out_file,
+        verbose=True)
 
     preparation.process(
         out_file, out_file, model_name, mapper,

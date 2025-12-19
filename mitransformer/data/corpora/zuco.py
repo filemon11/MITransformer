@@ -11,7 +11,8 @@ from .. import tokeniser
 def load_zuco(
         input_file: str,
         make_lower: bool = True,
-        token_mapper_dir: str | None = None
+        token_mapper_dir: str | None = None,
+        verbose: bool = False
         ) -> tuple[list[str], list[int], list[int]]:
     """Load natural stories corpus from csv file.
 
