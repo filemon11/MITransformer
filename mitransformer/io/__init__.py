@@ -5,4 +5,4 @@ from .parsing import (  # noqa: F401
     DataprepParserArgs, TestParserArgs,
     CompareParserArgs, RTParserArgs, Undefined,
     create_parser, OptNone, str_to_bool, HyperoptSpace,
-    StrToLiteral)
+    StrToLiteral, SplitParserArgs)

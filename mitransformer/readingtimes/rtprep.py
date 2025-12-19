@@ -1,12 +1,24 @@
 import pandas as pd
 
-from typing import Literal, overload
+from typing import Literal, overload, Protocol
 
-Corpus = Literal["naturalstories", "zuco", "frank_ET", "frank_SP"]
+Corpus = Literal[
+    "naturalstories", "naturalstories_train", "naturalstories_test",
+    "zuco",
+    "frank_ET", "frank_ET_train", "frank_ET_test",
+    "frank_SP", "frank_SP_train", "frank_SP_test"]
 CorpusTypes = Literal["ET", "SP"]
-CORPORA = {"naturalstories", "zuco", "frank_ET", "frank_SP"}
-ET_CORPORA = {"frank_ET", "zuco"}
-SP_CORPORA = {"naturalstories", "frank_SP"}
+CORPORA = {
+    "naturalstories", "naturalstories_train", "naturalstories_test",
+    "zuco",
+    "frank_ET", "frank_ET_train", "frank_ET_test",
+    "frank_SP", "frank_SP_train", "frank_SP_test"}
+ET_CORPORA = {
+    "frank_ET", "frank_ET_train", "frank_ET_test",
+    "zuco"}
+SP_CORPORA = {
+    "naturalstories", "naturalstories_train", "naturalstories_test"
+    "frank_SP", "frank_SP_train", "frank_SP_test"}
 
 
 @overload
@@ -18,16 +30,17 @@ def prepare_RTs_naturalstories(
 
 @overload
 def prepare_RTs_naturalstories(
-        input_file: str, output_file: None
+        input_file: str, output_file: None = None
         ) -> pd.DataFrame:
     ...
 
 
 def prepare_RTs_naturalstories(
-        input_file: str, output_file: str | None
+        input_file: str, output_file: str | None = None
         ) -> None | pd.DataFrame:
     # TODO simply copy the file
     df = pd.read_csv(input_file, sep='\t', header=0)
+    df["Corpus"] = "naturalstories"
     if output_file is None:
         return df
     df.to_csv(output_file)
@@ -43,7 +56,7 @@ def prepare_RTs_zuco(
 
 @overload
 def prepare_RTs_zuco(
-        input_file: str, output_file: None
+        input_file: str, output_file: None = None
         ) -> pd.DataFrame:
     ...
 
@@ -70,7 +83,7 @@ def prepare_RTs_frank_ET(
 
 @overload
 def prepare_RTs_frank_ET(
-        input_file: str, output_file: None
+        input_file: str, output_file: None = None
         ) -> pd.DataFrame:
     ...
 
@@ -87,6 +100,7 @@ def prepare_RTs_frank_ET(
         "RTgopast": "GPT",
         "RTfirstpass": "GD",
         "RTrightbound": "RBT"})
+    df["Corpus"] = "frank_ET"
     if output_file is None:
         return df
     df.to_csv(output_file)
@@ -102,7 +116,7 @@ def prepare_RTs_frank_SP(
 
 @overload
 def prepare_RTs_frank_SP(
-        input_file: str, output_file: None
+        input_file: str, output_file: None = None
         ) -> pd.DataFrame:
     ...
 
@@ -115,6 +129,7 @@ def prepare_RTs_frank_SP(
         "subj_nr": "WorkerId",
         "sent_nr": "item",
         "word_pos": "zone"})
+    df["Corpus"] = "frank_SP"
     if output_file is None:
         return df
     df.to_csv(output_file)
@@ -141,10 +156,36 @@ def prepare_RTs(
         input_file: str, output_file: str | None = None,
         corpus: Corpus = "naturalstories"
         ) -> None | pd.DataFrame:
-    corpus_to_func = {
+    corpus_to_func: dict[str, CorpusPreparer] = {
         "naturalstories": prepare_RTs_naturalstories,
+        "naturalstories_train": prepare_RTs_naturalstories,
+        "naturalstories_test": prepare_RTs_naturalstories,
         "zuco": prepare_RTs_zuco,
         "frank_ET": prepare_RTs_frank_ET,
-        "frank_SP": prepare_RTs_frank_SP
+        "frank_ET_train": prepare_RTs_frank_ET,
+        "frank_ET_test": prepare_RTs_frank_ET,
+        "frank_SP": prepare_RTs_frank_SP,
+        "frank_SP_train": prepare_RTs_frank_SP,
+        "frank_SP_test": prepare_RTs_frank_SP,
     }
     return corpus_to_func[corpus](input_file, output_file)
+
+
+class CorpusPreparer(Protocol):
+    @overload
+    def __call__(
+            self, input_file: str, output_file: str
+            ) -> None:
+        ...
+
+    @overload
+    def __call__(
+            self, input_file: str, output_file: None = None
+            ) -> pd.DataFrame:
+        ...
+
+    def __call__(
+            self,
+            input_file: str,
+            output_file: str | None = None) -> None | pd.DataFrame:
+        ...

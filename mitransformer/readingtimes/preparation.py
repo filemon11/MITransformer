@@ -11,10 +11,11 @@ from ..data import (
     load_natural_stories, load_zuco, load_frank, CorpusLoader,
     TransformMaskHeadChild, MasksSetting)
 from .frame import SplitFrame, UnsplitFrame
+from . import rtprep
 from ..utils.params import Params
 
 from typing import (
-    Iterable, Literal, overload)
+    Iterable, overload)
 
 '''
 The input files are the meta data (text without RT) of the corpus
@@ -34,11 +35,8 @@ WNUM_COL = "zone"
 BASELINE_METRICS = ("frequency", "length")
 
 
-Corpus = Literal["naturalstories", "zuco", "frank_SP", "frank_ET"]
-
-
 def corpus_to_df(
-        corpus: Corpus,
+        corpus: rtprep.Corpus,
         input_file: str,
         token_col: str = TOKEN_COL,
         text_id_col: str = TEXT_ID_COL,
@@ -47,11 +45,17 @@ def corpus_to_df(
         make_lower: bool = True,
         verbose: bool = False,
         ) -> pd.DataFrame:
-    corpus_to_func: dict[Corpus, CorpusLoader] = {
+    corpus_to_func: dict[rtprep.Corpus, CorpusLoader] = {
         "naturalstories": load_natural_stories,
+        "naturalstories_train": load_natural_stories,
+        "naturalstories_test": load_natural_stories,
         "zuco": load_zuco,
         "frank_ET": load_frank,
-        "frank_SP": load_frank
+        "frank_ET_train": load_frank,
+        "frank_ET_test": load_frank,
+        "frank_SP": load_frank,
+        "frank_SP_train": load_frank,
+        "frank_SP_test": load_frank,
     }
 
     func = corpus_to_func[corpus]
@@ -73,7 +77,7 @@ def corpus_to_df(
 @overload
 def io_corpus_convert(
         model_dir: str,
-        corpus: Corpus,
+        corpus: rtprep.Corpus,
         input_file: str,
         output_file: None = None,
         token_col: str = TOKEN_COL,
@@ -88,7 +92,7 @@ def io_corpus_convert(
 @overload
 def io_corpus_convert(
         model_dir: str,
-        corpus: Corpus,
+        corpus: rtprep.Corpus,
         input_file: str,
         output_file: str,
         token_col: str = TOKEN_COL,
@@ -102,7 +106,7 @@ def io_corpus_convert(
 
 def io_corpus_convert(
         model_dir: str,
-        corpus: Corpus,
+        corpus: rtprep.Corpus,
         input_file: str,
         output_file: str | None = None,
         token_col: str = TOKEN_COL,
@@ -169,7 +173,7 @@ def process(
         only_content_words_cost: bool = False,
         masks_setting: MasksSetting = "current",
         shift: int = 0,
-        corpus: Corpus = "naturalstories",
+        corpus: rtprep.Corpus = "naturalstories",
         trainer_args: Params | None = None
         ) -> None:
     ...
@@ -187,7 +191,7 @@ def process(
         only_content_words_cost: bool = False,
         masks_setting: MasksSetting = "current",
         shift: int = 0,
-        corpus: Corpus = "naturalstories",
+        corpus: rtprep.Corpus = "naturalstories",
         trainer_args: Params | None = None
         ) -> pd.DataFrame:
     ...
@@ -204,7 +208,7 @@ def process(
         only_content_words_cost: bool = False,
         masks_setting: MasksSetting = "current",
         shift: int = 0,
-        corpus: Corpus = "naturalstories",
+        corpus: rtprep.Corpus = "naturalstories",
         trainer_args: Params | None = None
         ) -> pd.DataFrame | None:
 

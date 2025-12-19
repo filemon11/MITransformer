@@ -721,6 +721,63 @@ def create_parser() -> argparse.ArgumentParser:
         default="current",
         help=('What dependencies to assign to the current token.'))
 
+    # # Split Parser
+    split_parser = subparsers.add_parser(
+        "split", help="split mode")
+
+    # # # Data parser group
+    data_group = split_parser.add_argument_group('data')
+    data_group.add_argument(
+        '--dataset_name', type=str,
+        help='name of the psycholinguistic dataset to load',
+        choices=readingtimes.CORPORA,
+        default="naturalstories")
+    data_group.add_argument(
+        '--max_len_train', type=argtypes.OptNone(int), default=Undefined,
+        help='Does nothing. TODO')
+    data_group.add_argument(
+        '--max_len_eval_test', type=argtypes.OptNone(int), default=Undefined,
+        help='Does nothing. TODO')
+    data_group.add_argument(
+        '--masked', type=argtypes.str_to_bool, default=True,
+        help=(
+            'Does nothing. TODO'))
+    data_group.add_argument(
+        '--triangulate', type=int, default=Undefined,
+        help='Does nothing. TODO')
+    data_group.add_argument(
+        '--vocab_size', type=argtypes.OptNone(int), default=Undefined,
+        help=(
+            'Does nothing. TODO'))
+    data_group.add_argument(
+        '--first_k', type=argtypes.OptNone(int), default=Undefined,
+        help='Does nothing. TODO')
+    data_group.add_argument(
+        '--first_k_eval_test', type=argtypes.OptNone(int), default=Undefined,
+        help='Does nothing. TODO')
+    data_group.add_argument(
+        '--connect_with_dummy', type=argtypes.str_to_bool, default=Undefined,
+        help=(
+            'Does nothing. TODO'))
+    data_group.add_argument(
+        '--connect_with_self', type=argtypes.str_to_bool, default=Undefined,
+        help=(
+            'Does nothing. TODO'))
+    data_group.add_argument(
+        '--masks_setting', type=str, choices=(
+            "complete", "current", "next", "both"),
+        default=Undefined,
+        help=('Does nothing. TODO'))
+
+    # # # Functional parser group
+    functional_group = split_parser.add_argument_group('functional')
+    functional_group.add_argument(
+        '--proportion', type=float,
+        help=(
+            'proportion of corpus to assign to train split'
+            '(the remainder is assigned to the test split)'),
+        default=0.5)
+
     # # Test Parser
     test_parser = subparsers.add_parser(
         "test", help="testing mode")

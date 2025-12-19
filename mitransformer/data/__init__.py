@@ -21,7 +21,8 @@ from .parse import (  # noqa: F401
     parse_natural_stories_with_spacy, parse_list_of_sentences_with_spacy
 )
 from .corpora import (  # noqa: F401
-    load_natural_stories, load_zuco, load_frank, CorpusLoader)
+    load_natural_stories, load_zuco, load_frank, CorpusLoader, CorpusSplitter,
+    split_naturalstories, split_frank)
 from .rtdata import (   # noqa: F401
     rt_corpus_to_measurements_file, rt_corpus_to_text_file
     )

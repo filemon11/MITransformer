@@ -26,6 +26,9 @@ if not, search on huggingface and parse and load new.
 def main(arguments: "parsing.ParserArgs") -> None:
     if arguments.mode == "dataprep":
         mains.main_dataprep(arguments)
+    elif arguments.mode == "split":
+        assert isinstance(arguments, parsing.SplitParserArgs)
+        mains.main_split(arguments)
     else:
         try:
             n_devices = (

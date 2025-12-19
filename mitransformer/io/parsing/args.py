@@ -22,7 +22,7 @@ from typing import (
 class ParserArgs(Params):
     mode: Literal[
         "train", "hyperopt", "dataprep", "test",
-        "compare"]
+        "compare", "split"]
     rank: int | None
     n_workers: int
     name: str
@@ -184,6 +184,11 @@ class DataprepParserArgs(ParserArgs):
 
 
 @dataclass
+class SplitParserArgs(ParserArgs):
+    proportion: float
+
+
+@dataclass
 class CompareParserArgs(ParserArgs):
     model1_name: str
     model2_name: str
@@ -238,7 +243,7 @@ def make_device_str(string: str) -> str:
 def args_logic(args: (
         TrainParserArgs | HyperoptParserArgs
         | DataprepParserArgs | TestParserArgs
-        | CompareParserArgs | RTParserArgs)
+        | CompareParserArgs | RTParserArgs | SplitParserArgs)
         ) -> None:
     seed_everything(args.seed)
     args.device = make_device_str(args.device)

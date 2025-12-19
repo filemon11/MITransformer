@@ -1,7 +1,44 @@
 from transformers import AutoTokenizer  # type: ignore
+import numpy as np
 import tqdm
 
+from . import utils
 from .. import tokeniser
+
+
+def split_frank(
+        input_file: str,
+        proportion: float,
+        out_path1: str | None = None,
+        out_path2: str | None = None,
+        verbose: bool = False) -> None:
+
+    if out_path1 is None:
+        out_path1 = utils.create_suffixed_filepath(input_file, "train")
+    if out_path2 is None:
+        out_path2 = utils.create_suffixed_filepath(input_file, "test")
+
+    with open(input_file, mode="r", encoding='cp1252') as file:
+        num_lines = sum(1 for _ in file)
+        file.seek(0)
+
+        include_in_train = np.random.rand(num_lines-1) < proportion
+
+        file_iter = iter(file)
+        header = next(file_iter)
+
+        with open(out_path1, mode="w") as out1:
+            out1.write(header)
+            with open(out_path2, mode="w") as out2:
+                out2.write(header)
+
+                for line, iit in tqdm.tqdm(
+                        zip(file_iter, include_in_train),
+                        "Splitting UCL corpus", disable=not verbose):
+                    if iit:
+                        out1.write(line)
+                    else:
+                        out2.write(line)
 
 
 def load_frank(

@@ -23,7 +23,7 @@ if __name__ == "__main__":
         # on Wikitext?
         # Is the mapper not a model property that can be loaded?
 
-    corpus_to_infile: dict[preparation.Corpus, str] = {
+    corpus_to_infile: dict[rtprep.Corpus, str] = {
         "naturalstories": "naturalstories-master/words.tsv",
         "zuco": "zuco/training_data.csv",
         "frank_ET": "frank/stimuli.txt",
@@ -33,7 +33,7 @@ if __name__ == "__main__":
         in_file = corpus_to_infile[corpus]  # type: ignore
     except KeyError:
         raise Exception(f"Corpus {corpus} unknown.")
-    corpus = cast(preparation.Corpus, corpus)
+    corpus = cast(rtprep.Corpus, corpus)
 
     out_file = f"RT/data/{corpus}_candidates_{model_name}.csv"
 
@@ -48,7 +48,7 @@ if __name__ == "__main__":
         only_content_words_cost=only_content_words_cost,
         only_content_words_left=only_content_words_left)
 
-    corpus_to_rt_infile: dict[preparation.Corpus, str] = {
+    corpus_to_rt_infile: dict[rtprep.Corpus, str] = {
         "naturalstories": "RT/data/processed_RTs.tsv",
         "zuco": "zuco/training_data.csv",
         "frank_ET": "frank/eyetracking.RT.txt",
