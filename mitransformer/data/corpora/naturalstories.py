@@ -12,7 +12,6 @@ from typing import Tuple
 
 
 def line_to_components(line: str) -> Tuple[str, str, str, str]:
-    line = line.strip()
     token_id, token = line.split("\t")
     token = token[:-1]
 

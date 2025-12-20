@@ -150,8 +150,13 @@ def parse_list_of_words_with_spacy(
 
 def parse_list_of_sentences_with_spacy(
         list_of_sentences: Iterable[Iterable[str]],
-        min_len: int | None = None
+        segment: None | Iterable[bool] = None,
+        min_len: int | None = None,
         ) -> str:
+    if segment is not None:
+        return "".join([parse_list_of_words_with_spacy(
+            sentence, min_len, segment_sentences=seg)
+            for seg, sentence in zip(segment, list_of_sentences)])
     return "".join([parse_list_of_words_with_spacy(
         sentence, min_len, segment_sentences=False)
         for sentence in list_of_sentences])

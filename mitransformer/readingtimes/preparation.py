@@ -71,6 +71,17 @@ def corpus_to_df(
         text_id_col: text_ids,
         wnum_col: wnums})
 
+    # Don't allow concatenation of different splits of
+    # the same corpus.
+    if "naturalstories" in corpus:
+        df["Corpus"] = "naturalstories"
+    elif "frank_SP" in corpus:
+        df["Corpus"] = "frank_SP"
+    elif "frank_ET" in corpus:
+        df["Corpus"] = "frank_ET"
+    else:
+        raise Exception("Corpus unknown.")
+
     return df
 
 
@@ -140,18 +151,19 @@ def io_corpus_convert(
 
 def get_conllu_frame(
         df: pd.DataFrame,
-        corpus: str,
-        word_col: str = "word") -> SplitFrame:
+        word_col: str = "word",
+        sentence_col: str = "item",
+        corpus_col: str = "Corpus") -> SplitFrame:
     words = df[word_col]
-    sentence_ids: None | pd.Series = None
-    if corpus != "naturalstories":
-        sentence_ids = df["item"]
+    sentence_ids = df[sentence_col]
+    corpus_names = df[corpus_col]
 
     # Add surprisal
     frame = SplitFrame(tokenised=True)
     frame.add_(
         "conllu",
-        words=words, sentence_ids=sentence_ids)  # dataset attribute missing
+        words=words, sentence_ids=sentence_ids,
+        corpus_names=corpus_names)  # dataset attribute missing
     frame.add_(
         "space_after", "word",
         "position", "head",
@@ -227,7 +239,7 @@ def process(
 
     # Create conllu frame
     frame = get_conllu_frame(
-        input_file, corpus, word_col=token_col)
+        input_file, word_col=token_col)
 
     # Surprisal
     transform = TransformMaskHeadChild(

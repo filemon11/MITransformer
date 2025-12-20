@@ -7,6 +7,9 @@ from . import objective, sampler
 
 import os
 import optuna
+import pandas as pd
+
+from typing import Tuple
 
 from mitransformer.utils.logmaker import (
     getLogger, info)
@@ -31,37 +34,31 @@ class PsyLingObjective(objective.Objective):
             f"{arguments.lme_formula['formula']}")
 
         # Load candidates
-        assert self.data_provider is not None
-        psyling_df = readingtimes.io_corpus_convert(
-            "custom", arguments.psyling_dataset,
-            data.rt_corpus_to_text_file[arguments.psyling_dataset],
-            verbose=True,
-            token_mapper_dir=os.path.join(data.dataset_details[
-                self.arguments.dataset_name]["tokmap_dir"], "mapper"))
-        psyling_df.fillna("NaN")
 
-        orig_frame = readingtimes.UnsplitFrame(
-            psyling_df, {"word_col": readingtimes.TOKEN_COL}, tokenised=False)
+        self.psyling_datasets = ("naturalstories", "frank_SP")  #(arguments.psyling_dataset,)
+        # TODO: check whether tokenisation at surprisal step is correct
 
-        for metric in readingtimes.BASELINE_METRICS:
-            orig_frame.add_(
-                metric)
+        psyling_dfs = [
+            readingtimes.io_corpus_convert(
+                "custom", dataset,
+                data.rt_corpus_to_text_file[dataset],
+                verbose=True,
+                token_mapper_dir=None)
+            for dataset in self.psyling_datasets]
 
-        # Create conllu frame
-        self.frame = readingtimes.get_conllu_frame(
-            psyling_df, arguments.psyling_dataset)
-        # omits undefined args
-
-        self.split_frame = orig_frame.split([
-                len(sentence) for sentence in self.frame.untokenise().df[
-                    readingtimes.TOKEN_COL]])
+        self.tok_frame, self.untok_frame = get_frames(
+            pd.concat(psyling_dfs))
 
         # Load measurements
-        self.measurements = readingtimes.prepare_RTs(
-            data.rt_corpus_to_measurements_file[arguments.psyling_dataset],
-            corpus=arguments.psyling_dataset)
+        self.measurements = [
+            readingtimes.prepare_RTs(
+                data.rt_corpus_to_measurements_file[dataset],
+                corpus=dataset)
+            for dataset in self.psyling_datasets
+        ]
 
-        self.lme_formula = arguments.lme_formula
+        # TODO: allow multiple psyling_datasets by concatenating several
+        # 'psyling_df' instances.
 
     def __call__(self, trial) -> float:
         if self.n_devices > 1:
@@ -88,7 +85,7 @@ class PsyLingObjective(objective.Objective):
 
         assert self.data_provider is not None
 
-        add_method = self.frame.add_
+        add_method = self.tok_frame.add_
         loglik: None | float = None
         for step, metrics in enumerate(train_iterator, start=1):
             # Handle pruning based on the intermediate value.
@@ -103,7 +100,7 @@ class PsyLingObjective(objective.Objective):
                 transform = self.data_provider.datasets[
                     "train"].dataset.transform_mask  # type: ignore
 
-            to_add = ["surprisal", *set(self.lme_formula[
+            to_add = ["surprisal", *set(self.arguments.lme_formula[
                     "covariates"]) - set(readingtimes.BASELINE_METRICS)]
             to_add = [ta for ta in to_add if "." not in ta]
             # no spillover versions
@@ -122,33 +119,45 @@ class PsyLingObjective(objective.Objective):
             # Untokenisation
             # We cannot omit this because surprisal can be a sum
             # of token surprisals.
-            untok_frame = self.frame.untokenise()
-            frame = self.split_frame | untok_frame
+            untok_frame = self.tok_frame.untokenise()
+            frame = self.untok_frame | untok_frame
 
             frame = frame.include_spillover(self.arguments.shift)
             frame.truncate_(right=1)
             unsplit_frame = frame.unsplit()
 
-            print(unsplit_frame.df[
-                ["word", "surprisal", "cosine"]].head(n=10))
+            print(unsplit_frame.df.head(n=10))
 
             # Joining
             # This may take some time. Should we precompute this,
             # keep track of the indices and then simply insert
             # the (duplicate) values in columns surprisal, ...?
             # TODO: check how much time this takes
-            joined = readingtimes.join(
-                self.measurements,
-                unsplit_frame.df,
-                "ET" if self.arguments.psyling_dataset
-                in readingtimes.ET_CORPORA else "SP")
+
+            # !!! TODO: join all measurements in __init__ because
+            # iterative joining with the frame does not work.
+            # It disregards all Workers that do not appear in
+            # the first measurement table.
+            joined = unsplit_frame.df
+            for dataset, measurements in zip(
+                    self.psyling_datasets, self.measurements):
+                joined = readingtimes.join(
+                    joined,
+                    measurements,
+                    "ET" if dataset in readingtimes.ET_CORPORA else "SP",
+                    how="left")
+
+            # In concatenated setting, there can be several corpora per
+            # item. However, we want these to be unique. Therefore:
+            joined["item"] = joined["Corpus"] + joined["item"].astype(str)
+            print(joined.head(n=10))
 
             # Fit lme
             lme, _ = readingtimes.fit_gpboost(
                 joined,
-                y_col=self.lme_formula["to_predict"],
-                predictors=self.lme_formula["covariates"],
-                random_effects=self.lme_formula["random_effects"]
+                y_col=self.arguments.lme_formula["to_predict"],
+                predictors=self.arguments.lme_formula["covariates"],
+                random_effects=self.arguments.lme_formula["random_effects"]
             )
             # TODO: decide plausible lme structure
 
@@ -171,7 +180,7 @@ class PsyLingObjective(objective.Objective):
                 should_prune = True
                 break
 
-            add_method = self.frame.reload_
+            add_method = self.tok_frame.reload_
 
         assert loglik is not None and metrics is not None, (
             "eval_interval is larger than total number of steps")
@@ -199,3 +208,26 @@ class PsyLingObjective(objective.Objective):
             raise optuna.exceptions.TrialPruned()
 
         return loglik
+
+
+def get_frames(
+        psyling_df: pd.DataFrame,
+        ) -> Tuple[readingtimes.SplitFrame, readingtimes.SplitFrame]:
+
+    orig_frame = readingtimes.UnsplitFrame(
+        psyling_df, {"word_col": readingtimes.TOKEN_COL}, tokenised=False)
+
+    for metric in readingtimes.BASELINE_METRICS:
+        orig_frame.add_(
+            metric)
+
+    # Create conllu frame
+    tok_frame = readingtimes.get_conllu_frame(
+        psyling_df)
+    # omits undefined args
+
+    untok_frame = orig_frame.split([
+        len(sentence) for sentence in tok_frame.untokenise().df[
+            readingtimes.TOKEN_COL]])
+
+    return tok_frame, untok_frame

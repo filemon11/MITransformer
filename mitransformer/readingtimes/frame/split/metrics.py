@@ -21,11 +21,11 @@ from ....data.dataset import (
     head_list_to_adjacency_matrix, shift_masks)
 from ....train import LMTrainer, inverse_sigmoid, select_true, unpad
 
-
+from itertools import cycle
 from abc import ABC, abstractmethod
 
 from typing import (
-    Type, Any, Iterable, Callable, Literal, Collection)
+    Type, Any, Iterable, Callable, Literal, Collection, Tuple)
 
 LANG = "en"
 
@@ -147,37 +147,50 @@ class SplitTokMetricMakerTokenlist(SplitTokMetricMaker):
     def __call__(
             self, df: pd.DataFrame, words: Iterable[str],
             sentence_ids: Iterable[int] | None,
+            corpus_names: Iterable[str] | None,
             max_len: int | None = None,
             min_len: int | None = None, *args, **kwargs
             ) -> tuple[pd.Series, dict[str, Any]]:
         if sentence_ids is None:
             conllu = parse_list_of_words_with_spacy(words, min_len=min_len)
         else:
+            # If given corpus names, allows segmentation for natural stories
+            # corpus.
             def yield_sentences(
-                    words: Iterable[str], sentence_ids: Iterable[int]
-                    ) -> Iterable[Iterable[str]]:
+                    words: Iterable[str], sentence_ids: Iterable[int],
+                    corpus_names: Iterable[str] | None
+                    ) -> Iterable[Tuple[Iterable[str], bool]]:
                 iter_words = iter(words)
                 iter_sentence_ids = iter(sentence_ids)
 
+                iter_corpus_names: Iterable[str]
+                if corpus_names is None:
+                    iter_corpus_names = cycle(["custom"])
+                else:
+                    iter_corpus_names = iter(corpus_names)
+
                 try:
                     prev_sentence_id = next(iter_sentence_ids)
-
                     sentence = [next(iter_words)]
+                    prev_corpus_name = next(iter_corpus_names)
 
-                    for word, sentence_id in zip(
-                            iter_words, iter_sentence_ids):
+                    for word, sentence_id, corpus_name in zip(
+                            iter_words, iter_sentence_ids,
+                            iter_corpus_names):
                         if sentence_id != prev_sentence_id:
-                            yield sentence
+                            yield (sentence, "naturalstories" in prev_corpus_name)
                             sentence = []
 
                         sentence.append(word)
                         prev_sentence_id = sentence_id
-                    yield sentence
+                        prev_corpus_name = corpus_name
+                    yield (sentence, "naturalstories" in prev_corpus_name)
 
                 except StopIteration:
                     pass
-            conllu = parse_list_of_sentences_with_spacy(
-                yield_sentences(words, sentence_ids),
+            conllu = parse_list_of_sentences_with_spacy(  # type: ignore
+                *zip(*yield_sentences(
+                    words, sentence_ids, corpus_names)),  # type: ignore
                 min_len=min_len
             )
         tokenlists = load_conllu_from_str(conllu, max_len)

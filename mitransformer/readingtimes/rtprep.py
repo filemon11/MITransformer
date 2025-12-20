@@ -67,7 +67,7 @@ def prepare_RTs_zuco(
     df = pd.read_csv(input_file)
     df = df.rename(columns={"sentence_id": "item", "word_id": "zone"})
     # TODO: Load correct corpus data and not aggregated over participants
-    df["WorkerId"] = 1
+    df["WorkerId"] = "1"
     if output_file is None:
         return df
     df.to_csv(output_file)
@@ -100,6 +100,7 @@ def prepare_RTs_frank_ET(
         "RTgopast": "GPT",
         "RTfirstpass": "GD",
         "RTrightbound": "RBT"})
+    df["WorkerId"] = df["WorkerId"].astype(str)
     df["Corpus"] = "frank_ET"
     if output_file is None:
         return df
@@ -129,6 +130,7 @@ def prepare_RTs_frank_SP(
         "subj_nr": "WorkerId",
         "sent_nr": "item",
         "word_pos": "zone"})
+    df["WorkerId"] = df["WorkerId"].astype(str)
     df["Corpus"] = "frank_SP"
     if output_file is None:
         return df

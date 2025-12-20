@@ -1,4 +1,5 @@
 import pandas as pd
+from pandas import _typing as pdtyping
 
 from . import rtprep
 
@@ -24,23 +25,26 @@ def io_join(
 
 @overload
 def join(
-        metrics_file: str | pd.DataFrame, candidates_file: str | pd.DataFrame,
-        corpus_type: rtprep.CorpusTypes, output_file: None = None
+        candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
+        corpus_type: rtprep.CorpusTypes, output_file: None = None,
+        how: pdtyping.MergeHow = "inner"
         ) -> pd.DataFrame:
     ...
 
 
 @overload
 def join(
-        metrics_file: str | pd.DataFrame, candidates_file: str | pd.DataFrame,
-        corpus_type: rtprep.CorpusTypes, output_file: str
+        candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
+        corpus_type: rtprep.CorpusTypes, output_file: str,
+        how: pdtyping.MergeHow = "inner"
         ) -> None:
     ...
 
 
 def join(
-        metrics_file: str | pd.DataFrame, candidates_file: str | pd.DataFrame,
+        candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
         corpus_type: rtprep.CorpusTypes, output_file: str | None = None,
+        how: pdtyping.MergeHow = "inner"
         ) -> None | pd.DataFrame:
     # Read input files
     if isinstance(candidates_file, str):
@@ -51,8 +55,7 @@ def join(
         measurements = pd.read_csv(metrics_file)
     else:
         measurements = metrics_file
-
-    base_columns = ('item', 'zone', 'WorkerId')
+    base_columns = ('item', 'zone', 'WorkerId', 'Corpus')
     # Process depending on corpus type
     if corpus_type == "ET":
         measurements = (
@@ -84,11 +87,12 @@ def join(
         interest = list(base_columns) + ['RT']
 
     # Select relevant columns and inner join with meta
-    measurement = measurements[interest].merge(candidates, how='inner')
+    measurement = candidates.merge(
+        measurements[interest], how=how, on=['item', 'zone', 'Corpus'])
 
     # Get token count (equivalent to the R token check)
     token_count = (
-        measurement[['item', 'zone', 'word']]
+        measurement[['item', 'zone', 'Corpus', 'word']]
         .drop_duplicates()
         .shape[0]
     )
