@@ -125,8 +125,8 @@ class StrToTuple(Generic[T]):
 
     def __call__(self, string: str) -> tuple[T, ...]:
         string = string.strip()
-        assert string[0] == "(" and string[-1] == ")"
-        string = string[1:-1]
+        if string[0] == "(" and string[-1] == ")":
+            string = string[1:-1]
         components: Iterable[str] = split_nested(string)
         components = [c.strip() for c in components]
 

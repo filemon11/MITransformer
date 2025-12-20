@@ -353,8 +353,12 @@ def create_parser() -> argparse.ArgumentParser:
         default=25,
         help="how many trials to run")
     hyperopt_parser.add_argument(
-        '--psyling_dataset', type=str, choices=readingtimes.CORPORA,
-        help='name of the dataset for psycholinguistic evaluation',
+        '--psyling_dataset',
+        type=argtypes.StrToTuple(str, ...),
+        help=(
+            'name of the dataset for psycholinguistic evaluation.'
+            'Can be several datasets separated via comma. These are '
+            'concatenated  by the optimiser.'),
         default="naturalstories")
     hyperopt_parser.add_argument(
         '--shift', type=int, default=0,

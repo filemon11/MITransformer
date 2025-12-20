@@ -178,7 +178,8 @@ class SplitTokMetricMakerTokenlist(SplitTokMetricMaker):
                             iter_words, iter_sentence_ids,
                             iter_corpus_names):
                         if sentence_id != prev_sentence_id:
-                            yield (sentence, "naturalstories" in prev_corpus_name)
+                            yield (
+                                sentence, "naturalstories" in prev_corpus_name)
                             sentence = []
 
                         sentence.append(word)

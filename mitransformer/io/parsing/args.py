@@ -15,7 +15,7 @@ import numpy as np
 from dataclasses import dataclass
 
 from typing import (
-    Literal)
+    Literal, Tuple)
 
 
 @dataclass
@@ -98,7 +98,7 @@ class HyperoptParserArgs(ParserArgs):
     sampler_startup_trials: int
     pruner_startup_trials: int
     n_trials: int
-    psyling_dataset: Corpus
+    psyling_dataset: Tuple[Corpus, ...]
     lme_formula: LMEParseResults
     shift: int
     sampler: Literal["tpe", "random"]

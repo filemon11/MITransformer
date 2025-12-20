@@ -5,7 +5,6 @@ from ... import parsing
 from .. import train
 from . import objective, sampler
 
-import os
 import optuna
 import pandas as pd
 
@@ -35,27 +34,38 @@ class PsyLingObjective(objective.Objective):
 
         # Load candidates
 
-        self.psyling_datasets = ("naturalstories", "frank_SP")  #(arguments.psyling_dataset,)
         # TODO: check whether tokenisation at surprisal step is correct
 
+        assert all(
+            [ds in readingtimes.CORPORA for ds in arguments.psyling_dataset])
         psyling_dfs = [
             readingtimes.io_corpus_convert(
                 "custom", dataset,
                 data.rt_corpus_to_text_file[dataset],
                 verbose=True,
                 token_mapper_dir=None)
-            for dataset in self.psyling_datasets]
+            for dataset in arguments.psyling_dataset]
 
         self.tok_frame, self.untok_frame = get_frames(
             pd.concat(psyling_dfs))
 
         # Load measurements
-        self.measurements = [
+        is_et_corpus = [
+            ds in readingtimes.ET_CORPORA for ds in arguments.psyling_dataset]
+        assert all(is_et_corpus) or not any(is_et_corpus), (
+            "Psyling corpora must be all of the same type (either ET or SP)."
+        )
+        self.is_et_corpus: bool = is_et_corpus[0]
+        measurement_keys = [
+            "FFD", "GPT", "GD", "RBT"] if self.is_et_corpus else ["RT"]
+        measurement_keys.extend(["word", "item", "zone", "WorkerId", "Corpus"])
+        measurements = [
             readingtimes.prepare_RTs(
                 data.rt_corpus_to_measurements_file[dataset],
-                corpus=dataset)
-            for dataset in self.psyling_datasets
+                corpus=dataset)[measurement_keys]
+            for dataset in arguments.psyling_dataset
         ]
+        self.measurements = pd.concat(measurements)
 
         # TODO: allow multiple psyling_datasets by concatenating several
         # 'psyling_df' instances.
@@ -126,6 +136,7 @@ class PsyLingObjective(objective.Objective):
             frame.truncate_(right=1)
             unsplit_frame = frame.unsplit()
 
+            print(unsplit_frame.colnames)
             print(unsplit_frame.df.head(n=10))
 
             # Joining
@@ -134,23 +145,16 @@ class PsyLingObjective(objective.Objective):
             # the (duplicate) values in columns surprisal, ...?
             # TODO: check how much time this takes
 
-            # !!! TODO: join all measurements in __init__ because
-            # iterative joining with the frame does not work.
-            # It disregards all Workers that do not appear in
-            # the first measurement table.
-            joined = unsplit_frame.df
-            for dataset, measurements in zip(
-                    self.psyling_datasets, self.measurements):
-                joined = readingtimes.join(
-                    joined,
-                    measurements,
-                    "ET" if dataset in readingtimes.ET_CORPORA else "SP",
-                    how="left")
+            joined = readingtimes.join(
+                unsplit_frame.df,
+                self.measurements,
+                "ET" if self.is_et_corpus else "SP")
 
             # In concatenated setting, there can be several corpora per
-            # item. However, we want these to be unique. Therefore:
+            # item and several corpora per WorkerId. However, we want these
+            # to be unique because they come from different corpora. Therefore:
             joined["item"] = joined["Corpus"] + joined["item"].astype(str)
-            print(joined.head(n=10))
+            joined["WorkerId"] = joined["Corpus"] + joined["WorkerId"]
 
             # Fit lme
             lme, _ = readingtimes.fit_gpboost(
@@ -201,8 +205,6 @@ class PsyLingObjective(objective.Objective):
                     **metrics["eval"].to_dict()},
                 run_name=str(trial.number),
                 global_step=arguments.eval_interval*step)
-            # TODO: add field to metric in order to report
-            # TODO: also report loglik in loop above
 
         if should_prune:
             raise optuna.exceptions.TrialPruned()
