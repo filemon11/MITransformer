@@ -38,16 +38,16 @@ class PsyLingObjective(objective.Objective):
 
         assert all(
             [ds in readingtimes.CORPORA for ds in arguments.psyling_dataset])
-        psyling_dfs = [
+        psyling_df = pd.concat([
             readingtimes.io_corpus_convert(
                 "custom", dataset,
                 data.rt_corpus_to_text_file[dataset],
                 verbose=True,
                 token_mapper_dir=None)
-            for dataset in arguments.psyling_dataset]
+            for dataset in arguments.psyling_dataset])
 
         self.tok_frame, self.untok_frame = get_frames(
-            pd.concat(psyling_dfs))
+            psyling_df)
 
         # Load measurements
         is_et_corpus = [
@@ -66,6 +66,11 @@ class PsyLingObjective(objective.Objective):
             for dataset in arguments.psyling_dataset
         ]
         self.measurements = pd.concat(measurements)
+        # remove items that are not needed (i.e. that won't be joined on later)
+        keys = ["Corpus", "item", "zone"]
+        self.measurements = self.measurements.merge(
+            psyling_df[keys],
+            on=keys, how="inner")
 
         # TODO: allow multiple psyling_datasets by concatenating several
         # 'psyling_df' instances.
@@ -136,7 +141,6 @@ class PsyLingObjective(objective.Objective):
             frame.truncate_(right=1)
             unsplit_frame = frame.unsplit()
 
-            print(unsplit_frame.colnames)
             print(unsplit_frame.df.head(n=10))
 
             # Joining
