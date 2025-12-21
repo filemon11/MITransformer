@@ -19,6 +19,8 @@ class ModelProps(TypedDict):
     negloglik_per_row: float
     aic: float
     aic_per_row: float
+    bic: float
+    bic_per_row: float
     coef: pd.DataFrame
     cov_pars: pd.DataFrame
 
@@ -28,6 +30,8 @@ class ComparisonProps(TypedDict):
     delta_negloglik_per_row: float
     delta_aic: float
     delta_aic_per_row: float
+    delta_bic: float
+    delta_bic_per_row: float
     lr_stat: float
     dof: float
     p_value: float
@@ -56,14 +60,20 @@ def get_model_props(
 
     k_fixed = int(coef.shape[1])
     k_random = int(cov_pars.shape[1])
+    k = k_fixed + k_random
 
-    aic = 2 * (k_fixed + k_random) - 2 * negloglik
+    aic = 2 * k - 2 * negloglik
+    bic = np.log(n_observations) * k + 2 * negloglik
 
+    cov_pars.loc[1] = np.sqrt(cov_pars.iloc[0])
+    cov_pars.index = ["Variance", "Std.Dev."]  # type: ignore
     return {
         "negloglik": negloglik,
         "negloglik_per_row": negloglik / n_observations,
         "aic": aic,
         "aic_per_row": aic / n_observations,
+        "bic": bic,
+        "bic_per_row": bic / n_observations,
         "coef": coef,
         "cov_pars": cov_pars
     }
@@ -81,6 +91,8 @@ def get_model_comparison(
         props1["negloglik_per_row"] - props0["negloglik_per_row"])
     delta_aic = props1["aic"] - props0["aic"]
     delta_aic_per_row = props1["aic_per_row"] - props0["aic_per_row"]
+    delta_bic = props1["bic"] - props0["bic"]
+    delta_bic_per_row = props1["bic_per_row"] - props0["bic_per_row"]
 
     lr_stat = 2 * (props1["negloglik"] - props0["negloglik"])
 
@@ -94,6 +106,8 @@ def get_model_comparison(
         "delta_negloglik_per_row": delta_negloglik_per_row,
         "delta_aic": delta_aic,
         "delta_aic_per_row": delta_aic_per_row,
+        "delta_bic": delta_bic,
+        "delta_bic_per_row": delta_bic_per_row,
         "lr_stat": lr_stat,
         "dof": dof,
         "p_value": p_value,
@@ -174,3 +188,41 @@ def compute_aggregate_comparison(
         comparisons.append(get_model_comparison(m0, m1, n))
 
     return get_aggregate(comparisons)
+
+
+def model_props_to_str(
+        model_props: ModelProps,
+        coefficient_names: Iterable[str] | None = None,
+        random_coefficient_names: Iterable[str] | None = None,
+        ) -> str:
+    string = "Measures:\n"
+    df = pd.DataFrame({
+        "negloglik": [model_props["negloglik"]],
+        "aic": [model_props["aic"]],
+        "bic": [model_props["bic"]]})
+    string += df.to_string()
+
+    string += "\nMeasures per row:\n"
+    df = pd.DataFrame({
+        "negloglik": [model_props["negloglik_per_row"]],
+        "aic": [model_props["aic_per_row"]],
+        "bic": [model_props["bic_per_row"]]})
+    string += df.to_string()
+    del df
+
+    coef = model_props["coef"]
+    if coefficient_names is not None:
+        coef = coef.copy()
+        coef = coef.set_axis(coefficient_names, axis=1)
+
+    string += "\nFixed effects:\n"
+    string += coef.to_string()
+
+    cov_pars = model_props["cov_pars"]
+    if random_coefficient_names is not None:
+        cov_pars = cov_pars.copy()
+        cov_pars = cov_pars.set_axis(random_coefficient_names, axis=1)
+
+    string += "\nRandom effects:\n"
+    string += cov_pars.to_string()
+    return string

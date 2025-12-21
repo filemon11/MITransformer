@@ -6,6 +6,7 @@ from .rtprep import (  # noqa: F401
     CorpusTypes)
 from .lme import (  # noqa: F401
     lme, fit_gpboost, get_model_comparison,
-    get_model_props)
+    get_model_props, ModelProps, ComparisonProps,
+    model_props_to_str)
 from .datajoin import join, io_join  # noqa: F401
 from .frame import SplitFrame, UnsplitFrame  # noqa: F401

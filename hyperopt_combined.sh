@@ -34,7 +34,7 @@ hyperopt_selection='--psyling_dataset frank_SP_train,naturalstories_train --samp
 core="${general_params} hyperopt ${hyperopt_selection} ${general_hyperopt_params}"
 
 torchrun ${prefix} \
-    --name hyperopt_combined6 \
+    --name hyperopt_combined7 \
     ${core} \
     --dependency_mode 'standard'
 

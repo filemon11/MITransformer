@@ -72,8 +72,14 @@ class PsyLingObjective(objective.Objective):
             psyling_df[keys],
             on=keys, how="inner")
 
-        # TODO: allow multiple psyling_datasets by concatenating several
-        # 'psyling_df' instances.
+        # # Is this necessary?
+        # self.measurements[self.arguments.lme_formula["to_predict"]] = np.log(
+        #     self.measurements[self.arguments.lme_formula["to_predict"]])
+        # # Is this necessary to account for per-corpus differences?
+        # self.measurements[self.arguments.lme_formula["to_predict"]] = (
+        #     self.measurements
+        #     .groupby("Corpus")[self.arguments.lme_formula["to_predict"]]
+        #     .transform(lambda x: (x - x.mean()) / x.std()))
 
     def __call__(self, trial) -> float:
         if self.n_devices > 1:
@@ -160,13 +166,40 @@ class PsyLingObjective(objective.Objective):
             joined["item"] = joined["Corpus"] + joined["item"].astype(str)
             joined["WorkerId"] = joined["Corpus"] + joined["WorkerId"]
 
+            # Scale predictors
+            num_cols = list(
+                set(joined.select_dtypes(include="number").columns)
+                - {self.arguments.lme_formula["to_predict"], "zone"})
+            joined[num_cols] = (
+                joined[num_cols]
+                - joined[num_cols].mean()) / joined[num_cols].std()
+
             # Fit lme
-            lme, _ = readingtimes.fit_gpboost(
+            lme, d0 = readingtimes.fit_gpboost(
                 joined,
                 y_col=self.arguments.lme_formula["to_predict"],
                 predictors=self.arguments.lme_formula["covariates"],
                 random_effects=self.arguments.lme_formula["random_effects"]
             )
+            info(
+                arguments.rank, logger,
+                readingtimes.model_props_to_str(
+                    readingtimes.get_model_props(lme, len(d0)),
+                    ["Intercept"] + list(
+                        self.arguments.lme_formula["covariates"]),
+                    ["Error_term"]
+                    + [
+                        group for group, coefs in
+                        self.arguments.lme_formula["random_effects"].items()
+                        if 1 in coefs]
+                    + [
+                        f"{group}_{c}"
+                        for group, coefs
+                        in self.arguments.lme_formula["random_effects"].items()
+                        for c in coefs if c not in (1, 0)]
+                )
+            )
+
             # TODO: decide plausible lme structure
 
             # Get optimisation metric

@@ -3,9 +3,9 @@ from typing import TypedDict, Literal
 
 class ParseResult(TypedDict):
     to_predict: str
-    covariates: set[str]
-    groups: set[str]
-    random_effects: dict[str, set[str | Literal[0] | Literal[1]]]
+    covariates: tuple[str, ...]
+    groups: tuple[str, ...]
+    random_effects: dict[str, tuple[str | Literal[0] | Literal[1], ...]]
     formula: str
 
 
@@ -17,22 +17,22 @@ def parse(formula: str) -> ParseResult:
 
     # covariates
     components = [c.strip() for c in split_nested(formula, "+")]
-    covariates: set[str] = set()
+    covariates: tuple[str, ...] = tuple()
     randoms: list[str] = []
     for c in components:
         if c[0] == "(" and c[-1] == ")":
             randoms.append(c[1:-1].strip())
         else:
-            covariates.add(c)
+            covariates = covariates + (c,)
 
     # random effects
-    groups: set[str] = set()
+    groups: tuple[str, ...] = tuple()
     random_effects: dict[
-        str, set[str | Literal[0] | Literal[1]]] = {}
+        str, tuple[str | Literal[0] | Literal[1], ...]] = {}
     for re in randoms:
         covs, group = re.split("|")
         group = group.strip()
-        groups.add(group)
+        groups = groups + (group,)
 
         covs_split: list[str | Literal[0] | Literal[1]] = [
             cov.strip() for cov in covs.split("+")]
@@ -41,13 +41,13 @@ def parse(formula: str) -> ParseResult:
             for cov in covs_split]
         assert group not in random_effects.keys(), (
             "Independent random effects are not supported.")
-        random_effects[group] = set(covs_split)
+        random_effects[group] = tuple(covs_split)
 
     for group, s in random_effects.items():
         assert not (0 in s and 1 in s), (
             f"Provided bot 1 and 0 for group {group}. Specify one option.")
         if not (0 in s or 1 in s):
-            s.add(1)
+            random_effects[group] = s + (1,)
             # Add explicit intercept for clarity
         for i in s:
             if i not in (1, 0):

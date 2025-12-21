@@ -82,7 +82,7 @@ def create_parser() -> argparse.ArgumentParser:
         '--triangulate', type=int, default=0,
         help='TODO')
     data_group.add_argument(
-        '--vocab_size', type=argtypes.OptNone(int), default=50_000,
+        '--vocab_size', type=argtypes.OptNone(int), default=1_000_000,
         help=(
             'number of most frequent tokens to embed; all other '
             'tokens are replaced with an UNK token;'
@@ -400,7 +400,7 @@ def create_parser() -> argparse.ArgumentParser:
         help='TODO')
     hyperopt_flexible_data_group.add_argument(
         '--vocab_size',
-        type=argtypes.HyperoptSpace(argtypes.OptNone(int)), default=50_000,
+        type=argtypes.HyperoptSpace(argtypes.OptNone(int)), default=1_000_000,
         help=(
             'number of most frequent tokens to embed; all other '
             'tokens are replaced with an UNK token;'
@@ -698,7 +698,7 @@ def create_parser() -> argparse.ArgumentParser:
         '--triangulate', type=int, default=0,
         help='TODO')
     data_group.add_argument(
-        '--vocab_size', type=argtypes.OptNone(int), default=50_000,
+        '--vocab_size', type=argtypes.OptNone(int), default=1_000_000,
         help=(
             'number of most frequent tokens to embed; all other '
             'tokens are replaced with an UNK token;'
