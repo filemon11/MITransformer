@@ -109,6 +109,9 @@ class LMTrainer():
 
         self.writer = metrics.MetricWriter(
             log_dir=os.path.join("./runs", config.model_name))
+
+        transformerlm.compile()
+        # possibly amp autocast should be wrapped around LMTrainer usage
         self.transformerlm: models.MITransformerLM | DDP = transformerlm
         self.transformerlm.to(config.device)
         self.transformer_config: models.MITransformerConfig

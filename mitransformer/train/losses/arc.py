@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from typing import Literal
 
 
+@torch.compile
 def arc_loss(
         score_preds: torch.Tensor,
         score_gold: torch.BoolTensor,

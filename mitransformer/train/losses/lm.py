@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from typing import Literal
 
 
+@torch.compile
 def lm_loss(
         logits: torch.Tensor, labels: torch.Tensor,
         ignore_index: int = -100,
@@ -42,6 +43,36 @@ def lm_loss(
         loss = loss.sum() / mask.sum()
 
     else:
+        k = 99
+        # TODO make this an argument
+
+        # mask ignored labels once
+        valid = labels != ignore_index
+
+        # sample negatives
+        neg = torch.randint(
+            0, logits.shape[1] - 1, (
+                logits.shape[0], k, *labels.shape[1:]),
+            device=logits.device
+        )
+
+        # create pos indices
+        pos = torch.where(
+            valid, labels, torch.zeros_like(labels)).unsqueeze(1)
+
+        # shift negatives to avoid positive class
+        neg = neg + (neg >= pos).long()
+
+        # build indices: [positive | negatives]
+        idx = torch.cat([pos, neg], dim=1)
+
+        # gather
+        logits = logits.gather(1, idx)
+
+        # targets: positive is always index 0
+        labels = torch.zeros_like(labels)
+        labels[~valid] = ignore_index
+
         loss = F.cross_entropy(
             logits, labels,
             ignore_index=ignore_index,

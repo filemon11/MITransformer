@@ -4,6 +4,7 @@ from . import utils
 from typing import Literal
 
 
+@torch.compile
 def attention_entropy_loss(
         arc_distributions: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,

@@ -6,6 +6,7 @@ from . import utils
 from typing import Literal
 
 
+@torch.compile
 def surprox_loss(
         logits: torch.Tensor,
         label_ids: torch.Tensor,

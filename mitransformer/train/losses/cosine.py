@@ -7,6 +7,7 @@ from . import utils
 from typing import Literal
 
 
+@torch.compile
 def cosine_loss(
         embeddings: torch.Tensor,
         activations: torch.Tensor,
