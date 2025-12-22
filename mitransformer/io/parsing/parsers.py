@@ -48,6 +48,10 @@ def create_parser() -> argparse.ArgumentParser:
         default=torch.cuda.device_count() > 1,
         help="whether to use distributed GPU training")
     parser.add_argument(
+        '--use_amp', type=argtypes.str_to_bool,
+        default=True,
+        help="whether to use automatic mixed precision (half-precision FP16)")
+    parser.add_argument(
         '--seed', type=int, default=1895,
         help="seed for random processes")
     # TODO: actually set seed

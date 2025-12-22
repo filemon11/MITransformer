@@ -5,6 +5,7 @@ from tqdm import tqdm
 import pandas as pd
 import numpy as np
 import torch
+from torch.amp.grad_scaler import GradScaler
 from torch.optim.adam import Adam
 from torch.optim import Optimizer
 import torch.nn.functional as F
@@ -23,7 +24,7 @@ from ..utils import pickle
 from typing import (Self, Literal, cast,
                     Container, Iterable, Mapping,
                     Any, Generator, TypedDict, NotRequired,
-                    TypeVar)
+                    TypeVar, DefaultDict)
 
 from ..utils.logmaker import getLogger, info, get_timestr, warning
 
@@ -34,8 +35,6 @@ M = TypeVar("M", bound=metrics.LMMetric)
 N = TypeVar("N")
 K = TypeVar("K")
 V = TypeVar("V")
-
-torch.autograd.set_detect_anomaly(True)
 
 
 class AdditionalPrediction(TypedDict):
@@ -66,6 +65,7 @@ class GeneralConfig(utils.Params):
     loss_alpha: float | None = 0.5
     arc_loss_weighted: bool = False
     device: str | int = "cpu"
+    use_amp: bool = True
     rank: int | None = None
     world_size: int = 1
     n_workers: int = 0
@@ -101,6 +101,11 @@ class LMTrainer():
             self, transformerlm: models.MITransformerLM,
             transformer_config: models.MITransformerConfig,
             config: GeneralConfig):
+        self.use_amp = config.use_amp
+        self.device_type = "cpu" if config.device == "cpu" else "cuda"
+        self.scaler = GradScaler(
+            self.device_type,
+            enabled=self.use_amp)
 
         self.writer = metrics.MetricWriter(
             log_dir=os.path.join("./runs", config.model_name))
@@ -690,99 +695,105 @@ class LMTrainer():
 
         additional: models.AdditionalResults
         arc_logits: dict[str, torch.Tensor] | None
-        logits, arc_logits, additional = self.transformerlm(
-            **batch,
-            return_arc_logits=not self.config.combined_loss,
-            return_proj_states=(
-                self.config.combined_loss
-                and self.config.distr_mode == "att-n"),
-            return_att=(
-                self.config.combined_loss
-                and self.config.distr_mode == "att"),
-            return_embeddings=(
-                self.config.combined_loss
-                and self.config.losses is not None
-                and "cosine" in self.config.losses
-            ),
-            return_activations=(
-                self.config.combined_loss
-                and self.config.losses is not None
-                and "cosine" in self.config.losses
-            ))
+        with torch.autocast(
+                self.device_type, dtype=torch.float16, enabled=self.use_amp):
 
-        self.run_hooks(batch, (logits, arc_logits))
-        # remove from arc_scores those that should not be used...
+            logits, arc_logits, additional = self.transformerlm(
+                **batch,
+                return_arc_logits=not self.config.combined_loss,
+                return_proj_states=(
+                    self.config.combined_loss
+                    and self.config.distr_mode == "att-n"),
+                return_att=(
+                    self.config.combined_loss
+                    and self.config.distr_mode == "att"),
+                return_embeddings=(
+                    self.config.combined_loss
+                    and self.config.losses is not None
+                    and "cosine" in self.config.losses
+                ),
+                return_activations=(
+                    self.config.combined_loss
+                    and self.config.losses is not None
+                    and "cosine" in self.config.losses
+                ))
 
-        lm_loss = self.loss(
-            logits, batch["label_ids"],
-            ignore_index=ignore_index,
-            reduction="sum")
-        arc_loss: torch.Tensor | None = None
-        additional_losses: dict[str, torch.Tensor] | None = None
+            self.run_hooks(batch, (logits, arc_logits))
+            # remove from arc_scores those that should not be used...
 
-        num_arc_instances: int | None = None
-        if self.train_config.dependency_mode == "supervised":
-            assert "masks" in batch
-            assert arc_logits is not None
-            batch = cast(data.MaskIdBatch, batch)
-            score_pair = self.prepare_scores(
-                arc_logits, batch["masks"])
-
-            if score_pair is not None:
-                score_preds, score_golds = score_pair
-                score_preds = {
-                    key: F.sigmoid(pred) for key, pred in score_preds.items()}
-
-                preds_concat = torch.concat(list(score_preds.values()))
-                golds_concat = torch.concat(list(score_golds.values()))
-                del score_pair
-                del score_preds
-                del score_golds
-
-                to_ignore = self.get_ignore_mask(
-                        preds_concat,
-                        batch["label_ids"],
-                        ignore_index)
-                # TODO: is this correctly masked?
-                # For current should we shift to_ignore?
-
-                arc_loss, num_arc_instances = self.arc_loss(
-                    preds_concat,
-                    cast(torch.BoolTensor, golds_concat),
-                    to_ignore,
-                    reduction="sum")
-                del preds_concat
-                del golds_concat
-            else:
-                warning(
-                    self.config.rank, logger,
-                    "Scores did not align. Check keys.")
-
-        elif self.config.combined_loss:
-            additional_losses = self.additional_losses(
-                additional, to_ignore_mask="triangular",
-                logits=logits,
-                label_ids=batch["label_ids"], ignore_index=ignore_index,
+            lm_loss = self.loss(
+                logits, batch["label_ids"],
+                ignore_index=ignore_index,
                 reduction="sum")
-        del additional
+            arc_loss: torch.Tensor | None = None
+            additional_losses: dict[str, torch.Tensor] | None = None
 
-        num_instances = int((batch["label_ids"] != ignore_index).sum().item())
-        del batch
+            num_arc_instances: int | None = None
+            if self.train_config.dependency_mode == "supervised":
+                assert "masks" in batch
+                assert arc_logits is not None
+                batch = cast(data.MaskIdBatch, batch)
+                score_pair = self.prepare_scores(
+                    arc_logits, batch["masks"])
 
-        metric = self.get_metric(
-            num_instances,
-            num_arc_instances=num_arc_instances,
-            lm_loss=lm_loss,
-            arc_loss=arc_loss,
-            additional_losses=additional_losses,
-            weights=self.config.losses)
+                if score_pair is not None:
+                    score_preds, score_golds = score_pair
+                    score_preds = {
+                        key: F.sigmoid(
+                            pred) for key, pred in score_preds.items()}
 
-        loss: torch.Tensor = metric.loss
-        metric.detach_()
-        metric.to_("cpu")
+                    preds_concat = torch.concat(list(score_preds.values()))
+                    golds_concat = torch.concat(list(score_golds.values()))
+                    del score_pair
+                    del score_preds
+                    del score_golds
+
+                    to_ignore = self.get_ignore_mask(
+                            preds_concat,
+                            batch["label_ids"],
+                            ignore_index)
+                    # TODO: is this correctly masked?
+                    # For current should we shift to_ignore?
+
+                    arc_loss, num_arc_instances = self.arc_loss(
+                        preds_concat,
+                        cast(torch.BoolTensor, golds_concat),
+                        to_ignore,
+                        reduction="sum")
+                    del preds_concat
+                    del golds_concat
+                else:
+                    warning(
+                        self.config.rank, logger,
+                        "Scores did not align. Check keys.")
+
+            elif self.config.combined_loss:
+                additional_losses = self.additional_losses(
+                    additional, to_ignore_mask="triangular",
+                    logits=logits,
+                    label_ids=batch["label_ids"], ignore_index=ignore_index,
+                    reduction="sum")
+            del additional
+
+            num_instances = int(
+                (batch["label_ids"] != ignore_index).sum().item())
+            del batch
+
+            metric = self.get_metric(
+                num_instances,
+                num_arc_instances=num_arc_instances,
+                lm_loss=lm_loss,
+                arc_loss=arc_loss,
+                additional_losses=additional_losses,
+                weights=self.config.losses)
+
+            loss: torch.Tensor = metric.loss
+            metric.detach_()
+            metric.to_("cpu")
 
         if self.train_config.gradient_acc is not None:
-            (loss / self.train_config.gradient_acc).backward()
+            self.scaler.scale(
+                (loss / self.train_config.gradient_acc)).backward()
             # divide the per-instance avg loss by the number of gradient_acc.
             # Otherwise the gradient would be gradient_acc-times as high
             # as in the non-accumulating setting.
@@ -792,11 +803,12 @@ class LMTrainer():
             # accumulating batch. I.e. we are taking an average of averages
             # which can be different from a gloal average.
         else:
-            loss.backward()
+            self.scaler.scale(loss).backward()
         del loss
 
         if perform_opt:
-            self.optimiser.step()   # update parameters
+            self.scaler.step(self.optimiser)   # update parameters
+            self.scaler.update()
             self.optimiser.zero_grad(set_to_none=True)
 
         return metric
@@ -810,118 +822,122 @@ class LMTrainer():
 
         additional: models.AdditionalResults
         arc_logits: None | dict[str, torch.Tensor]
-        logits, arc_logits, additional = self.transformerlm(
-            **batch,
-            return_arc_logits=not self.config.combined_loss,
-            return_proj_states=(
-                self.config.combined_loss
-                and self.config.distr_mode == "att-n"),
-            return_att=(
-                self.config.combined_loss
-                and self.config.distr_mode == "att"),
-            return_embeddings=(
-                self.config.combined_loss
-                and self.config.losses is not None
-                and "cosine" in self.config.losses
-            ),
-            return_activations=(
-                self.config.combined_loss
-                and self.config.losses is not None
-                and "cosine" in self.config.losses
-            ))
-        self.run_hooks(batch, (logits, arc_logits))
-        # remove from arc_scores those that should not be used...
 
-        labels = batch["label_ids"]
-        lm_loss = self.loss(
-            logits, labels,
-            ignore_index=ignore_index, reduction="sum")
+        with torch.autocast(
+                self.device_type, dtype=torch.float16, enabled=self.use_amp):
+            logits, arc_logits, additional = self.transformerlm(
+                **batch,
+                return_arc_logits=not self.config.combined_loss,
+                return_proj_states=(
+                    self.config.combined_loss
+                    and self.config.distr_mode == "att-n"),
+                return_att=(
+                    self.config.combined_loss
+                    and self.config.distr_mode == "att"),
+                return_embeddings=(
+                    self.config.combined_loss
+                    and self.config.losses is not None
+                    and "cosine" in self.config.losses
+                ),
+                return_activations=(
+                    self.config.combined_loss
+                    and self.config.losses is not None
+                    and "cosine" in self.config.losses
+                ))
+            self.run_hooks(batch, (logits, arc_logits))
+            # remove from arc_scores those that should not be used...
 
-        num_instances = int((labels != ignore_index).sum().item())
-
-        surprisal_sum = functions.sum_depadded(
-            functions.logits_to_surprisal(
+            labels = batch["label_ids"]
+            lm_loss = self.loss(
                 logits, labels,
-                ignore_index,
-                softmax=not self.config.discriminative),
-            labels, ignore_index).sum().detach().cpu().item()
-        del labels
+                ignore_index=ignore_index, reduction="sum")
 
-        uas_abs: None | pd.DataFrame | float = None
-        arc_loss: None | torch.Tensor = None
-        additional_losses: None | dict[str, torch.Tensor] = None
+            num_instances = int((labels != ignore_index).sum().item())
 
-        att_entropy = None
-        num_arc_instances = None
-        if mode == "supervised":
-            assert arc_logits is not None
-            assert "masks" in batch
-            batch = cast(data.MaskIdBatch, batch)
-            score_pair = self.prepare_scores(
-                arc_logits, batch["masks"])
+            surprisal_sum = functions.sum_depadded(
+                functions.logits_to_surprisal(
+                    logits, labels,
+                    ignore_index,
+                    softmax=not self.config.discriminative),
+                labels, ignore_index).sum().detach().cpu().item()
+            del labels
 
-            if score_pair is not None:
-                score_preds, score_golds = score_pair
-                score_logits = score_preds
-                score_preds = {
-                    key: F.sigmoid(pred) for key, pred in score_preds.items()}
+            uas_abs: None | pd.DataFrame | float = None
+            arc_loss: None | torch.Tensor = None
+            additional_losses: None | dict[str, torch.Tensor] = None
 
-                preds_concat = torch.concat(list(score_preds.values()))
-                golds_concat = torch.concat(list(score_golds.values()))
+            att_entropy = None
+            num_arc_instances = None
+            if mode == "supervised":
+                assert arc_logits is not None
+                assert "masks" in batch
+                batch = cast(data.MaskIdBatch, batch)
+                score_pair = self.prepare_scores(
+                    arc_logits, batch["masks"])
 
-                to_ignore_dict = {
-                    key: self.get_ignore_mask(
-                        preds,
-                        batch["label_ids"],
-                        ignore_index)
-                    for key, preds in score_preds.items()}
-                to_ignore = cast(
-                    torch.BoolTensor, torch.concat(
-                        list(to_ignore_dict.values())))
+                if score_pair is not None:
+                    score_preds, score_golds = score_pair
+                    score_logits = score_preds
+                    score_preds = {
+                        key: F.sigmoid(pred) for key, pred
+                        in score_preds.items()}
 
-                arc_loss, num_arc_instances = self.arc_loss(
-                    preds_concat,
-                    cast(torch.BoolTensor, golds_concat),
-                    to_ignore,
+                    preds_concat = torch.concat(list(score_preds.values()))
+                    golds_concat = torch.concat(list(score_golds.values()))
+
+                    to_ignore_dict = {
+                        key: self.get_ignore_mask(
+                            preds,
+                            batch["label_ids"],
+                            ignore_index)
+                        for key, preds in score_preds.items()}
+                    to_ignore = cast(
+                        torch.BoolTensor, torch.concat(
+                            list(to_ignore_dict.values())))
+
+                    arc_loss, num_arc_instances = self.arc_loss(
+                        preds_concat,
+                        cast(torch.BoolTensor, golds_concat),
+                        to_ignore,
+                        reduction="sum")
+
+                    # TODO allow to manage current and next dep
+                    # => two UAS metrics
+
+                    uas = []
+                    if self.config.masks_setting in ("current", "both"):
+                        uas.append(functions.uas_composition(
+                            score_preds, score_golds, batch["label_ids"],
+                            ignore_index, "current",
+                            "head_current", "child_current"))
+                    if self.config.masks_setting in ("next", "both"):
+                        uas.append(functions.uas_composition(
+                            score_preds, score_golds, batch["label_ids"],
+                            ignore_index, "next", "head_next", "child_next"))
+                    if len(uas) == 1:
+                        uas_abs = uas[0]
+                    elif len(uas) > 1:
+                        uas_abs = pd.DataFrame({
+                            "current": [uas[0]],
+                            "next": [uas[1]]})
+                    else:
+                        raise Exception(
+                            "masks_setting should not be "
+                            + self.config.masks_setting)
+
+                    att_entropy = pd.DataFrame({
+                        key: losses.get_attention_entropy(
+                            logits_preds.softmax(-1), to_ignore_dict[key],
+                            "none").flatten(1).sum(-1).detach().cpu()
+                        for key, logits_preds in score_logits.items()})
+                    # can make separate list of heads
+            elif self.config.combined_loss:
+                additional_losses = self.additional_losses(
+                    additional, to_ignore_mask="triangular",
+                    logits=logits,
+                    label_ids=batch["label_ids"], ignore_index=ignore_index,
                     reduction="sum")
-
-                # TODO allow to manage current and next dep
-                # => two UAS metrics
-
-                uas = []
-                if self.config.masks_setting in ("current", "both"):
-                    uas.append(functions.uas_composition(
-                        score_preds, score_golds, batch["label_ids"],
-                        ignore_index, "current",
-                        "head_current", "child_current"))
-                if self.config.masks_setting in ("next", "both"):
-                    uas.append(functions.uas_composition(
-                        score_preds, score_golds, batch["label_ids"],
-                        ignore_index, "next", "head_next", "child_next"))
-                if len(uas) == 1:
-                    uas_abs = uas[0]
-                elif len(uas) > 1:
-                    uas_abs = pd.DataFrame({
-                        "current": [uas[0]],
-                        "next": [uas[1]]})
-                else:
-                    raise Exception(
-                        "masks_setting should not be "
-                        + self.config.masks_setting)
-
-                att_entropy = pd.DataFrame({
-                    key: losses.get_attention_entropy(
-                        logits_preds.softmax(-1), to_ignore_dict[key],
-                        "none").flatten(1).sum(-1).detach().cpu()
-                    for key, logits_preds in score_logits.items()})
-                # can make separate list of heads
-        elif self.config.combined_loss:
-            additional_losses = self.additional_losses(
-                additional, to_ignore_mask="triangular",
-                logits=logits,
-                label_ids=batch["label_ids"], ignore_index=ignore_index,
-                reduction="sum")
-        del logits
+            del logits
 
         metric = self.get_metric(
             num_instances,
@@ -933,8 +949,8 @@ class LMTrainer():
             att_entropy=att_entropy,
             additional_losses=additional_losses,
             weights=self.config.losses)
-        metric.to_("cpu")
         metric.detach_()
+        metric.to_("cpu")
         return metric
 
     def check_early_stop(
@@ -1195,10 +1211,61 @@ class LMTrainer():
             return_embeddings: bool | None = None,
             return_activations: bool | None = None,
             return_logits: bool | None = None,
-            return_label_ids: bool = False
+            return_label_ids: bool = False,
             ) -> tuple[
                 list[torch.Tensor], dict[str, list[torch.Tensor]],
                 AdditionalPrediction]:
+        """Returns logits and arc scores"""
+
+        probs_global: list[torch.Tensor] = []
+        attention_logits_global: DefaultDict[
+            str, list[torch.Tensor]] = defaultdict(list)
+        additional_global: DefaultDict[
+            models.AdditionalKeys, list[torch.Tensor]] = defaultdict(list)
+        for (
+            pred_probs, attention_logits,
+            additional) in self.predict_batched(
+                dataset,
+                make_prob=make_prob,
+                only_true=only_true,
+                dataset_name=dataset_name,
+                token_mapper=token_mapper,
+                return_arc_logits=return_arc_logits,
+                return_proj_states=return_proj_states,
+                return_att=return_att,
+                return_embeddings=return_embeddings,
+                return_activations=return_activations,
+                return_logits=return_logits,
+                return_label_ids=return_label_ids,):
+
+            for key, attention in attention_logits.items():
+                attention_logits_global[key].extend(attention)
+
+            for key, tensorlist in additional.items():
+                additional_global[key].extend(  # type: ignore
+                    tensorlist)  # type: ignore
+            probs_global.extend(pred_probs)
+
+        return (
+            probs_global, dict(attention_logits_global),
+            dict(additional_global))  # type: ignore
+
+    def predict_batched(
+            self, dataset: data.TokenisedDataset[data.IdsSentence],
+            make_prob: bool = False,
+            only_true: bool = False,
+            dataset_name: str | None = None,
+            token_mapper: data.TokenMapper | None = None,
+            return_arc_logits: bool | None = None,
+            return_proj_states: bool | None = None,
+            return_att: bool | None = None,
+            return_embeddings: bool | None = None,
+            return_activations: bool | None = None,
+            return_logits: bool | None = None,
+            return_label_ids: bool = False,
+            ) -> Iterable[tuple[
+                list[torch.Tensor], dict[str, list[torch.Tensor]],
+                AdditionalPrediction]]:
         """Returns logits and arc scores"""
         # TODO: Does this work with ddp? Batches are distributed but not
         # joined back together.
@@ -1214,11 +1281,9 @@ class LMTrainer():
 
         ignore_index = dataset.keys_for_padding["label_ids"]
 
-        unpadded_logits: list[torch.Tensor] = []
-        unpadded_arc_logits: defaultdict[str, list[torch.Tensor]]
-        unpadded_arc_logits = defaultdict(list)
-        unpadded_additional: defaultdict[str, list[torch.Tensor]]
-        unpadded_additional = defaultdict(list)
+        unpadded_logits: list[torch.Tensor]
+        unpadded_arc_logits: dict[str, list[torch.Tensor]]
+        unpadded_additional: dict[str, list[torch.Tensor]]
 
         self.transformerlm.eval()
         with torch.no_grad():
@@ -1228,6 +1293,8 @@ class LMTrainer():
             arc_logits: dict[str, torch.Tensor] | None
             additional: models.AdditionalResults
             for batch in tqdm(loader, desc="Batches"):
+                unpadded_arc_logits = {}
+                unpadded_additional = {}
                 batch = self.batch_to(batch, device=self.config.device)
 
                 if return_arc_logits is None:
@@ -1252,19 +1319,23 @@ class LMTrainer():
                         and self.config.losses is not None
                         and "cosine" in self.config.losses
                     )
-                logits, arc_logits, additional = self.transformerlm(
-                    **batch,
-                    return_arc_logits=return_arc_logits,
-                    return_proj_states=return_proj_states,
-                    return_att=return_att,
-                    return_embeddings=return_embeddings,
-                    return_activations=return_activations)
+
+                with torch.autocast(
+                        self.device_type, dtype=torch.float16,
+                        enabled=self.use_amp):
+                    logits, arc_logits, additional = self.transformerlm(
+                        **batch,
+                        return_arc_logits=return_arc_logits,
+                        return_proj_states=return_proj_states,
+                        return_att=return_att,
+                        return_embeddings=return_embeddings,
+                        return_activations=return_activations)
 
                 self.run_hooks(batch, (logits, arc_logits))
                 labels = batch["label_ids"]
 
                 if return_logits:
-                    unpadded_additional["logits"].extend(
+                    unpadded_additional["logits"] = (
                             functions.unpad(
                                 logits,
                                 labels, ignore_index
@@ -1280,12 +1351,12 @@ class LMTrainer():
                     logits = functions.select_true(
                         logits, labels, ignore_index)
 
-                unpadded_logits.extend(
+                unpadded_logits = (
                     functions.unpad(logits, labels, ignore_index))
 
                 if arc_logits is not None:
                     for key in arc_logits.keys():
-                        unpadded_arc_logits[key].extend(
+                        unpadded_arc_logits[key] = (
                             functions.unpad_masks(
                                 arc_logits[key].swapaxes(0, 1),
                                 labels, ignore_index))
@@ -1296,7 +1367,7 @@ class LMTrainer():
                         num_after_square = 0
                         if additional_key in ("proj_states",):
                             num_after_square = 1
-                        unpadded_additional[additional_key].extend(
+                        unpadded_additional[additional_key] = (
                             functions.unpad_masks(
                                 additional[
                                     additional_key].swapaxes(  # type: ignore
@@ -1306,7 +1377,7 @@ class LMTrainer():
 
                 for additional_key in ("embeddings", "activations"):
                     if additional_key in additional:  # type: ignore
-                        unpadded_additional[additional_key].extend(
+                        unpadded_additional[additional_key] = (
                             functions.unpad(
                                 additional[additional_key],  # type: ignore
                                 labels, ignore_index
@@ -1317,26 +1388,26 @@ class LMTrainer():
                         # <EOS> dot pred(.) is part of loss.
 
                 if return_label_ids:
-                    unpadded_additional["label_ids"].extend(
+                    unpadded_additional["label_ids"] = (
                         functions.unpad(
                             labels, labels, ignore_index
                         )
                     )
 
-        # This should collect the data across all processes.
-        # The distributed sampler chunked it in an interleaved
-        # fashion and did not shuffle it, so getting back
-        # the correct order should be just a matter of interleaving
-        # the lists of results. TODO: test
-        unpadded_logits = self.gather_list(
-            unpadded_logits, interleave=True)
-        unpadded_arc_logits_out = self.gather_dict_of_lists(
-            dict(unpadded_arc_logits), interleave=True)
-        unpadded_additional_out = self.gather_dict_of_lists(
-            dict(unpadded_additional), interleave=True)
-        return (
-            unpadded_logits, unpadded_arc_logits_out,
-            cast(AdditionalPrediction, unpadded_additional_out))
+                # This should collect the data across all processes.
+                # The distributed sampler chunked it in an interleaved
+                # fashion and did not shuffle it, so getting back
+                # the correct order should be just a matter of interleaving
+                # the lists of results. TODO: test
+                unpadded_logits = self.gather_list(
+                    unpadded_logits, interleave=True)
+                unpadded_arc_logits_out = self.gather_dict_of_lists(
+                    dict(unpadded_arc_logits), interleave=True)
+                unpadded_additional_out = self.gather_dict_of_lists(
+                    dict(unpadded_additional), interleave=True)
+                yield (
+                    unpadded_logits, unpadded_arc_logits_out,
+                    cast(AdditionalPrediction, unpadded_additional_out))
 
     def generate(
             self, token_mapper: data.TokenMapper,

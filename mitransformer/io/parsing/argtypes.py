@@ -40,7 +40,7 @@ def str_to_bool(string: str) -> bool:
         pass
     raise Exception((
         f"argument value {string} cannot"
-        "be parsed as a string!"))
+        " be parsed as a string!"))
 
 
 class OptNone(Generic[T]):

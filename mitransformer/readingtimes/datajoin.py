@@ -96,8 +96,7 @@ def join(
         .drop_duplicates()
         .shape[0]
     )
-    info(0, logger, f"Token count: {token_count}")  # Should match ~24679
-
+    info(0, logger, f"Token count: {token_count}")
     if output_file is None:
         return measurement
     # Write output

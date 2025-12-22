@@ -71,7 +71,7 @@ def save_doc_as_conllu(
     if location is not None:
         with open(location, "a") as f:
             for sentence in doc.sents:
-                if min_len is None or len(sentence._.conll) > min_len:
+                if min_len is None or len(sentence._.conll) >= min_len:
                     for word in sentence._.conll:
                         token = word["FORM"]
 
@@ -94,7 +94,7 @@ def save_doc_as_conllu(
     else:
         return_str = ""
         for sentence in doc.sents:
-            if min_len is None or len(sentence._.conll) > min_len:
+            if min_len is None or len(sentence._.conll) >= min_len:
                 for word in sentence._.conll:
                     token = word["FORM"]
                     num_token = token.replace('.', '')
@@ -170,6 +170,7 @@ def parse_wikitext_with_spacy(
         output_file_name_train: str = "wikitext_spacy_train.conllu",
         output_file_name_dev: str = "wikitext_spacy_dev.conllu",
         output_file_name_test: str = "wikitext_spacy_test.conllu",
+        min_len: int | None = 4,
         lowercase: bool = True):
     """Files should not exist or be empty"""
 
@@ -196,7 +197,7 @@ def parse_wikitext_with_spacy(
                 treated = make_lowercase(treated)
             save_doc_as_conllu(
                 parse(treated),
-                os.path.join(output_dir, filename), min_len=4)
+                os.path.join(output_dir, filename), min_len=min_len)
 
 
 def remove_at_symbols(text: str) -> str:

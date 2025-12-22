@@ -45,6 +45,9 @@ class MemMapDataset(
             id_hl: RaggedMmap | None = None,
             max_len: int | None = 40,
             first_k: int | None = None):
+        """max_len does not do doing anything if loading
+        from a memory mapped dataset. The length needs to be specified
+        when writing that dataset to memory and not when loading it."""
         self.mapped: bool = False
 
         self.file: str | None = file

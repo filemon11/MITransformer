@@ -9,7 +9,7 @@ from .dataset import (  # noqa: F401
     SentenceDataset,
     MemMapWindowDataset, MasksSetting,
     TransformMaskHeadChild, SentenceIds,
-    TokenisedDataset, IdsSentence)
+    TokenisedDataset, IdsSentence, TransformFunc)
 from .dataloader import (  # noqa: F401
     DataLoader, get_loader,
     TokenisedBatch, FastBatch,

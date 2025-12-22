@@ -5,10 +5,12 @@ from ... import parsing
 from .. import train
 from . import objective, sampler
 
+from conllu.models import TokenList
+
 import optuna
 import pandas as pd
 
-from typing import Tuple
+from typing import Tuple, Iterable, Sequence
 
 from mitransformer.utils.logmaker import (
     getLogger, info)
@@ -33,9 +35,7 @@ class PsyLingObjective(objective.Objective):
             f"{arguments.lme_formula['formula']}")
 
         # Load candidates
-
         # TODO: check whether tokenisation at surprisal step is correct
-
         assert all(
             [ds in readingtimes.CORPORA for ds in arguments.psyling_dataset])
         psyling_df = pd.concat([
@@ -47,7 +47,23 @@ class PsyLingObjective(objective.Objective):
             for dataset in arguments.psyling_dataset])
 
         self.tok_frame, self.untok_frame = get_frames(
-            psyling_df)
+            psyling_df, max_len=self.arguments.max_len_eval_test)
+
+        transform = None
+        assert self.data_provider is not None
+        if isinstance(
+                self.data_provider.datasets[
+                    "train"].dataset,  # type: ignore
+                data.MemMapDepDataset):
+            transform = self.data_provider.datasets[
+                "train"].dataset.transform_mask  # type: ignore
+
+        # Create memmaped dataset for psyling data
+        self.dataset = create_dataset(
+            self.tok_frame.df["conllu"].tolist(),
+            self.arguments.masked, self.arguments.masks_setting,
+            transform, self.data_provider.datasets["token_mapper"]
+        )
 
         # Load measurements
         is_et_corpus = [
@@ -56,21 +72,9 @@ class PsyLingObjective(objective.Objective):
             "Psyling corpora must be all of the same type (either ET or SP)."
         )
         self.is_et_corpus: bool = is_et_corpus[0]
-        measurement_keys = [
-            "FFD", "GPT", "GD", "RBT"] if self.is_et_corpus else ["RT"]
-        measurement_keys.extend(["word", "item", "zone", "WorkerId", "Corpus"])
-        measurements = [
-            readingtimes.prepare_RTs(
-                data.rt_corpus_to_measurements_file[dataset],
-                corpus=dataset)[measurement_keys]
-            for dataset in arguments.psyling_dataset
-        ]
-        self.measurements = pd.concat(measurements)
-        # remove items that are not needed (i.e. that won't be joined on later)
-        keys = ["Corpus", "item", "zone"]
-        self.measurements = self.measurements.merge(
-            psyling_df[keys],
-            on=keys, how="inner")
+        self.measurements = get_measurements(
+            self.is_et_corpus, arguments.psyling_dataset, psyling_df
+        )
 
         # # Is this necessary?
         # self.measurements[self.arguments.lme_formula["to_predict"]] = np.log(
@@ -104,39 +108,25 @@ class PsyLingObjective(objective.Objective):
         metrics = None
         step = 0
 
-        assert self.data_provider is not None
-
         add_method = self.tok_frame.add_
         loglik: None | float = None
         for step, metrics in enumerate(train_iterator, start=1):
             # Handle pruning based on the intermediate value.
-            transform = None
-
-            # somehow this is ill-typed. Provider is assigned
-            # dataloader by Objective parent class
-            if isinstance(
-                    self.data_provider.datasets[
-                        "train"].dataset,  # type: ignore
-                    data.MemMapDepDataset):
-                transform = self.data_provider.datasets[
-                    "train"].dataset.transform_mask  # type: ignore
 
             to_add = ["surprisal", *set(self.arguments.lme_formula[
-                    "covariates"]) - set(readingtimes.BASELINE_METRICS)]
+                "covariates"]) - set(
+                    ["surprisal", *readingtimes.BASELINE_METRICS])]
             to_add = [ta for ta in to_add if "." not in ta]
             # no spillover versions
 
             add_method(
                 *to_add,
-                masked=self.arguments.masked,
-                token_mapper_dir=self.data_provider.datasets["token_mapper"],
-                transform=transform, trainer=trainer,
-                masks_setting=self.arguments.masks_setting,
+                dataset=self.dataset, trainer=trainer,
                 arc_distr_mode=self.arguments.distr_mode,
                 include_current=self.arguments.include_current,
                 length_weighted=self.arguments.length_weighted)
             # TODO: allow unmasked dataset to be used
-            # TODO: implement candidates
+
             # Untokenisation
             # We cannot omit this because surprisal can be a sum
             # of token surprisals.
@@ -147,7 +137,7 @@ class PsyLingObjective(objective.Objective):
             frame.truncate_(right=1)
             unsplit_frame = frame.unsplit()
 
-            print(unsplit_frame.df.head(n=10))
+            print(unsplit_frame.df.tail(n=15))
 
             # Joining
             # This may take some time. Should we precompute this,
@@ -167,12 +157,9 @@ class PsyLingObjective(objective.Objective):
             joined["WorkerId"] = joined["Corpus"] + joined["WorkerId"]
 
             # Scale predictors
-            num_cols = list(
-                set(joined.select_dtypes(include="number").columns)
-                - {self.arguments.lme_formula["to_predict"], "zone"})
-            joined[num_cols] = (
-                joined[num_cols]
-                - joined[num_cols].mean()) / joined[num_cols].std()
+            z_score_numerical_(
+                joined, {self.arguments.lme_formula["to_predict"], "zone"}
+            )
 
             # Fit lme
             lme, d0 = readingtimes.fit_gpboost(
@@ -181,10 +168,11 @@ class PsyLingObjective(objective.Objective):
                 predictors=self.arguments.lme_formula["covariates"],
                 random_effects=self.arguments.lme_formula["random_effects"]
             )
+            model_props = readingtimes.get_model_props(lme, len(d0))
             info(
                 arguments.rank, logger,
                 readingtimes.model_props_to_str(
-                    readingtimes.get_model_props(lme, len(d0)),
+                    model_props,
                     ["Intercept"] + list(
                         self.arguments.lme_formula["covariates"]),
                     ["Error_term"]
@@ -203,8 +191,7 @@ class PsyLingObjective(objective.Objective):
             # TODO: decide plausible lme structure
 
             # Get optimisation metric
-            loglik = -readingtimes.get_model_props(
-                lme, len(unsplit_frame.df))["negloglik"]
+            loglik = -model_props["negloglik"]
 
             # Add to metric writer
             trainer.writer.custom_add_scalar(
@@ -251,6 +238,7 @@ class PsyLingObjective(objective.Objective):
 
 def get_frames(
         psyling_df: pd.DataFrame,
+        max_len: int | None = None
         ) -> Tuple[readingtimes.SplitFrame, readingtimes.SplitFrame]:
 
     orig_frame = readingtimes.UnsplitFrame(
@@ -269,4 +257,80 @@ def get_frames(
         len(sentence) for sentence in tok_frame.untokenise().df[
             readingtimes.TOKEN_COL]])
 
+    if max_len is not None:
+        include = [
+            len(sentence) <= max_len
+            for sentence in untok_frame.df[readingtimes.TOKEN_COL]]
+        untok_frame.df = untok_frame.df[include].reset_index(drop=True)
+        tok_frame.df = tok_frame.df[include].reset_index(drop=True)
+
     return tok_frame, untok_frame
+
+
+def create_dataset(
+        tokenlists: list[TokenList],
+        masked: bool, masks_setting: data.MasksSetting,
+        transform: data.TransformFunc | None,
+        token_mapper: data.TokenMapper,
+        ) -> data.MemMapDataset | data.MemMapDepDataset:
+
+    with open("temp_file", "w") as temp:
+        for sentence in tokenlists:
+            temp.write(sentence.serialize())
+
+    dataset: data.MemMapDataset | data.MemMapDepDataset
+    if masked:
+        assert masks_setting is not None
+        assert transform is not None
+        dataset = data.MemMapDepDataset.from_file(
+            "temp_file", transform_masks=transform,
+            masks_setting=masks_setting,
+            max_len=None)
+    else:
+        dataset = data.MemMapDataset.from_file(
+            "temp_file",
+            max_len=None)
+    dataset.map_to_ids(
+        token_mapper,
+        "temp_memmap")
+    return dataset
+
+
+def get_measurements(
+        is_et_corpus: bool,
+        psyling_datasets: Iterable[readingtimes.Corpus],
+        psyling_df: pd.DataFrame | None = None,
+        merge_on: Sequence[str] = ["Corpus", "item", "zone"]
+        ) -> pd.DataFrame:
+    measurement_keys = [
+        "FFD", "GPT", "GD", "RBT"] if is_et_corpus else ["RT"]
+    measurement_keys.extend(["word", "item", "zone", "WorkerId", "Corpus"])
+    measurements = [
+        readingtimes.prepare_RTs(
+            data.rt_corpus_to_measurements_file[dataset],
+            corpus=dataset)[measurement_keys]
+        for dataset in psyling_datasets
+    ]
+    measurements_df = pd.concat(measurements)
+    # remove items that are not needed (i.e. that won't be joined on later)
+
+    if psyling_df is not None:
+        measurements_df = measurements_df.merge(
+            psyling_df[merge_on],
+            on=merge_on, how="inner")
+    return measurements_df
+
+
+def z_score_(
+        df: pd.DataFrame, cols: Sequence[str]) -> None:
+    df[cols] = (
+        df[cols]
+        - df[cols].mean()) / df[cols].std()
+
+
+def z_score_numerical_(
+        df: pd.DataFrame, exception: Iterable[str]) -> None:
+    num_cols = list(
+        set(df.select_dtypes(include="number").columns)
+        - set(exception))
+    z_score_(df, num_cols)

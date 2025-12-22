@@ -1,5 +1,5 @@
 from .transform import (  # noqa: F401
-    TransformMaskHeadChild)
+    TransformMaskHeadChild, TransformFunc)
 from .sentence import (  # noqa: F401
     TokenisedSentence, TokenisedMaskedSentence,
     FastSentence, FastMaskedSentence,

@@ -67,7 +67,7 @@ python -m spacy download en_core_web_trf
 
 # Preparing corpus for training (Wikitext)
 
-python -m mitransformer dataprep --first_k none --first_k_eval_test none
+python -m mitransformer dataprep --first_k none --first_k_eval_test none --max_len_train 40
 
 ```
 

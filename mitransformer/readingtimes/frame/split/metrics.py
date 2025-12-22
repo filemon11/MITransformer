@@ -6,6 +6,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM  # type: ignore
 from ....train.losses import entropy
 from ....train import attdistr, losses
+from .... import models
 
 from ...lingutils import (
     UntokSplitFunc, UntokSplitAdd,
@@ -23,9 +24,11 @@ from ....train import LMTrainer, inverse_sigmoid, select_true, unpad
 
 from itertools import cycle
 from abc import ABC, abstractmethod
+from collections import defaultdict
 
 from typing import (
-    Type, Any, Iterable, Callable, Literal, Collection, Tuple)
+    Type, Any, Iterable, Callable, Literal, Collection, Tuple,
+    DefaultDict)
 
 LANG = "en"
 
@@ -204,8 +207,8 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
 
     def __call__(
             self, df: pd.DataFrame,
-            token_mapper_dir: TokenMapper | str,
             trainer: LMTrainer | str,
+            token_mapper_dir: TokenMapper | str | None = None,
             dataset: CoNLLUDataset | SentenceDataset | None = None,
             masked: bool = True,
             transform: TransformMaskHeadChild | None = None,
@@ -275,44 +278,64 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             # huggingface weights.)
 
         else:
-            if isinstance(token_mapper_dir, str):
-                token_mapper: TokenMapper = TokenMapper.load(token_mapper_dir)
-            else:
-                token_mapper = token_mapper_dir
-
             assert dataset is not None
-            dataset.map_to_ids(token_mapper)
+            if token_mapper_dir is not None:
+                if isinstance(token_mapper_dir, str):
+                    token_mapper: TokenMapper = TokenMapper.load(
+                        token_mapper_dir)
+                else:
+                    token_mapper = token_mapper_dir
 
-            pred_probs, attention_logits, additional = trainer.predict(
-                dataset,
-                make_prob=True,
-                only_true=True,
-                return_arc_logits=True,
-                return_logits=True,
-                return_label_ids=True)
+                dataset.map_to_ids(token_mapper)
 
-            if trainer.config.device != "cpu":
-                attention_logits = {
-                    key: [tensor.to("cpu") for tensor in tensorlist]
-                    for key, tensorlist in attention_logits.items()}
-                pred_probs = [tensor.to("cpu") for tensor in pred_probs]
+            probs_global: list[torch.Tensor] = []
+            attention_logits_global: DefaultDict[
+                str, list[torch.Tensor]] = defaultdict(list)
+            additional_global: DefaultDict[
+                models.AdditionalKeys, list[torch.Tensor]] = defaultdict(list)
+            for (
+                pred_probs, attention_logits,
+                additional) in trainer.predict_batched(
+                    dataset,
+                    make_prob=True,
+                    only_true=True,
+                    return_arc_logits=True,
+                    return_logits=True,
+                    return_label_ids=True):
 
+                if trainer.config.device != "cpu":
+                    attention_logits = {
+                        key: [tensor.to("cpu") for tensor in tensorlist]
+                        for key, tensorlist in attention_logits.items()}
+
+                    pred_probs = [tensor.to("cpu") for tensor in pred_probs]
+
+                    for key, tensorlist in additional.items():
+                        additional[key] = [  # type: ignore
+                            tensor.to("cpu")
+                            for tensor in tensorlist]  # type: ignore
+
+                for key, attention in attention_logits.items():
+                    attention_logits_global[key].extend(attention)
                 for key, tensorlist in additional.items():
-                    additional[key] = [  # type: ignore
-                        tensor.to("cpu")
-                        for tensor in tensorlist]  # type: ignore
+                    additional_global[key].extend(  # type: ignore
+                            additional[key])  # type: ignore
 
-            probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
-            assert all(len(p) == len(t) for p, t in zip(probs, df["word"])), (
-                ([(len(p), len(t)) for p, t in zip(probs, df["word"])]))
-            return pd.Series(probs), {
-                "attention_logits": attention_logits,
+                probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
+                probs_global.extend(probs)
+            assert all(
+                comparison := [len(p) == len(t) for p, t in zip(
+                    probs_global, df["word"])]), (
+                        comparison)
+
+            return pd.Series(probs_global), {
+                "attention_logits": attention_logits_global,
                 "dataset": dataset,
                 "transform": transform,
                 "token_mapper_dir": token_mapper_dir,
                 "trainer": trainer,
                 "masks_setting": masks_setting,
-                **additional}
+                **additional_global}  # type: ignore
 
 
 class SplitTokMetricMakerMask(SplitTokMetricMaker):

@@ -63,7 +63,7 @@ def get_model_props(
     k = k_fixed + k_random
 
     aic = 2 * k - 2 * negloglik
-    bic = np.log(n_observations) * k + 2 * negloglik
+    bic = np.log(n_observations) * k - 2 * negloglik
 
     cov_pars.loc[1] = np.sqrt(cov_pars.iloc[0])
     cov_pars.index = ["Variance", "Std.Dev."]  # type: ignore
