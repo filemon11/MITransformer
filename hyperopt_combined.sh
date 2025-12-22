@@ -28,7 +28,7 @@ export OMP_NUM_THREADS=$THREADS_PER_GPU
 prefix="--standalone --nnodes=1 --nproc-per-node=${N_GPUS} -m mitransformer.__main__"
 
 general_params="--n_workers ${THREADS_PER_GPU} --device ${DEVICE} --use_ddp ${USE_DDP}"
-general_hyperopt_params='--shift 1 --global_distr 0 --optimise loglik --masked 0 --combined True --losses {lm:none,cosine:none} --first_k 40000 --first_k_eval_test 10000 --batch_size 30 --gradient_acc 20 --epochs 5 --early_stop_after 4 --n_trials=100 --eval_interval 20 --n_warmup_steps 2 --use_steps 1 --max_steps none'
+general_hyperopt_params='--shift 1 --global_distr 0 --optimise loglik --masked 0 --combined True --losses {lm:none,cosine:none} --first_k 40000 --first_k_eval_test 10000 --batch_size 40 --gradient_acc 20 --epochs 5 --early_stop_after 4 --n_trials=100 --eval_interval 20 --n_warmup_steps 2 --use_steps 1 --max_steps none'
 hyperopt_selection='--use_lstm 0 --psyling_dataset frank_SP_train,naturalstories_train --sampler tpe --pruner hyperband --length_weighted 1 --lme_formula RT~length+length.1+frequency+frequency.1+surprisal+surprisal.1+cosine+cosine.1+position+(length+length.1+frequency+frequency.1+surprisal+surprisal.1+cosine+cosine.1+position|WorkerId)+(1|Corpus) --layer_design (0,) --width 4 --depth 4 --n_embd 400 --dropout_attn 0.0 --dropout_resid 0.0 --dropout_ff 0.0 --dropout_embd 0.06 --dropout_lstm 0.0 --learning_rate 1e-4 --d_ff_factor 4 --bias 0 --use_dual_fixed 0'
 
 core="${general_params} hyperopt ${hyperopt_selection} ${general_hyperopt_params}"

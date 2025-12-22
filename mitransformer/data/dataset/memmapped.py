@@ -44,6 +44,7 @@ class MemMapDataset(
             file: str | None = None,
             id_hl: RaggedMmap | None = None,
             max_len: int | None = 40,
+            min_len: int | None = 3,
             first_k: int | None = None):
         """max_len does not do doing anything if loading
         from a memory mapped dataset. The length needs to be specified
@@ -54,6 +55,7 @@ class MemMapDataset(
         self.first_k: int | None = first_k
 
         self.max_len: int | None = max_len
+        self.min_len: int | None = min_len
 
         self.id_hl: RaggedMmap | None = id_hl
         if id_hl is not None:
@@ -71,6 +73,7 @@ class MemMapDataset(
         return (functions.get_sentence(tl) for tl in functions.load_conllu(
             self.file,
             self.max_len,
+            self.min_len,
             first_k=self.first_k))
 
     @property
@@ -79,24 +82,29 @@ class MemMapDataset(
         return (functions.get_tokens(tl) for tl in functions.load_conllu(
             self.file,
             self.max_len,
+            self.min_len,
             first_k=self.first_k))
 
     @classmethod
     def from_file(
             cls, file: str,
             max_len: int | None = 40,
+            min_len: int | None = 3,
             first_k: int | None = None,
             ) -> Self:
 
         return cls(
             file,
-            max_len=max_len, first_k=first_k)
+            max_len=max_len,
+            min_len=min_len,
+            first_k=first_k)
 
     @classmethod
     def from_memmap(
             cls, path: str,
             pad_id: int = 0,
             max_len: int | None = 40,
+            min_len: int | None = 3,
             first_k: int | None = None) -> Self:
 
         id_hl = RaggedMmap(path)
@@ -104,6 +112,7 @@ class MemMapDataset(
         dataset = cls(
             id_hl=id_hl,
             max_len=max_len,
+            min_len=min_len,
             first_k=first_k)
         dataset.keys_for_tensors = {"input_ids", "label_ids"}
         dataset.keys_for_padding = {"input_ids": pad_id,
@@ -161,11 +170,13 @@ class MemMapDepDataset(
             file: str | None = None,
             id_hl: RaggedMmap | None = None,
             max_len: int | None = 40,
+            min_len: int | None = 3,
             first_k: int | None = None,
             transform_mask: transform.TransformFunc | None = None,
             masks_setting: utils.MasksSetting = "current"):
         super().__init__(
             file, id_hl=id_hl, max_len=max_len,
+            min_len=min_len,
             first_k=first_k)
         self.transform_mask: transform.TransformFunc | None
         self.transform_mask = transform_mask
@@ -181,12 +192,14 @@ class MemMapDepDataset(
         return (functions.get_head_list(tl) for tl in functions.load_conllu(
             self.file,
             self.max_len,
+            self.min_len,
             first_k=self.first_k))
 
     @classmethod
     def from_file(
             cls, file: str,
             max_len: int | None = 40,
+            min_len: int | None = 3,
             first_k: int | None = None,
             transform_masks: Callable[
                 [npt.NDArray[np.bool_]],
@@ -197,7 +210,8 @@ class MemMapDepDataset(
 
         return cls(
             file=file,
-            max_len=max_len, first_k=first_k,
+            max_len=max_len, min_len=min_len,
+            first_k=first_k,
             transform_mask=transform_masks,
             masks_setting=masks_setting)
 
@@ -206,6 +220,7 @@ class MemMapDepDataset(
             cls, path: str,
             pad_id: int = 0,
             max_len: int | None = 40,
+            min_len: int | None = 3,
             first_k: int | None = None,
             transform_masks: Callable[
                 [npt.NDArray[np.bool_]],
@@ -219,6 +234,7 @@ class MemMapDepDataset(
         dataset = cls(
             id_hl=id_hl,
             max_len=max_len,
+            min_len=min_len,
             first_k=first_k,
             transform_mask=transform_masks,
             masks_setting=masks_setting,)
@@ -281,6 +297,7 @@ class MemMapWindowDataset(MemMapDepDataset):
             masks_setting: utils.MasksSetting = "current",
             memdir: str | None = None,
             max_len: int = 40,
+            min_len: int = 3,
             first_k: int | None = None):
         self.mapped: bool = False
 
@@ -291,6 +308,7 @@ class MemMapWindowDataset(MemMapDepDataset):
         self.transform_mask = transform_mask
 
         self.max_len = max_len
+        self.min_len = min_len
 
         self.masks_setting: utils.MasksSetting
         self.masks_setting = masks_setting
@@ -311,6 +329,7 @@ class MemMapWindowDataset(MemMapDepDataset):
     def from_file(
             cls, file: str,
             max_len: int | None = 40,
+            min_len: int | None = 3,
             first_k: int | None = None,
             transform_masks: Callable[
                 [npt.NDArray[np.bool_]],
@@ -328,6 +347,7 @@ class MemMapWindowDataset(MemMapDepDataset):
             cls, path: str,
             pad_id: int = 0,
             max_len: int | None = 40,
+            min_len: int | None = 3,
             first_k: int | None = None,
             transform_masks: Callable[
                 [npt.NDArray[np.bool_]],

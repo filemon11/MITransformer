@@ -99,7 +99,7 @@ def load_natural_stories(
         For every token, its word ID.
     """
 
-    # TODO: add first item in id (e.g. 1.3.whole -> 1) to set for eachr row.
+    # TODO: add first item in id (e.g. 1.3.whole -> 1) to set for each row.
     # Then make list from that, make dict from list item to index,
     # create random mask and iterate through corpus to append the stories
     # This will result in all sentences of a story belonging to the same split.

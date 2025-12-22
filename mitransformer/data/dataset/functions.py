@@ -40,12 +40,14 @@ EOS_DEPREL = "eos"
 
 def load_conllu_from_str(
         conllu_str: str, max_len: int | None = 40,
+        min_len: int | None = 3,
         verbose: bool = False
         ) -> list[TokenList]:
     return [tokenlist for tokenlist in tqdm.tqdm(
                 conllu.parse(conllu_str), "Creating tokenlists",
                 disable=not verbose)
-            if max_len is None or len(tokenlist) <= max_len]
+            if (max_len is None or len(tokenlist) <= max_len)
+            and (min_len is None or len(tokenlist) >= min_len)]
 
 
 def get_sentence(
@@ -141,6 +143,7 @@ def apply_to_tokenlist(
 
 def load_conllu(
         file: str, max_len: int | None = 40,
+        min_len: int | None = 3,
         first_k: int | None = None,
         verbose: bool = False
         ) -> Iterator[TokenList]:
@@ -149,7 +152,9 @@ def load_conllu(
     for tokenlist in tqdm.tqdm(
             conllu.parse_incr(data_file), "Creating tokenlists",
             disable=not verbose):
-        if max_len is None or len(tokenlist) <= max_len:
+        if (
+                (max_len is None or len(tokenlist) <= max_len)
+                and (min_len is None or len(tokenlist) >= min_len)):
             # Disregard contracted tokens
             yield TokenList(
                 [token for token in tokenlist

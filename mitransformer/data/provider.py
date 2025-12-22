@@ -161,6 +161,8 @@ def load_dataset(
         details: DatasetDetailsFull | DatasetDetails,
         max_len_train: int | None,
         max_len_eval_test: int | None,
+        min_len_train: int | None,
+        min_len_eval_test: int | None,
         vocab_size: int | None,
         first_k: int | None,
         first_k_eval_test: int | None,
@@ -179,6 +181,8 @@ def load_dataset(
         details: DatasetDetailsFull | DatasetDetails,
         max_len_train: int | None = 40,
         max_len_eval_test: int | None = None,
+        min_len_train: int | None = 3,
+        min_len_eval_test: int | None = None,
         vocab_size: int | None = 50_000,
         first_k: int | None = None,
         first_k_eval_test: int | None = None,
@@ -196,6 +200,8 @@ def load_dataset(
         details: DatasetDetails | DatasetDetailsFull,
         max_len_train: int | None = 40,  # should mark all
         max_len_eval_test: int | None = None,
+        min_len_train: int | None = 3,
+        min_len_eval_test: int | None = None,
         vocab_size: int | None = 50_000,  # of this with ReadOnly
         first_k: int | None = None,
         first_k_eval_test: int | None = None,
@@ -238,7 +244,8 @@ def load_dataset(
 
     def load_dataset(
             dir: str, is_train: bool,
-            max_len: int | None = None
+            max_len: int | None = None,
+            min_len: int | None = None,
             ) -> dataset.MemMapDepDataset | dataset.MemMapDataset:
         first_k_param = first_k if is_train else first_k_eval_test
         if masked:
@@ -246,6 +253,7 @@ def load_dataset(
                 return dataset.MemMapDepDataset.from_memmap(
                     path=dir,
                     max_len=max_len,
+                    min_len=min_len,
                     first_k=first_k_param,
                     transform_masks=transform,
                     masks_setting=masks_setting)
@@ -254,6 +262,7 @@ def load_dataset(
                     file=dir,
                     transform_masks=transform,
                     max_len=max_len,
+                    min_len=min_len,
                     first_k=first_k_param,
                     masks_setting=masks_setting)
         else:
@@ -261,11 +270,13 @@ def load_dataset(
                 return dataset.MemMapDataset.from_memmap(
                     path=dir,
                     max_len=max_len,
+                    min_len=min_len,
                     first_k=first_k_param)
             else:
                 return dataset.MemMapDataset.from_file(
                     file=dir,
                     max_len=max_len,
+                    min_len=min_len,
                     first_k=first_k_param)
 
     train: None | dataset.MemMapDepDataset | dataset.MemMapDataset = None
@@ -277,17 +288,21 @@ def load_dataset(
     splits: tuple[str, ...] = tuple()
     if len(dirs) == 1:
         # Only test
-        test = load_dataset(dirs[0], True, max_len_eval_test)
+        test = load_dataset(
+            dirs[0], True, max_len_eval_test, min_len_eval_test)
         sets = (test,)
         splits = ("test",)
     elif len(dirs) > 1 and len(dirs) < 4:
         # train, eval and optional test
-        train = load_dataset(dirs[0], True, max_len_train)
-        eval = load_dataset(dirs[1], False, max_len_eval_test)
+        train = load_dataset(
+            dirs[0], True, max_len_train, min_len_train)
+        eval = load_dataset(
+            dirs[1], False, max_len_eval_test, min_len_eval_test)
         sets = (train, eval)  # type: ignore
         splits = ("train", "eval")
         if len(dirs) == 3:
-            test = load_dataset(dirs[2], False, max_len_eval_test)
+            test = load_dataset(
+                dirs[2], False, max_len_eval_test, min_len_eval_test)
             sets = (train, eval, test)  # type: ignore
             splits = ("train", "eval", "test")
     else:
@@ -358,6 +373,8 @@ class DataConfig(utils.Params):
     memmapped: bool
     max_len_train: int | None = 40
     max_len_eval_test: int | None = None
+    min_len_train: int | None = 3
+    min_len_eval_test: int | None = None
     vocab_size: int | None = 50_000
     masked: bool = False
     first_k: int | None = None

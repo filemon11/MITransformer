@@ -58,10 +58,11 @@ class SentenceDataset(
     def from_file(
             cls, file: str,
             max_len: int | None = 40,
+            min_len: int | None = 3,
             first_k: int | None = None) -> Self:
 
         tokenlists = functions.load_conllu(
-            file, max_len, first_k, verbose=True)
+            file, max_len, min_len, first_k, verbose=True)
         data_dict = cls.make_conlludict(tokenlists)
 
         return cls(data_dict)
@@ -69,10 +70,11 @@ class SentenceDataset(
     @classmethod
     def from_str(
             cls, conllu_str: str,
-            max_len: int | None = 40) -> Self:
+            max_len: int | None = 40,
+            min_len: int | None = 3,) -> Self:
 
         tokenlists = functions.load_conllu_from_str(
-            conllu_str, max_len, verbose=True)
+            conllu_str, max_len, min_len, verbose=True)
         return cls.from_conllu(tokenlists)
 
     @classmethod
@@ -153,6 +155,7 @@ class CoNLLUDataset(
     def from_file(
             cls, file: str,
             max_len: int | None = 40,
+            min_len: int | None = 3,
             first_k: int | None = None,
             transform_masks: Callable[
                 [npt.NDArray[np.bool_]],
@@ -162,7 +165,7 @@ class CoNLLUDataset(
             masks_setting: utils.MasksSetting = "current"):
 
         tokenlists = functions.load_conllu(
-            file, max_len, first_k, verbose=True)
+            file, max_len, min_len, first_k, verbose=True)
         data_dict = cls.make_conlludict(tokenlists)
 
         return cls(data_dict, transform_masks, masks_setting)
@@ -171,6 +174,7 @@ class CoNLLUDataset(
     def from_str(
             cls, conllu_str: str,
             max_len: int | None = 40,
+            min_len: int | None = 3,
             transform_masks: Callable[
                 [npt.NDArray[np.bool_]],
                 Mapping[
@@ -179,7 +183,7 @@ class CoNLLUDataset(
             masks_setting: utils.MasksSetting = "current"):
 
         tokenlists = functions.load_conllu_from_str(
-            conllu_str, max_len, verbose=True)
+            conllu_str, max_len, min_len, verbose=True)
         return cls.from_conllu(tokenlists, transform_masks, masks_setting)
 
     @classmethod

@@ -79,6 +79,7 @@ class NLPDataset(Dataset[T]):
     def from_file(
             cls, file: str,
             max_len: int | None = None,
+            min_len: int | None = None,
             first_k: int | None = None) -> Self:
         ...
 
@@ -114,6 +115,7 @@ class MaskedDataset(NLPDataset[K]):
     def from_file(
             cls, file: str,
             max_len: int | None = None,
+            min_len: int | None = None,
             first_k: int | None = None,
             transform_masks: Callable[
                 [npt.NDArray[np.bool_]],

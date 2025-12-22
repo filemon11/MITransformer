@@ -47,7 +47,8 @@ class PsyLingObjective(objective.Objective):
             for dataset in arguments.psyling_dataset])
 
         self.tok_frame, self.untok_frame = get_frames(
-            psyling_df, max_len=self.arguments.max_len_eval_test)
+            psyling_df, max_len=self.arguments.max_len_eval_test,
+            min_len=self.arguments.min_len_eval_test)
 
         transform = None
         assert self.data_provider is not None
@@ -130,14 +131,15 @@ class PsyLingObjective(objective.Objective):
             # Untokenisation
             # We cannot omit this because surprisal can be a sum
             # of token surprisals.
+            frame: readingtimes.SplitFrame | readingtimes.UnsplitFrame
             untok_frame = self.tok_frame.untokenise()
             frame = self.untok_frame | untok_frame
 
             frame = frame.include_spillover(self.arguments.shift)
             frame.truncate_(right=1)
-            unsplit_frame = frame.unsplit()
+            frame = frame.unsplit()
 
-            print(unsplit_frame.df.tail(n=15))
+            print(frame.df.tail(n=15))
 
             # Joining
             # This may take some time. Should we precompute this,
@@ -146,9 +148,10 @@ class PsyLingObjective(objective.Objective):
             # TODO: check how much time this takes
 
             joined = readingtimes.join(
-                unsplit_frame.df,
+                frame.df,
                 self.measurements,
                 "ET" if self.is_et_corpus else "SP")
+            del frame
 
             # In concatenated setting, there can be several corpora per
             # item and several corpora per WorkerId. However, we want these
@@ -168,6 +171,8 @@ class PsyLingObjective(objective.Objective):
                 predictors=self.arguments.lme_formula["covariates"],
                 random_effects=self.arguments.lme_formula["random_effects"]
             )
+            del joined
+
             model_props = readingtimes.get_model_props(lme, len(d0))
             info(
                 arguments.rank, logger,
@@ -187,6 +192,7 @@ class PsyLingObjective(objective.Objective):
                         for c in coefs if c not in (1, 0)]
                 )
             )
+            del lme
 
             # TODO: decide plausible lme structure
 
@@ -238,7 +244,8 @@ class PsyLingObjective(objective.Objective):
 
 def get_frames(
         psyling_df: pd.DataFrame,
-        max_len: int | None = None
+        max_len: int | None = None,
+        min_len: int | None = None
         ) -> Tuple[readingtimes.SplitFrame, readingtimes.SplitFrame]:
 
     orig_frame = readingtimes.UnsplitFrame(
@@ -257,9 +264,18 @@ def get_frames(
         len(sentence) for sentence in tok_frame.untokenise().df[
             readingtimes.TOKEN_COL]])
 
+    def compare(sentence: Sequence) -> bool:
+        include = True
+        length = len(sentence)
+        if max_len is not None:
+            include = length <= max_len
+        if min_len is not None:
+            include = include and min_len <= length
+        return include
+
     if max_len is not None:
         include = [
-            len(sentence) <= max_len
+            compare(sentence)
             for sentence in untok_frame.df[readingtimes.TOKEN_COL]]
         untok_frame.df = untok_frame.df[include].reset_index(drop=True)
         tok_frame.df = tok_frame.df[include].reset_index(drop=True)
@@ -285,11 +301,13 @@ def create_dataset(
         dataset = data.MemMapDepDataset.from_file(
             "temp_file", transform_masks=transform,
             masks_setting=masks_setting,
-            max_len=None)
+            max_len=None,
+            min_len=None)
     else:
         dataset = data.MemMapDataset.from_file(
             "temp_file",
-            max_len=None)
+            max_len=None,
+            min_len=None)
     dataset.map_to_ids(
         token_mapper,
         "temp_memmap")

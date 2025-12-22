@@ -155,7 +155,7 @@ class SplitTokMetricMakerTokenlist(SplitTokMetricMaker):
             min_len: int | None = None, *args, **kwargs
             ) -> tuple[pd.Series, dict[str, Any]]:
         if sentence_ids is None:
-            conllu = parse_list_of_words_with_spacy(words, min_len=min_len)
+            conllu = parse_list_of_words_with_spacy(words, min_len=None)
         else:
             # If given corpus names, allows segmentation for natural stories
             # corpus.
@@ -197,7 +197,7 @@ class SplitTokMetricMakerTokenlist(SplitTokMetricMaker):
                     words, sentence_ids, corpus_names)),  # type: ignore
                 min_len=min_len
             )
-        tokenlists = load_conllu_from_str(conllu, max_len)
+        tokenlists = load_conllu_from_str(conllu, max_len, min_len)
         return pd.Series(tokenlists), {}
 
 

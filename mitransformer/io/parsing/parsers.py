@@ -78,6 +78,12 @@ def create_parser() -> argparse.ArgumentParser:
         '--max_len_eval_test', type=argtypes.OptNone(int), default=None,
         help='maximum number of tokens in eval set')
     data_group.add_argument(
+        '--min_len_train', type=argtypes.OptNone(int), default=3,
+        help='minimum number of tokens in training set')
+    data_group.add_argument(
+        '--min_len_eval_test', type=argtypes.OptNone(int), default=None,
+        help='minimum number of tokens in eval set')
+    data_group.add_argument(
         '--masked', type=argtypes.str_to_bool, default=True,
         help=(
             'Whether to include dependencies in dataset. Necessary for '
@@ -400,6 +406,15 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help='maximum number of tokens in eval set')
     hyperopt_flexible_data_group.add_argument(
+        '--min_len_train',
+        type=argtypes.HyperoptSpace(argtypes.OptNone(int)), default=3,
+        help='minimum number of tokens in training set')
+    hyperopt_flexible_data_group.add_argument(
+        '--min_len_eval_test',
+        type=argtypes.HyperoptSpace(argtypes.OptNone(int)),
+        default=None,
+        help='minimum number of tokens in eval set')
+    hyperopt_flexible_data_group.add_argument(
         '--triangulate', type=argtypes.HyperoptSpace(int), default=0,
         help='TODO')
     hyperopt_flexible_data_group.add_argument(
@@ -694,6 +709,12 @@ def create_parser() -> argparse.ArgumentParser:
         '--max_len_eval_test', type=argtypes.OptNone(int), default=None,
         help='maximum number of tokens in eval set')
     data_group.add_argument(
+        '--min_len_train', type=argtypes.OptNone(int), default=3,
+        help='minimum number of tokens in training set')
+    data_group.add_argument(
+        '--min_len_eval_test', type=argtypes.OptNone(int), default=None,
+        help='minimum number of tokens in eval set')
+    data_group.add_argument(
         '--masked', type=argtypes.str_to_bool, default=True,
         help=(
             'Whether to include dependencies in dataset. Necessary for'
@@ -745,6 +766,12 @@ def create_parser() -> argparse.ArgumentParser:
         help='Does nothing. TODO')
     data_group.add_argument(
         '--max_len_eval_test', type=argtypes.OptNone(int), default=Undefined,
+        help='Does nothing. TODO')
+    data_group.add_argument(
+        '--min_len_train', type=argtypes.OptNone(int), default=Undefined,
+        help='Does nothing. TODO')
+    data_group.add_argument(
+        '--min_len_eval_test', type=argtypes.OptNone(int), default=Undefined,
         help='Does nothing. TODO')
     data_group.add_argument(
         '--masked', type=argtypes.str_to_bool, default=True,
@@ -801,6 +828,12 @@ def create_parser() -> argparse.ArgumentParser:
     data_group.add_argument(
         '--max_len_eval_test', type=argtypes.OptNone(int), default=Undefined,
         help='maximum number of tokens in eval set')
+    data_group.add_argument(
+        '--min_len_train', type=argtypes.OptNone(int), default=Undefined,
+        help='minimum number of tokens in training set')
+    data_group.add_argument(
+        '--min_len_eval_test', type=argtypes.OptNone(int), default=Undefined,
+        help='minimum number of tokens in eval set')
     data_group.add_argument(
         '--masked', type=argtypes.str_to_bool, default=True,
         help=(
@@ -956,6 +989,12 @@ def create_parser() -> argparse.ArgumentParser:
         help='Does nothing. TODO')
     data_group.add_argument(
         '--max_len_eval_test', type=argtypes.OptNone(int), default=Undefined,
+        help='Does nothing. TODO')
+    data_group.add_argument(
+        '--min_len_train', type=argtypes.OptNone(int), default=Undefined,
+        help='Does nothing. TODO')
+    data_group.add_argument(
+        '--min_len_eval_test', type=argtypes.OptNone(int), default=Undefined,
         help='Does nothing. TODO')
     data_group.add_argument(
         '--masked', type=argtypes.str_to_bool, default=True,
