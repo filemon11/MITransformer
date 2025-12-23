@@ -13,7 +13,7 @@ def load_zuco(
         make_lower: bool = True,
         token_mapper_dir: str | None = None,
         verbose: bool = False
-        ) -> tuple[list[str], list[int], list[int]]:
+        ) -> tuple[list[str], list[str], list[int]]:
     """Load natural stories corpus from csv file.
 
     Parameters
@@ -33,7 +33,7 @@ def load_zuco(
     -------
     list[str]
         The list of all tokens.
-    list[int]
+    list[str]
         For every token the story ID it appears in.
     list[int]
         For every token, its word ID.
@@ -66,5 +66,5 @@ def load_zuco(
 
     return (
         file["word"].to_list(),
-        file["sentence_id"].to_list(),
-        file["word_id"].to_list())
+        file["sentence_id"].astype(str).to_list(),
+        file["word_id"].astype(int).to_list())
