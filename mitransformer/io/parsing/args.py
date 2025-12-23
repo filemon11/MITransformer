@@ -2,8 +2,7 @@ import torch
 
 from . import hyperopt
 from ...data import (
-    MasksSetting)
-from ...readingtimes import Corpus
+    MasksSetting, RTCorpus)
 from ...models import (
     TransformerDescription)
 from ...utils.params import Params, Undefined
@@ -101,7 +100,7 @@ class HyperoptParserArgs(ParserArgs):
     sampler_startup_trials: int
     pruner_startup_trials: int
     n_trials: int
-    psyling_dataset: Tuple[Corpus, ...]
+    psyling_dataset: Tuple[RTCorpus, ...]
     lme_formula: LMEParseResults
     shift: int
     sampler: Literal["tpe", "random"]

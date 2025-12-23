@@ -37,7 +37,7 @@ class PsyLingObjective(objective.Objective):
         # Load candidates
         # TODO: check whether tokenisation at surprisal step is correct
         assert all(
-            [ds in readingtimes.CORPORA for ds in arguments.psyling_dataset])
+            [ds in data.RTCORPORA for ds in arguments.psyling_dataset])
         psyling_df = pd.concat([
             readingtimes.io_corpus_convert(
                 "custom", dataset,
@@ -68,7 +68,7 @@ class PsyLingObjective(objective.Objective):
 
         # Load measurements
         is_et_corpus = [
-            ds in readingtimes.ET_CORPORA for ds in arguments.psyling_dataset]
+            ds in data.ET_CORPORA for ds in arguments.psyling_dataset]
         assert all(is_et_corpus) or not any(is_et_corpus), (
             "Psyling corpora must be all of the same type (either ET or SP)."
         )
@@ -316,7 +316,7 @@ def create_dataset(
 
 def get_measurements(
         is_et_corpus: bool,
-        psyling_datasets: Iterable[readingtimes.Corpus],
+        psyling_datasets: Iterable[data.RTCorpus],
         psyling_df: pd.DataFrame | None = None,
         merge_on: Sequence[str] = ["Corpus", "item", "zone"]
         ) -> pd.DataFrame:
@@ -324,7 +324,7 @@ def get_measurements(
         "FFD", "GPT", "GD", "RBT"] if is_et_corpus else ["RT"]
     measurement_keys.extend(["word", "item", "zone", "WorkerId", "Corpus"])
     measurements = [
-        readingtimes.prepare_RTs(
+        data.prepare_RT_measurements(
             data.rt_corpus_to_measurements_file[dataset],
             corpus=dataset)[measurement_keys]
         for dataset in psyling_datasets

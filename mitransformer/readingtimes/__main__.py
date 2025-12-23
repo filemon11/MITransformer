@@ -2,7 +2,7 @@ import sys
 import subprocess
 
 from . import preparation
-from . import rtprep
+from .. import data
 
 from typing import cast
 
@@ -23,7 +23,7 @@ if __name__ == "__main__":
         # on Wikitext?
         # Is the mapper not a model property that can be loaded?
 
-    corpus_to_infile: dict[rtprep.Corpus, str] = {
+    corpus_to_infile: dict[data.RTCorpus, str] = {
         "naturalstories": "naturalstories-master/words.tsv",
         "zuco": "zuco/training_data.csv",
         "frank_ET": "frank/stimuli.txt",
@@ -33,7 +33,7 @@ if __name__ == "__main__":
         in_file = corpus_to_infile[corpus]  # type: ignore
     except KeyError:
         raise Exception(f"Corpus {corpus} unknown.")
-    corpus = cast(rtprep.Corpus, corpus)
+    corpus = cast(data.RTCorpus, corpus)
 
     out_file = f"RT/data/{corpus}_candidates_{model_name}.csv"
 
@@ -48,13 +48,13 @@ if __name__ == "__main__":
         only_content_words_cost=only_content_words_cost,
         only_content_words_left=only_content_words_left)
 
-    corpus_to_rt_infile: dict[rtprep.Corpus, str] = {
+    corpus_to_rt_infile: dict[data.RTCorpus, str] = {
         "naturalstories": "RT/data/processed_RTs.tsv",
         "zuco": "zuco/training_data.csv",
         "frank_ET": "frank/eyetracking.RT.txt",
         "frank_SP": "frank/selfpacedreading.RT.txt"
     }
-    rtprep.prepare_RTs(
+    data.prepare_RT_measurements(
         corpus_to_rt_infile[corpus],
         f"RT/data/{corpus}_metrics.csv",
         corpus=corpus)

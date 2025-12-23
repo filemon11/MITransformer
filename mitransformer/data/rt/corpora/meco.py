@@ -9,9 +9,9 @@ import pyreadr  # type: ignore
 from transformers import AutoTokenizer  # type: ignore
 
 from . import utils
-from .. import tokeniser
+from ... import tokeniser
 
-from typing import Tuple
+from typing import Tuple, overload, Literal
 
 
 def line_to_components(line: str) -> Tuple[str, str, str, str]:
@@ -46,9 +46,15 @@ def split_meco(
     # Filter language
     df = df[df["lang"] == lang]
 
+    # only these are necessary
+    df = df[[
+        "word", "trialid", "wordnum", "sentnum",
+        "firstrun.gopast", "firstfix.dur", "firstrun.dur"]]
+
     story_ids_list = df["trialid"].unique().tolist()
 
     random.shuffle(story_ids_list)
+    print(story_ids_list)
 
     to_train = story_ids_list[:int(len(story_ids_list)*proportion)]
 
@@ -62,13 +68,43 @@ def split_meco(
         out_path2, df2, "joint.data")
 
 
+def split_meco1(
+        input_file: str,
+        proportion: float,
+        out_path1: str | None = None,
+        out_path2: str | None = None,
+        verbose: bool = False,
+        lang: str = "en"
+        ) -> None:
+    split_meco(
+        input_file, proportion,
+        out_path1, out_path2,
+        verbose, lang
+    )
+
+
+def split_meco2(
+        input_file: str,
+        proportion: float,
+        out_path1: str | None = None,
+        out_path2: str | None = None,
+        verbose: bool = False,
+        lang: str = "en_uk"
+        ) -> None:
+    split_meco(
+        input_file, proportion,
+        out_path1, out_path2,
+        verbose, lang
+    )
+
+
 def load_meco(
         input_file: str,
         make_lower: bool = True,
         token_mapper_dir: str | None = None,
         verbose: bool = False,
         lang: str = "en"
-        ) -> tuple[list[str], list[int], list[int]]:
+        ) -> tuple[list[str], list[str], list[int]]:
     """Load meco corpus from .rda file.
 
     Parameters
@@ -89,7 +125,7 @@ def load_meco(
     -------
     list[str]
         The list of all tokens.
-    list[int]
+    list[str]
         For every token the story ID it appears in.
     list[int]
         For every token, its word ID.
@@ -114,11 +150,11 @@ def load_meco(
 
     # Remove duplicates because we are only interested in
     # the text here
-    df = df[["word", "itemid", "wordnum", "sentnum"]].drop_duplicates()
-    df["itemid"] = df["itemid"].astype(int)
+    df = df[["word", "trialid", "wordnum", "sentnum"]].drop_duplicates()
+    df["trialid"] = df["trialid"].astype(int)
 
     # Sort to be sure the order is right
-    df.sort_values(by=["itemid", "wordnum"], inplace=True)
+    df.sort_values(by=["trialid", "wordnum"], inplace=True)
 
     # Make words lowercase
     if make_lower:
@@ -148,8 +184,113 @@ def load_meco(
     # sentence boundaries into the language model, we might want to
     # return three columns: story id, sentence num, word num
 
-    df["itemid"] = df["itemid"].astype(str) + "_" + df["sentnum"].astype(str)
+    df["trialid"] = df["trialid"].astype(str) + "_" + df["sentnum"].astype(str)
     return (
         df["word"].to_list(),
-        df["itemid"].to_list(),
+        df["trialid"].to_list(),
         df["wordnum"].to_list())
+
+
+@overload
+def prepare_RTs_meco(
+        meco_wave: Literal[1, 2],
+        input_file: str, output_file: str,
+        lang: str = "en"
+        ) -> None:
+    ...
+
+
+@overload
+def prepare_RTs_meco(
+        meco_wave: Literal[1, 2],
+        input_file: str, output_file: None = None,
+        lang: str = "en"
+        ) -> pd.DataFrame:
+    ...
+
+
+def prepare_RTs_meco(
+        meco_wave: Literal[1, 2],
+        input_file: str, output_file: str | None = None,
+        lang: str = "en"
+        ) -> None | pd.DataFrame:
+
+    df: pd.DataFrame = pyreadr.read_r(input_file)["joint.data"]
+
+    # Filter language
+    df = df[df["lang"] == lang]
+
+    # This corpus comes with story ids, sentences numbers (per story)
+    # and word numbers (also per story, i.e. zone in story).
+    # Therefore, the sentence numbers are not important for identification
+    # but useful for the parsing process we perform. Thus,
+    # we merge story ids and sentence numbers to retain unique
+    # identifiability of zone in corpus and be able to demark
+    # every sentence.
+
+    # In the long run, if we want to pass larger contexts that extend
+    # sentence boundaries into the language model, we might want to
+    # return three columns: story id, sentence num, word num
+
+    df["trialid"] = df["trialid"].astype(str) + "_" + df["sentnum"].astype(str)
+
+    df.rename(columns={
+        "trialid": "item", "wordnum": "zone", "uniform_id": "WorkerId",
+        "firstrun.gopast": "GPT",
+        "firstfix.dur": "FFD",
+        "firstrun.dur": "GD"},
+        inplace=True)
+    df["Corpus"] = f"meco_{meco_wave}"
+
+    if output_file is None:
+        return df
+    df.to_csv(output_file)
+    return None
+
+
+@overload
+def prepare_RTs_meco1(
+        input_file: str, output_file: str,
+        lang: str = "en"
+        ) -> None:
+    ...
+
+
+@overload
+def prepare_RTs_meco1(
+        input_file: str, output_file: None = None,
+        lang: str = "en"
+        ) -> pd.DataFrame:
+    ...
+
+
+def prepare_RTs_meco1(
+        input_file: str, output_file: str | None = None,
+        lang: str = "en"
+        ) -> None | pd.DataFrame:
+    return prepare_RTs_meco(
+        1, input_file, output_file, lang)
+
+
+@overload
+def prepare_RTs_meco2(
+        input_file: str, output_file: str,
+        lang: str = "en_uk"
+        ) -> None:
+    ...
+
+
+@overload
+def prepare_RTs_meco2(
+        input_file: str, output_file: None = None,
+        lang: str = "en_uk"
+        ) -> pd.DataFrame:
+    ...
+
+
+def prepare_RTs_meco2(
+        input_file: str, output_file: str | None = None,
+        lang: str = "en_uk"
+        ) -> None | pd.DataFrame:
+    return prepare_RTs_meco(
+        2, input_file, output_file, lang)

@@ -4,11 +4,12 @@ from a .tsv file.
 
 import tqdm
 import random
+import pandas as pd
 
 from . import utils
-from .. import tokeniser
+from ... import tokeniser
 
-from typing import Tuple
+from typing import Tuple, overload
 
 
 def line_to_components(line: str) -> Tuple[str, str, str, str]:
@@ -73,7 +74,7 @@ def load_natural_stories(
         make_lower: bool = True,
         token_mapper_dir: str | None = None,
         verbose: bool = False
-        ) -> tuple[list[str], list[int], list[int]]:
+        ) -> tuple[list[str], list[str], list[int]]:
     """Load natural stories corpus from tsv file.
 
     Parameters
@@ -93,7 +94,7 @@ def load_natural_stories(
     -------
     list[str]
         The list of all tokens.
-    list[int]
+    list[str]
         For every token the story ID it appears in.
     list[int]
         For every token, its word ID.
@@ -109,7 +110,7 @@ def load_natural_stories(
         token_mapper = tokeniser.TokenMapper.load(token_mapper_dir)
 
     words: list[str] = []
-    story_ids: list[int] = []
+    story_ids: list[str] = []
     word_ids: list[int] = []
     with open(input_file, "r") as file:
         for line in tqdm.tqdm(
@@ -130,6 +131,33 @@ def load_natural_stories(
                         to_string=True)[0]
 
                 words.append(token.replace(" ", ""))
-                story_ids.append(int(story_id))
+                story_ids.append(story_id)
                 word_ids.append(int(word_id))
     return words, story_ids, word_ids
+
+
+@overload
+def prepare_RTs_naturalstories(
+        input_file: str, output_file: str
+        ) -> None:
+    ...
+
+
+@overload
+def prepare_RTs_naturalstories(
+        input_file: str, output_file: None = None
+        ) -> pd.DataFrame:
+    ...
+
+
+def prepare_RTs_naturalstories(
+        input_file: str, output_file: str | None = None
+        ) -> None | pd.DataFrame:
+    # TODO simply copy the file
+    df = pd.read_csv(input_file, sep='\t', header=0)
+    df["Corpus"] = "naturalstories"
+    df["item"] = df["item"].astype(str)
+    if output_file is None:
+        return df
+    df.to_csv(output_file)
+    return None

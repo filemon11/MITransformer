@@ -49,15 +49,15 @@ def main_rt(
         in_file = data.rt_corpus_to_measurements_file[corpus]  # type: ignore
     except KeyError:
         raise Exception(f"Corpus {corpus} unknown.")
-    assert corpus in readingtimes.CORPORA
-    corpus = cast(readingtimes.Corpus, corpus)
+    assert corpus in data.RTCORPORA
+    corpus = cast(data.RTCorpus, corpus)
 
     assert arguments.masked, (
         "--masked cannot be False. Dependencies are needed for computing"
         " costs.")
 
     # Load measurements
-    measurements = readingtimes.prepare_RTs(
+    measurements = data.prepare_RT_measurements(
         data.rt_corpus_to_measurements_file[corpus],
         corpus=corpus)
 
@@ -81,7 +81,7 @@ def main_rt(
     readingtimes.join(
         measurements,
         candidates,
-        "ET" if corpus in readingtimes.ET_CORPORA else "SP",
+        "ET" if corpus in data.ET_CORPORA else "SP",
         f"RT/data/{corpus}_{arguments.name}_preprocessed_{model_name}.csv"
     )
 

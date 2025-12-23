@@ -7,11 +7,8 @@ import pandas as pd
 import os
 
 from ..train import LMTrainer
-from ..data import (
-    load_natural_stories, load_zuco, load_frank, CorpusLoader,
-    TransformMaskHeadChild, MasksSetting)
+from .. import data
 from .frame import SplitFrame, UnsplitFrame
-from . import rtprep
 from ..utils.params import Params
 
 from typing import (
@@ -35,65 +32,12 @@ WNUM_COL = "zone"
 BASELINE_METRICS = ("frequency", "length")
 
 
-def corpus_to_df(
-        corpus: rtprep.Corpus,
-        input_file: str,
-        token_col: str = TOKEN_COL,
-        text_id_col: str = TEXT_ID_COL,
-        wnum_col: str = WNUM_COL,
-        token_mapper_dir: str | None = None,
-        make_lower: bool = True,
-        verbose: bool = False,
-        ) -> pd.DataFrame:
-    corpus_to_func: dict[rtprep.Corpus, CorpusLoader] = {
-        "naturalstories": load_natural_stories,
-        "naturalstories_train": load_natural_stories,
-        "naturalstories_test": load_natural_stories,
-        "zuco": load_zuco,
-        "frank_ET": load_frank,
-        "frank_ET_train": load_frank,
-        "frank_ET_test": load_frank,
-        "frank_SP": load_frank,
-        "frank_SP_train": load_frank,
-        "frank_SP_test": load_frank,
-    }
-
-    func = corpus_to_func[corpus]
-
-    tokens, text_ids, wnums = func(
-        input_file, token_mapper_dir=token_mapper_dir,
-        make_lower=make_lower,
-        verbose=verbose)
-    # making lowercase makes no difference
-
-    df = pd.DataFrame({
-        token_col: tokens,
-        text_id_col: text_ids,
-        wnum_col: wnums})
-
-    # Don't allow concatenation of different splits of
-    # the same corpus.
-    if "naturalstories" in corpus:
-        df["Corpus"] = "naturalstories"
-    elif "frank_SP" in corpus:
-        df["Corpus"] = "frank_SP"
-    elif "frank_ET" in corpus:
-        df["Corpus"] = "frank_ET"
-    else:
-        raise Exception("Corpus unknown.")
-
-    return df
-
-
 @overload
 def io_corpus_convert(
         model_dir: str,
-        corpus: rtprep.Corpus,
+        corpus: data.RTCorpus,
         input_file: str,
         output_file: None = None,
-        token_col: str = TOKEN_COL,
-        text_id_col: str = TEXT_ID_COL,
-        wnum_col: str = WNUM_COL,
         token_mapper_dir: str | None = None,
         verbose: bool = False
         ) -> pd.DataFrame:
@@ -103,12 +47,9 @@ def io_corpus_convert(
 @overload
 def io_corpus_convert(
         model_dir: str,
-        corpus: rtprep.Corpus,
+        corpus: data.RTCorpus,
         input_file: str,
         output_file: str,
-        token_col: str = TOKEN_COL,
-        text_id_col: str = TEXT_ID_COL,
-        wnum_col: str = WNUM_COL,
         token_mapper_dir: str | None = None,
         verbose: bool = False
         ) -> None:
@@ -117,30 +58,25 @@ def io_corpus_convert(
 
 def io_corpus_convert(
         model_dir: str,
-        corpus: rtprep.Corpus,
+        corpus: data.RTCorpus,
         input_file: str,
         output_file: str | None = None,
-        token_col: str = TOKEN_COL,
-        text_id_col: str = TEXT_ID_COL,
-        wnum_col: str = WNUM_COL,
         token_mapper_dir: str | None = None,
         verbose: bool = False
         ) -> pd.DataFrame | None:
     if os.path.split(model_dir)[1][:4] == "hug:":
-        df = corpus_to_df(
+        df = data.prepare_RT_text(
             corpus,
             input_file,
-            token_col, text_id_col,
-            wnum_col, token_mapper_dir,
+            token_mapper_dir=token_mapper_dir,
             make_lower=False,
             verbose=verbose)
     else:
         # Convert original format to sensible csv
-        df = corpus_to_df(
+        df = data.prepare_RT_text(
             corpus,
             input_file,
-            token_col, text_id_col,
-            wnum_col, token_mapper_dir,
+            token_mapper_dir=token_mapper_dir,
             verbose=verbose)
 
     if output_file is None:
@@ -183,9 +119,9 @@ def process(
         baseline_metrics: Iterable[str] = BASELINE_METRICS,
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
-        masks_setting: MasksSetting = "current",
+        masks_setting: data.MasksSetting = "current",
         shift: int = 0,
-        corpus: rtprep.Corpus = "naturalstories",
+        corpus: data.RTCorpus = "naturalstories",
         trainer_args: Params | None = None
         ) -> None:
     ...
@@ -201,9 +137,9 @@ def process(
         baseline_metrics: Iterable[str] = BASELINE_METRICS,
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
-        masks_setting: MasksSetting = "current",
+        masks_setting: data.MasksSetting = "current",
         shift: int = 0,
-        corpus: rtprep.Corpus = "naturalstories",
+        corpus: data.RTCorpus = "naturalstories",
         trainer_args: Params | None = None
         ) -> pd.DataFrame:
     ...
@@ -218,9 +154,9 @@ def process(
         baseline_metrics: Iterable[str] = BASELINE_METRICS,
         only_content_words_left: bool = False,
         only_content_words_cost: bool = False,
-        masks_setting: MasksSetting = "current",
+        masks_setting: data.MasksSetting = "current",
         shift: int = 0,
-        corpus: rtprep.Corpus = "naturalstories",
+        corpus: data.RTCorpus = "naturalstories",
         trainer_args: Params | None = None
         ) -> pd.DataFrame | None:
 
@@ -242,7 +178,7 @@ def process(
         input_file, word_col=token_col)
 
     # Surprisal
-    transform = TransformMaskHeadChild(
+    transform = data.TransformMaskHeadChild(
         keys_for_head={"head"},
         keys_for_child={"child"})
     # TODO: load these params from somewhere

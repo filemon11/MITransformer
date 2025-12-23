@@ -1,9 +1,12 @@
 from transformers import AutoTokenizer  # type: ignore
 import numpy as np
 import tqdm
+import pandas as pd
 
 from . import utils
-from .. import tokeniser
+from ... import tokeniser
+
+from typing import overload
 
 
 def split_frank(
@@ -46,7 +49,7 @@ def load_frank(
         make_lower: bool = True,
         token_mapper_dir: str | None = None,
         verbose: bool = False
-        ) -> tuple[list[str], list[int], list[int]]:
+        ) -> tuple[list[str], list[str], list[int]]:
     """Load natural stories corpus from tsv file.
 
     Parameters
@@ -66,7 +69,7 @@ def load_frank(
     -------
     list[str]
         The list of all tokens.
-    list[int]
+    list[str]
         For every token the story ID it appears in.
     list[int]
         For every token, its word ID.
@@ -80,7 +83,7 @@ def load_frank(
         token_mapper = tokeniser.TokenMapper.load(token_mapper_dir)
 
     words: list[str] = []
-    sentence_ids: list[int] = []
+    sentence_ids: list[str] = []
     word_ids: list[int] = []
 
     with open(input_file, mode="r", encoding='cp1252') as file:
@@ -106,6 +109,73 @@ def load_frank(
                         to_string=True, join_with="")[0]
 
                 words.append(word)
-                sentence_ids.append(sentence_id)
+                sentence_ids.append(str(sentence_id))
                 word_ids.append(word_id)
     return words, sentence_ids, word_ids
+
+
+@overload
+def prepare_RTs_frank_ET(
+        input_file: str, output_file: str
+        ) -> None:
+    ...
+
+
+@overload
+def prepare_RTs_frank_ET(
+        input_file: str, output_file: None = None
+        ) -> pd.DataFrame:
+    ...
+
+
+def prepare_RTs_frank_ET(
+        input_file: str, output_file: str | None = None
+        ) -> None | pd.DataFrame:
+    df = pd.read_csv(input_file, sep='\t', header=0)
+    df = df.rename(columns={
+        "subj_nr": "WorkerId",
+        "sent_nr": "item",
+        "word_pos": "zone",
+        "RTfirstfix": "FFD",
+        "RTgopast": "GPT",
+        "RTfirstpass": "GD",
+        "RTrightbound": "RBT"})
+    df["WorkerId"] = df["WorkerId"].astype(str)
+    df["item"] = df["item"].astype(str)
+    df["Corpus"] = "frank_ET"
+    if output_file is None:
+        return df
+    df.to_csv(output_file)
+    return None
+
+
+@overload
+def prepare_RTs_frank_SP(
+        input_file: str, output_file: str
+        ) -> None:
+    ...
+
+
+@overload
+def prepare_RTs_frank_SP(
+        input_file: str, output_file: None = None
+        ) -> pd.DataFrame:
+    ...
+
+
+def prepare_RTs_frank_SP(
+        input_file: str, output_file: str | None = None
+        ) -> None | pd.DataFrame:
+    df = pd.read_csv(input_file, sep='\t', header=0)
+    df.rename(columns={
+        "subj_nr": "WorkerId",
+        "sent_nr": "item",
+        "word_pos": "zone"},
+        inplace=True)
+    df["WorkerId"] = df["WorkerId"].astype(str)
+    df["item"] = df["item"].astype(str)
+    df["Corpus"] = "frank_SP"
+    if output_file is None:
+        return df
+    df.to_csv(output_file)
+    return None

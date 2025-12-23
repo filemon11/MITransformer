@@ -9,7 +9,7 @@ import argparse
 from . import argtypes
 from ...utils import logmaker
 from ...utils.params import Undefined
-from ... import readingtimes
+from ... import data
 from ...readingtimes.lme import parse as lmeparse
 
 logger = logmaker.getLogger(__name__)
@@ -759,7 +759,7 @@ def create_parser() -> argparse.ArgumentParser:
     data_group.add_argument(
         '--dataset_name', type=str,
         help='name of the psycholinguistic dataset to load',
-        choices=readingtimes.CORPORA,
+        choices=data.RTCORPORA,
         default="naturalstories")
     data_group.add_argument(
         '--max_len_train', type=argtypes.OptNone(int), default=Undefined,
@@ -982,7 +982,7 @@ def create_parser() -> argparse.ArgumentParser:
     data_group = rt_parser.add_argument_group('data')
     data_group.add_argument(
         '--dataset_name', type=str, help='name of the dataset to load',
-        choices=readingtimes.CORPORA,
+        choices=data.RTCORPORA,
         default="naturalstories")
     data_group.add_argument(
         '--max_len_train', type=argtypes.OptNone(int), default=Undefined,

@@ -1,7 +1,7 @@
 import pandas as pd
 from pandas import _typing as pdtyping
 
-from . import rtprep
+from .. import data
 
 from typing import overload
 
@@ -10,11 +10,11 @@ logger = getLogger(__name__)
 
 
 def io_join(
-        corpus: rtprep.Corpus, model_name: str,
+        corpus: data.RTCorpus, model_name: str,
         additional_name: str,
         ) -> None:
-    corpus_type: rtprep.CorpusTypes = (
-        "ET" if corpus in rtprep.ET_CORPORA else "SP")
+    corpus_type: data.RTCorpusTypes = (
+        "ET" if corpus in data.ET_CORPORA else "SP")
     join(
         f"RT/data/{corpus}_{additional_name}_metrics.csv",
         f"RT/data/{corpus}_{additional_name}_candidates_{model_name}.csv",
@@ -26,7 +26,7 @@ def io_join(
 @overload
 def join(
         candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
-        corpus_type: rtprep.CorpusTypes, output_file: None = None,
+        corpus_type: data.RTCorpusTypes, output_file: None = None,
         how: pdtyping.MergeHow = "inner"
         ) -> pd.DataFrame:
     ...
@@ -35,7 +35,7 @@ def join(
 @overload
 def join(
         candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
-        corpus_type: rtprep.CorpusTypes, output_file: str,
+        corpus_type: data.RTCorpusTypes, output_file: str,
         how: pdtyping.MergeHow = "inner"
         ) -> None:
     ...
@@ -43,7 +43,7 @@ def join(
 
 def join(
         candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
-        corpus_type: rtprep.CorpusTypes, output_file: str | None = None,
+        corpus_type: data.RTCorpusTypes, output_file: str | None = None,
         how: pdtyping.MergeHow = "inner"
         ) -> None | pd.DataFrame:
     # Read input files

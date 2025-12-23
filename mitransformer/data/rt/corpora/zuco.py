@@ -5,7 +5,9 @@ from a .tsv file.
 import pandas as pd
 from transformers import AutoTokenizer  # type: ignore
 
-from .. import tokeniser
+from ... import tokeniser
+
+from typing import overload
 
 
 def load_zuco(
@@ -68,3 +70,33 @@ def load_zuco(
         file["word"].to_list(),
         file["sentence_id"].astype(str).to_list(),
         file["word_id"].astype(int).to_list())
+
+
+@overload
+def prepare_RTs_zuco(
+        input_file: str, output_file: str
+        ) -> None:
+    ...
+
+
+@overload
+def prepare_RTs_zuco(
+        input_file: str, output_file: None = None
+        ) -> pd.DataFrame:
+    ...
+
+
+def prepare_RTs_zuco(
+        input_file: str, output_file: str | None = None
+        ) -> None | pd.DataFrame:
+    df = pd.read_csv(input_file)
+    df.rename(
+        columns={"sentence_id": "item", "word_id": "zone"},
+        inplace=True)
+    # TODO: Load correct corpus data and not aggregated over participants
+    df["WorkerId"] = "1"
+    df["item"] = df["item"].astype(str)
+    if output_file is None:
+        return df
+    df.to_csv(output_file)
+    return None
