@@ -54,12 +54,11 @@ if (corpus_type == "ET") {
     group_by(item, zone, WorkerId) %>%
     summarise(FFD = sum(FFD),
               GPT = sum(GPT),
-              RBT = sum(RBT),
               GD = sum(GD),
               word = word) %>%
     ungroup() %>%
     distinct()
-  interest <- c('item','zone','WorkerId', 'FFD', 'GPT', 'RBT', 'GD')
+  interest <- c('item','zone','WorkerId', 'FFD', 'GPT', 'GD')
 } else {
   big.dundee2 <- big.dundee %>%
     group_by(item, zone, WorkerId) %>%

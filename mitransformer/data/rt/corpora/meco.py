@@ -152,6 +152,8 @@ def load_meco(
     # the text here
     df = df[["word", "trialid", "wordnum", "sentnum"]].drop_duplicates()
     df["trialid"] = df["trialid"].astype(int)
+    df["sentnum"] = df["sentnum"].astype(int)
+    df["wordnum"] = df["wordnum"].astype(int)
 
     # Sort to be sure the order is right
     df.sort_values(by=["trialid", "wordnum"], inplace=True)
@@ -232,6 +234,9 @@ def prepare_RTs_meco(
     # sentence boundaries into the language model, we might want to
     # return three columns: story id, sentence num, word num
 
+    df["trialid"] = df["trialid"].astype(int)
+    df["sentnum"] = df["sentnum"].astype(int)
+    df["wordnum"] = df["wordnum"].astype(int)
     df["trialid"] = df["trialid"].astype(str) + "_" + df["sentnum"].astype(str)
 
     df.rename(columns={
@@ -240,7 +245,7 @@ def prepare_RTs_meco(
         "firstfix.dur": "FFD",
         "firstrun.dur": "GD"},
         inplace=True)
-    df["Corpus"] = f"meco_{meco_wave}"
+    df["Corpus"] = f"meco{meco_wave}"
 
     if output_file is None:
         return df

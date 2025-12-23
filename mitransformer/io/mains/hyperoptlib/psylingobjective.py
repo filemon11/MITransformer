@@ -139,7 +139,7 @@ class PsyLingObjective(objective.Objective):
             frame.truncate_(right=1)
             frame = frame.unsplit()
 
-            print(frame.df.tail(n=15))
+            print(frame.df.tail(n=10))
 
             # Joining
             # This may take some time. Should we precompute this,
@@ -321,7 +321,7 @@ def get_measurements(
         merge_on: Sequence[str] = ["Corpus", "item", "zone"]
         ) -> pd.DataFrame:
     measurement_keys = [
-        "FFD", "GPT", "GD", "RBT"] if is_et_corpus else ["RT"]
+        "FFD", "GPT", "GD"] if is_et_corpus else ["RT"]
     measurement_keys.extend(["word", "item", "zone", "WorkerId", "Corpus"])
     measurements = [
         data.prepare_RT_measurements(
@@ -331,7 +331,6 @@ def get_measurements(
     ]
     measurements_df = pd.concat(measurements)
     # remove items that are not needed (i.e. that won't be joined on later)
-
     if psyling_df is not None:
         measurements_df = measurements_df.merge(
             psyling_df[merge_on],

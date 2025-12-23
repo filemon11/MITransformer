@@ -155,6 +155,10 @@ def prepare_RT_text(
         df["Corpus"] = "frank_SP"
     elif "frank_ET" in corpus:
         df["Corpus"] = "frank_ET"
+    elif "meco1" in corpus:
+        df["Corpus"] = "meco1"
+    elif "meco2" in corpus:
+        df["Corpus"] = "meco2"
     else:
         raise Exception("Corpus unknown.")
 

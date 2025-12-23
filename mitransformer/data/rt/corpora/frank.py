@@ -138,8 +138,7 @@ def prepare_RTs_frank_ET(
         "word_pos": "zone",
         "RTfirstfix": "FFD",
         "RTgopast": "GPT",
-        "RTfirstpass": "GD",
-        "RTrightbound": "RBT"})
+        "RTfirstpass": "GD"})
     df["WorkerId"] = df["WorkerId"].astype(str)
     df["item"] = df["item"].astype(str)
     df["Corpus"] = "frank_ET"

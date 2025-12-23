@@ -64,14 +64,13 @@ def join(
             .agg({
                 'FFD': 'sum',
                 'GPT': 'sum',
-                'RBT': 'sum',
                 'GD':  'sum',
                 'word': 'first'
             })
             .drop_duplicates()
         )
 
-        interest = list(base_columns) + ['FFD', 'GPT', 'RBT', 'GD']
+        interest = list(base_columns) + ['FFD', 'GPT', 'GD']
 
     else:
         measurements = (
