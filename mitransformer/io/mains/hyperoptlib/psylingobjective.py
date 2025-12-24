@@ -164,6 +164,7 @@ class PsyLingObjective(objective.Objective):
                 joined, {self.arguments.lme_formula["to_predict"], "zone"}
             )
 
+            joined.dropna(inplace=True)
             # Fit lme
             lme, d0 = readingtimes.fit_gpboost(
                 joined,

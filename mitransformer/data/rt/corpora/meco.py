@@ -54,7 +54,6 @@ def split_meco(
     story_ids_list = df["trialid"].unique().tolist()
 
     random.shuffle(story_ids_list)
-    print(story_ids_list)
 
     to_train = story_ids_list[:int(len(story_ids_list)*proportion)]
 

@@ -16,6 +16,8 @@ RT/results
 /processed
 /Wikitext_processed
 /zuco
+/osfstorage-archive/*
+/meco/*
 /proc
 /to_RWTH.zip
 /moduleslist
@@ -648,3 +650,7 @@ temp_memmap/starts/order.ninja
 temp_memmap/starts/shape.ninja
 temp_memmap/starts/type.ninja
 temp_file
+geco/.~lock.MonolingualReadingData_train.xlsx#
+geco/MonolingualReadingData_test.xlsx
+geco/MonolingualReadingData_train.xlsx
+geco/MonolingualReadingData.xlsx
