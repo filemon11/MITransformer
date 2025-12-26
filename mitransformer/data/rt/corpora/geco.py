@@ -106,7 +106,9 @@ def load_geco(
     if token_mapper_dir is not None:
         token_mapper = tokeniser.TokenMapper.load(token_mapper_dir)
 
-    df: pd.DataFrame = pd.read_excel(input_file)
+    df: pd.DataFrame = pd.read_excel(
+        input_file, keep_default_na=False, na_values=None)
+    df["WORD"] = df["WORD"].astype(str)
 
     # Remove duplicates because we are only interested in
     # the text here
@@ -179,6 +181,7 @@ def prepare_RTs_geco(
     zones = np.concat([np.arange(1, length+1) for length in lens_of_parts])
 
     df["zone"] = zones
+    df["Corpus"] = "geco"
 
     # rename columns
     df.rename(
@@ -187,10 +190,14 @@ def prepare_RTs_geco(
             "PART": "item",
             "WORD_FIRST_FIXATION_DURATION": "FFD",
             "WORD_GO_PAST_TIME": "GPT",
-            "WORD_GAZE_DURATION": "GD"
+            "WORD_GAZE_DURATION": "GD",
+            "WORD": "word",
         },
         inplace=True
     )
+
+    for col in ("FFD", "GPT", "GD"):
+        df[col] = df[col].replace(".", 0)
 
     if output_file is None:
         return df

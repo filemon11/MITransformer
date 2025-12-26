@@ -6,9 +6,12 @@ from .. import train
 from . import objective, sampler
 
 from conllu.models import TokenList
+import pathlib
+import os
 
 import optuna
 import pandas as pd
+import torch.distributed as dist
 
 from typing import Tuple, Iterable, Sequence
 
@@ -125,7 +128,10 @@ class PsyLingObjective(objective.Objective):
                 dataset=self.dataset, trainer=trainer,
                 arc_distr_mode=self.arguments.distr_mode,
                 include_current=self.arguments.include_current,
-                length_weighted=self.arguments.length_weighted)
+                length_weighted=self.arguments.length_weighted,
+                return_arc_logits=False,
+                rank=self.arguments.rank,
+                use_ddp=self.arguments.use_ddp)
             # TODO: allow unmasked dataset to be used
 
             # Untokenisation
@@ -289,29 +295,52 @@ def create_dataset(
         masked: bool, masks_setting: data.MasksSetting,
         transform: data.TransformFunc | None,
         token_mapper: data.TokenMapper,
+        tempdir: str = ".temp",
+        use_ddp: bool = False,
+        rank: int = 0,
         ) -> data.MemMapDataset | data.MemMapDepDataset:
 
-    with open("temp_file", "w") as temp:
+    pathlib.Path(tempdir).mkdir(parents=True, exist_ok=True)
+
+    with open(os.path.join(tempdir, "temp_dataset"), "w") as temp:
         for sentence in tokenlists:
             temp.write(sentence.serialize())
 
-    dataset: data.MemMapDataset | data.MemMapDepDataset
+    # Prevent memory writes by different processes
+    if not use_ddp or rank == 0:
+        dataset: data.MemMapDataset | data.MemMapDepDataset
+        if masked:
+            assert masks_setting is not None
+            assert transform is not None
+            dataset = data.MemMapDepDataset.from_file(
+                os.path.join(tempdir, "temp_dataset"),
+                transform_masks=transform,
+                masks_setting=masks_setting,
+                max_len=None,
+                min_len=None)
+        else:
+            dataset = data.MemMapDataset.from_file(
+                os.path.join(tempdir, "temp_dataset"),
+                max_len=None,
+                min_len=None)
+        dataset.map_to_ids(
+            token_mapper,
+            os.path.join(tempdir, "temp_mmap_dataset"))
+    if use_ddp:
+        dist.barrier()
+
     if masked:
-        assert masks_setting is not None
-        assert transform is not None
-        dataset = data.MemMapDepDataset.from_file(
-            "temp_file", transform_masks=transform,
+        dataset = data.MemMapDepDataset.from_memmap(
+            os.path.join(tempdir, "temp_mmap_dataset"),
+            transform_masks=transform,
             masks_setting=masks_setting,
             max_len=None,
             min_len=None)
     else:
-        dataset = data.MemMapDataset.from_file(
-            "temp_file",
+        dataset = data.MemMapDataset.from_memmap(
+            os.path.join(tempdir, "temp_mmap_dataset"),
             max_len=None,
             min_len=None)
-    dataset.map_to_ids(
-        token_mapper,
-        "temp_memmap")
     return dataset
 
 

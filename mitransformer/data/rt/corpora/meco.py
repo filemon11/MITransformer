@@ -49,7 +49,7 @@ def split_meco(
     # only these are necessary
     df = df[[
         "word", "trialid", "wordnum", "sentnum",
-        "firstrun.gopast", "firstfix.dur", "firstrun.dur"]]
+        "firstrun.gopast", "firstfix.dur", "firstrun.dur", "lang"]]
 
     story_ids_list = df["trialid"].unique().tolist()
 

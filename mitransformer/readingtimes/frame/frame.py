@@ -247,7 +247,7 @@ def add_column_(
         assert len(list_frame) == len(content), (
             f"Number of dataframe rows ({len(list_frame)}) and "
             f"number of new content elements ({len(content)}) do "
-            "not match.")
+            f"not match. Tried to add {colname}.")
 
         # # Assert that number elements in each sentence matches
         # series = list_frame.iloc[:, -1]

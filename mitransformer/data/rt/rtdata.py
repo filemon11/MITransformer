@@ -10,19 +10,23 @@ RTCorpus = Literal[
     "frank_ET", "frank_ET_train", "frank_ET_test",
     "frank_SP", "frank_SP_train", "frank_SP_test",
     "meco1", "meco1_train", "meco1_test",
-    "meco2", "meco2_train", "meco2_test"]
+    "meco2", "meco2_train", "meco2_test",
+    "geco", "geco_train", "geco_test"]
+
 RTCorpusTypes = Literal["ET", "SP"]
-RTCORPORA = {
-    "naturalstories", "zuco", "frank_ET", "frank_SP", "meco1", "meco2"}
+
 ET_CORPORA = {
-    "frank_ET", "zuco", "meco1", "meco2"}
+    "frank_ET", "zuco", "meco1", "meco2", "geco"}
 SP_CORPORA = {
     "naturalstories", "frank_SP"}
+NO_SENTENCE_NUM_CORPORA = {"naturalstories", "geco"}
 
-for constant in (RTCORPORA, ET_CORPORA, SP_CORPORA):
+for constant in (ET_CORPORA, SP_CORPORA, NO_SENTENCE_NUM_CORPORA):
     for corpus in constant.copy():
         for variant in ("train", "test"):
             constant.add(f"{corpus}_{variant}")
+
+RTCORPORA = ET_CORPORA | SP_CORPORA
 
 
 rt_corpus_to_measurements_file: dict[RTCorpus, str] = {
@@ -32,6 +36,7 @@ rt_corpus_to_measurements_file: dict[RTCorpus, str] = {
         "frank_SP": "frank/selfpacedreading.RT.txt",
         "meco1": "meco/joint_l1_data_trimmed_version2.0.rda",
         "meco2": "meco/joint_data_trimmed_wave2_version2.0.rda",
+        "geco": "geco/MonolingualReadingData.xlsx"
     }
 
 
@@ -43,6 +48,7 @@ rt_corpus_to_prepare_measurements_func: dict[
         "frank_SP": corpora.prepare_RTs_frank_SP,
         "meco1": corpora.prepare_RTs_meco1,
         "meco2": corpora.prepare_RTs_meco2,
+        "geco": corpora.prepare_RTs_geco,
     }
 
 
@@ -52,7 +58,8 @@ rt_corpus_to_prepare_text_func: dict[RTCorpus, corpora.CorpusLoader] = {
         "frank_ET": corpora.load_frank,
         "frank_SP": corpora.load_frank,
         "meco1": corpora.load_meco,
-        "meco2": corpora.load_meco
+        "meco2": corpora.load_meco,
+        "geco": corpora.load_geco,
     }
 
 
@@ -62,6 +69,7 @@ rt_corpus_to_split_func: dict[RTCorpus, corpora.CorpusSplitter] = {
         "frank_SP": corpora.split_frank,
         "meco1": corpora.split_meco1,
         "meco2": corpora.split_meco2,
+        "geco": corpora.split_geco,
     }
 
 
@@ -82,6 +90,7 @@ rt_corpus_to_text_file: dict[RTCorpus, str] = {
         "frank_SP": "frank/stimuli.txt",
         "meco1": "meco/joint_l1_data_trimmed_version2.0.rda",
         "meco2": "meco/joint_data_trimmed_wave2_version2.0.rda",
+        "geco": "geco/MonolingualReadingData.xlsx"
     }
 
 
@@ -159,6 +168,8 @@ def prepare_RT_text(
         df["Corpus"] = "meco1"
     elif "meco2" in corpus:
         df["Corpus"] = "meco2"
+    elif "geco" in corpus:
+        df["Corpus"] = "geco"
     else:
         raise Exception("Corpus unknown.")
 

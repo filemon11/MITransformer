@@ -28,4 +28,5 @@ from .rt import (   # noqa: F401
     CorpusLoader, CorpusSplitter, CorpusPreparer,
     split_naturalstories, split_frank, load_meco, prepare_RTs_meco1,
     prepare_RTs_meco2, prepare_RTs_frank_ET, prepare_RTs_frank_SP,
-    prepare_RTs_naturalstories, prepare_RTs_zuco)
+    prepare_RTs_naturalstories, prepare_RTs_zuco, load_geco,
+    prepare_RTs_geco, split_geco, NO_SENTENCE_NUM_CORPORA)

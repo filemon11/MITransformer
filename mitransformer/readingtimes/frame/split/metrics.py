@@ -3,10 +3,11 @@ import nltk  # type: ignore
 import numpy as np
 import numpy.typing as npt
 import torch
+import torch.distributed as dist
 from transformers import AutoTokenizer, AutoModelForCausalLM  # type: ignore
 from ....train.losses import entropy
 from ....train import attdistr, losses
-from .... import models
+from .... import data
 
 from ...lingutils import (
     UntokSplitFunc, UntokSplitAdd,
@@ -22,13 +23,14 @@ from ....data.dataset import (
     head_list_to_adjacency_matrix, shift_masks)
 from ....train import LMTrainer, inverse_sigmoid, select_true, unpad
 
+import mmap_ninja
+import pathlib
+import os
 from itertools import cycle
 from abc import ABC, abstractmethod
-from collections import defaultdict
 
 from typing import (
-    Type, Any, Iterable, Callable, Literal, Collection, Tuple,
-    DefaultDict)
+    Type, Any, Iterable, Callable, Literal, Collection, Tuple)
 
 LANG = "en"
 
@@ -154,6 +156,7 @@ class SplitTokMetricMakerTokenlist(SplitTokMetricMaker):
             max_len: int | None = None,
             min_len: int | None = None, *args, **kwargs
             ) -> tuple[pd.Series, dict[str, Any]]:
+
         if sentence_ids is None:
             conllu = parse_list_of_words_with_spacy(words, min_len=None)
         else:
@@ -182,13 +185,17 @@ class SplitTokMetricMakerTokenlist(SplitTokMetricMaker):
                             iter_corpus_names):
                         if sentence_id != prev_sentence_id:
                             yield (
-                                sentence, "naturalstories" in prev_corpus_name)
+                                sentence,
+                                prev_corpus_name in
+                                data.NO_SENTENCE_NUM_CORPORA)
                             sentence = []
 
                         sentence.append(word)
                         prev_sentence_id = sentence_id
                         prev_corpus_name = corpus_name
-                    yield (sentence, "naturalstories" in prev_corpus_name)
+                    yield (
+                        sentence, prev_corpus_name in
+                        data.NO_SENTENCE_NUM_CORPORA)
 
                 except StopIteration:
                     pass
@@ -213,8 +220,20 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             masked: bool = True,
             transform: TransformMaskHeadChild | None = None,
             masks_setting: Literal[
-            "current", "next"] | None = "current", *args, **kwargs
+            "current", "next"] | None = "current",
+            return_arc_logits: bool = True,
+            return_logits: bool = True,
+            return_label_ids: bool = True,
+            use_ddp: bool = False,
+            rank: int = 0,
+            tempdir: str = ".temp",
+            *args, **kwargs
             ) -> tuple[pd.Series, dict[str, Any]]:
+
+        # NOTE: This is a real burden on memory since the attention matrices
+        # are loaded into memory for the whole dataset and remain in the frame.
+        # TODO: Write them to disk in batches
+
         if dataset is None:
             assert self.conllu_col is not None
 
@@ -278,6 +297,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             # huggingface weights.)
 
         else:
+            pathlib.Path(tempdir).mkdir(parents=True, exist_ok=True)
             assert dataset is not None
             if token_mapper_dir is not None:
                 if isinstance(token_mapper_dir, str):
@@ -288,20 +308,21 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
 
                 dataset.map_to_ids(token_mapper)
 
+            attention_logits_mmaps: dict[
+                str, mmap_ninja.RaggedMmap] = {}
+            additional_mmaps: dict[str, mmap_ninja.RaggedMmap] = {}
+
             probs_global: list[torch.Tensor] = []
-            attention_logits_global: DefaultDict[
-                str, list[torch.Tensor]] = defaultdict(list)
-            additional_global: DefaultDict[
-                models.AdditionalKeys, list[torch.Tensor]] = defaultdict(list)
+            tensorlist: list[torch.Tensor]
             for (
                 pred_probs, attention_logits,
                 additional) in trainer.predict_batched(
                     dataset,
                     make_prob=True,
                     only_true=True,
-                    return_arc_logits=True,
-                    return_logits=True,
-                    return_label_ids=True):
+                    return_arc_logits=return_arc_logits,
+                    return_logits=return_logits,
+                    return_label_ids=return_label_ids):
 
                 if trainer.config.device != "cpu":
                     attention_logits = {
@@ -310,32 +331,61 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
 
                     pred_probs = [tensor.to("cpu") for tensor in pred_probs]
 
-                    for key, tensorlist in additional.items():
+                    for key, tensorlist in additional.items():  # type: ignore
                         additional[key] = [  # type: ignore
                             tensor.to("cpu")
                             for tensor in tensorlist]  # type: ignore
 
-                for key, attention in attention_logits.items():
-                    attention_logits_global[key].extend(attention)
-                for key, tensorlist in additional.items():
-                    additional_global[key].extend(  # type: ignore
-                            additional[key])  # type: ignore
-
                 probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
                 probs_global.extend(probs)
+                if not use_ddp or rank == 0:
+                    for key, attention in attention_logits.items():
+                        np_att = [att.numpy() for att in attention]
+                        path = os.path.join(tempdir, f"att_{key}")
+                        if key not in attention_logits_mmaps:
+                            attention_logits_mmaps[key] = (
+                                mmap_ninja.RaggedMmap.from_lists(
+                                    path, np_att))
+                        else:
+                            attention_logits_mmaps[key].extend(np_att)
+
+                    for key, tensorlist in additional.items():  # type: ignore
+                        np_additional = [add.numpy() for add in tensorlist]
+                        path = os.path.join(tempdir, f"additional_{key}")
+                        if key not in attention_logits_mmaps:
+                            additional_mmaps[key] = (
+                                mmap_ninja.RaggedMmap.from_lists(
+                                    path, np_additional))
+                        else:
+                            additional_mmaps[key].extend(np_additional)
+
             assert all(
                 comparison := [len(p) == len(t) for p, t in zip(
                     probs_global, df["word"])]), (
-                        comparison)
+                        comparison, probs_global, df["word"])
 
+            if use_ddp:
+                dist.barrier()
             return pd.Series(probs_global), {
-                "attention_logits": attention_logits_global,
+                "attention_logits": {
+                    key: mmap_ninja.RaggedMmap(
+                        os.path.join(tempdir, f"att_{key}"),
+                        wrapper_fn=torch.Tensor,
+                        copy_before_wrapper_fn=False
+                    )
+                    for key in attention_logits_mmaps.keys()},
                 "dataset": dataset,
                 "transform": transform,
                 "token_mapper_dir": token_mapper_dir,
                 "trainer": trainer,
                 "masks_setting": masks_setting,
-                **additional_global}  # type: ignore
+                **{
+                    key: mmap_ninja.RaggedMmap(
+                        os.path.join(tempdir, f"additional_{key}"),
+                        wrapper_fn=torch.Tensor,
+                        copy_before_wrapper_fn=False
+                    )
+                    for key in additional_mmaps.keys()}}  # type: ignore
 
 
 class SplitTokMetricMakerMask(SplitTokMetricMaker):
