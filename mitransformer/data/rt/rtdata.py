@@ -6,7 +6,9 @@ from typing import Literal, overload
 
 RTCorpus = Literal[
     "naturalstories", "naturalstories_train", "naturalstories_test",
-    "zuco",
+    "zuco1_1", "zuco1_1_train", "zuco1_1_test",
+    "zuco1_2", "zuco1_2_train", "zuco1_2_test",
+    "zuco2_1", "zuco2_1_train", "zuco2_1_test",
     "frank_ET", "frank_ET_train", "frank_ET_test",
     "frank_SP", "frank_SP_train", "frank_SP_test",
     "meco1", "meco1_train", "meco1_test",
@@ -16,10 +18,12 @@ RTCorpus = Literal[
 RTCorpusTypes = Literal["ET", "SP"]
 
 ET_CORPORA = {
-    "frank_ET", "zuco", "meco1", "meco2", "geco"}
+    "frank_ET", "zuco1_1", "zuco1_2", "zuco2_1", "meco1", "meco2", "geco"}
 SP_CORPORA = {
     "naturalstories", "frank_SP"}
 NO_SENTENCE_NUM_CORPORA = {"naturalstories", "geco"}
+
+CORE_CORPORA = set(ET_CORPORA | SP_CORPORA)
 
 for constant in (ET_CORPORA, SP_CORPORA, NO_SENTENCE_NUM_CORPORA):
     for corpus in constant.copy():
@@ -28,10 +32,11 @@ for constant in (ET_CORPORA, SP_CORPORA, NO_SENTENCE_NUM_CORPORA):
 
 RTCORPORA = ET_CORPORA | SP_CORPORA
 
-
 rt_corpus_to_measurements_file: dict[RTCorpus, str] = {
         "naturalstories": "RT/data/processed_RTs.tsv",
-        "zuco": "zuco/training_data.csv",
+        "zuco1_1": "zuco/zuco1/task1.csv",
+        "zuco1_2": "zuco/zuco1/task2.csv",
+        "zuco2_1": "zuco/zuco2/task1.csv",
         "frank_ET": "frank/eyetracking.RT.txt",
         "frank_SP": "frank/selfpacedreading.RT.txt",
         "meco1": "meco/joint_l1_data_trimmed_version2.0.rda",
@@ -43,7 +48,9 @@ rt_corpus_to_measurements_file: dict[RTCorpus, str] = {
 rt_corpus_to_prepare_measurements_func: dict[
     RTCorpus, corpora.CorpusPreparer] = {
         "naturalstories": corpora.prepare_RTs_naturalstories,
-        "zuco": corpora.prepare_RTs_zuco,
+        "zuco1_1": corpora.prepare_RTs_zuco1_1,
+        "zuco1_2": corpora.prepare_RTs_zuco1_2,
+        "zuco2_1": corpora.prepare_RTs_zuco2_1,
         "frank_ET": corpora.prepare_RTs_frank_ET,
         "frank_SP": corpora.prepare_RTs_frank_SP,
         "meco1": corpora.prepare_RTs_meco1,
@@ -54,7 +61,9 @@ rt_corpus_to_prepare_measurements_func: dict[
 
 rt_corpus_to_prepare_text_func: dict[RTCorpus, corpora.CorpusLoader] = {
         "naturalstories": corpora.load_natural_stories,
-        "zuco": corpora.load_zuco,
+        "zuco1_1": corpora.load_zuco,
+        "zuco1_2": corpora.load_zuco,
+        "zuco2_1": corpora.load_zuco,
         "frank_ET": corpora.load_frank,
         "frank_SP": corpora.load_frank,
         "meco1": corpora.load_meco,
@@ -65,6 +74,12 @@ rt_corpus_to_prepare_text_func: dict[RTCorpus, corpora.CorpusLoader] = {
 
 rt_corpus_to_split_func: dict[RTCorpus, corpora.CorpusSplitter] = {
         "naturalstories": corpora.split_naturalstories,
+        "zuco1_1": corpora.split_zuco,
+        "zuco1_2": corpora.split_zuco,
+        "zuco2_1": lambda *args, **kwargs: corpora.split_zuco2_1(
+            rt_corpus_to_text_file["zuco1_2_train"],
+            rt_corpus_to_text_file["zuco1_2_test"],
+            *args, **kwargs),
         "frank_ET": corpora.split_frank,
         "frank_SP": corpora.split_frank,
         "meco1": corpora.split_meco1,
@@ -85,7 +100,9 @@ for mapping in (
 
 rt_corpus_to_text_file: dict[RTCorpus, str] = {
         "naturalstories": "naturalstories-master/words.tsv",
-        "zuco": "zuco/training_data.csv",
+        "zuco1_1": "zuco/zuco1/task1.csv",
+        "zuco1_2": "zuco/zuco1/task2.csv",
+        "zuco2_1": "zuco/zuco2/task1.csv",
         "frank_ET": "frank/stimuli.txt",
         "frank_SP": "frank/stimuli.txt",
         "meco1": "meco/joint_l1_data_trimmed_version2.0.rda",
@@ -158,18 +175,10 @@ def prepare_RT_text(
 
     # Don't allow concatenation of different splits of
     # the same corpus.
-    if "naturalstories" in corpus:
-        df["Corpus"] = "naturalstories"
-    elif "frank_SP" in corpus:
-        df["Corpus"] = "frank_SP"
-    elif "frank_ET" in corpus:
-        df["Corpus"] = "frank_ET"
-    elif "meco1" in corpus:
-        df["Corpus"] = "meco1"
-    elif "meco2" in corpus:
-        df["Corpus"] = "meco2"
-    elif "geco" in corpus:
-        df["Corpus"] = "geco"
+    for c in CORE_CORPORA:
+        if c in corpus:
+            df["Corpus"] = c
+            break
     else:
         raise Exception("Corpus unknown.")
 

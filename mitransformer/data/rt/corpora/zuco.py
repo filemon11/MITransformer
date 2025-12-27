@@ -4,24 +4,151 @@ from a .tsv file.
 
 import pandas as pd
 from transformers import AutoTokenizer  # type: ignore
+import random
+import string
+import difflib
 
+from . import utils
 from ... import tokeniser
 
-from typing import overload
+from typing import overload, Literal
+
+
+def split_zuco(
+        input_file: str,
+        proportion: float,
+        out_path1: str | None = None,
+        out_path2: str | None = None,
+        verbose: bool = False
+        ) -> None:
+
+    if out_path1 is None:
+        out_path1 = utils.create_suffixed_filepath(input_file, "train")
+    if out_path2 is None:
+        out_path2 = utils.create_suffixed_filepath(input_file, "test")
+
+    df: pd.DataFrame = pd.read_csv(input_file)
+
+    # only these are necessary
+    df = df[[
+        "subject", "Sent_ID", "Word_ID", "Word", "FFD", "GPT", "GD"]]
+
+    sent_ids_list = df["Sent_ID"].unique().tolist()
+
+    random.shuffle(sent_ids_list)
+
+    to_train = sent_ids_list[:int(len(sent_ids_list)*proportion)]
+
+    mask = df["Sent_ID"].isin(to_train)
+    df1 = df[mask]
+    df2 = df[~mask]
+
+    df1.to_csv(out_path1, index=False)
+    df2.to_csv(out_path2, index=False)
+
+
+def split_zuco2_1(
+        input_file_zuco1_2_a: str,
+        input_file_zuco1_2_b: str,
+        input_file: str,
+        proportion: float,
+        out_path1: str | None = None,
+        out_path2: str | None = None,
+        verbose: bool = False
+        ) -> None:
+    """Split zuco1_2 first to account for sentences that appear in both.
+    Specify the same proportion for both split action.
+    Needs to apply heuristic string similarity function.
+    It is not clear why many matches are not found through
+    exact comparison. Different formatting?"""
+
+    if out_path1 is None:
+        out_path1 = utils.create_suffixed_filepath(input_file, "train")
+    if out_path2 is None:
+        out_path2 = utils.create_suffixed_filepath(input_file, "test")
+
+    df: pd.DataFrame = pd.read_csv(input_file)
+    df_a: pd.DataFrame = pd.read_csv(input_file_zuco1_2_a)
+    df_b: pd.DataFrame = pd.read_csv(input_file_zuco1_2_b)
+
+    def remove_punctuation(s: str) -> str:
+        # Necessary due to different formatting in the two
+        # waves
+        s = s.translate(
+            str.maketrans("", "", string.punctuation))
+        for h in ("‐", "-", "—",  "–", " "):
+            s = s.replace(h, "")
+        return s
+
+    def get_text(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df["Word"] = df["Word"].astype(str)
+        grouped = df.drop_duplicates(
+            ["Sent_ID", "Word_ID"]).groupby(
+                "Sent_ID")
+        return grouped["Word"].apply(
+            lambda x: remove_punctuation("".join(x)).lower()).reset_index()
+
+    df_text = get_text(df)
+    df_a_text = get_text(df_a)
+    df_b_text = get_text(df_b)
+    del df_a_text["Sent_ID"]
+    del df_b_text["Sent_ID"]
+
+    def mask_create(
+            df1: pd.DataFrame, df2: pd.DataFrame) -> pd.Series:
+        mask = df1["Word"].isin(df2["Word"])
+        mask = mask.__or__(df1["Word"].apply(
+            lambda x: any([y in x for y in df2["Word"]])))
+
+        # Overly sensitive
+        mask = mask.__or__(df1["Word"].apply(
+            lambda x: any([difflib.SequenceMatcher(
+                None, x, s2).ratio() > 0.4 for s2 in df2["Word"]])))
+        return mask
+
+    # necessary because for some sentences words are missing in
+    # one of the two corpora
+    df_a_merged = df_text[mask_create(df_text, df_a_text)]
+    df_b_merged = df_text[mask_create(df_text, df_b_text)]
+
+    a_sent_ids = df_a_merged["Sent_ID"].tolist()
+    b_sent_ids = df_b_merged["Sent_ID"].tolist()
+
+    # only these are necessary
+    df = df[[
+        "subject", "Sent_ID", "Word_ID", "Word", "FFD", "GPT", "GD"]]
+
+    sent_ids_list = list(
+        set(df["Sent_ID"].unique().tolist())
+        - set(a_sent_ids)
+        - set(b_sent_ids))
+
+    random.shuffle(sent_ids_list)
+
+    to_train = sent_ids_list[:int(len(sent_ids_list)*proportion)]
+
+    mask = df["Sent_ID"].isin(to_train + a_sent_ids)
+    df1 = df[mask]
+    df2 = df[~mask]
+
+    df1.to_csv(out_path1, index=False)
+    df2.to_csv(out_path2, index=False)
 
 
 def load_zuco(
         input_file: str,
         make_lower: bool = True,
         token_mapper_dir: str | None = None,
-        verbose: bool = False
+        verbose: bool = False,
         ) -> tuple[list[str], list[str], list[int]]:
-    """Load natural stories corpus from csv file.
+    """Load geco corpus from .xlsx file.
 
     Parameters
     ----------
     input_file : str
-        .csv file that contains the corpus.
+        .rda file that contains the corpus.
+        ('joint_l1_data_trimmed_version2.0.rda')
     make_lower : bool, default=True
         Whether to convert the tokens to lowercase.
     token_mapper_dir : str | None, default=None
@@ -36,10 +163,15 @@ def load_zuco(
     list[str]
         The list of all tokens.
     list[str]
-        For every token the story ID it appears in.
+        For every token the part ID it appears in.
     list[int]
         For every token, its word ID.
     """
+
+    # TODO: add first item in id (e.g. 1.3.whole -> 1) to set for eachr row.
+    # Then make list from that, make dict from list item to index,
+    # create random mask and iterate through corpus to append the stories
+    # This will result in all sentences of a story belonging to the same split.
 
     pretokeniser = AutoTokenizer.from_pretrained(
         "bert-base-uncased").backend_tokenizer.pre_tokenizer  # type: ignore
@@ -48,32 +180,39 @@ def load_zuco(
     if token_mapper_dir is not None:
         token_mapper = tokeniser.TokenMapper.load(token_mapper_dir)
 
-    file = pd.read_csv(input_file, keep_default_na=False, na_values=['NaN'])
+    df: pd.DataFrame = pd.read_csv(
+        input_file, keep_default_na=False, na_values=None)
+    df["Word"] = df["Word"].astype(str)
 
-    file["word"] = file["word"].str.replace("<EOS>", "")
+    # Remove duplicates because we are only interested in
+    # the text here
+    df = df.drop_duplicates(["Sent_ID", "Word_ID"])
+
+    # Make words lowercase
     if make_lower:
-        file["word"] = file["word"].str.lower()
+        df["Word"] = df["Word"].str.lower()
 
+    # Apply pretokenisation and token mapper (to map to UNK)
     if token_mapper is not None:
-        # TODO split at boundaries (punctuation, parantheses, ...)
-        file["word"] = file["word"].apply(
+        df["Word"] = df["Word"].apply(
             lambda t: [
                 tup[0] for tup in
                 pretokeniser.pre_tokenize_str(
                     t)])
-        file["word"] = file["word"].apply(
+        df["Word"] = df["Word"].apply(
             lambda t: token_mapper.decode(
                 token_mapper.encode([t]),
                 to_string=True, join_with="")[0])
 
     return (
-        file["word"].to_list(),
-        file["sentence_id"].astype(str).to_list(),
-        file["word_id"].astype(int).to_list())
+        df["Word"].to_list(),
+        df["Sent_ID"].to_list(),
+        df["Word_ID"].to_list())
 
 
 @overload
 def prepare_RTs_zuco(
+        wave: Literal[1, 2], task:  Literal[1, 2],
         input_file: str, output_file: str
         ) -> None:
     ...
@@ -81,22 +220,97 @@ def prepare_RTs_zuco(
 
 @overload
 def prepare_RTs_zuco(
+        wave: Literal[1, 2], task:  Literal[1, 2, 3],
         input_file: str, output_file: None = None
         ) -> pd.DataFrame:
     ...
 
 
 def prepare_RTs_zuco(
-        input_file: str, output_file: str | None = None
+        wave: Literal[1, 2], task:  Literal[1, 2, 3],
+        input_file: str, output_file: str | None = None,
         ) -> None | pd.DataFrame:
-    df = pd.read_csv(input_file)
+    if wave == 2:
+        assert task != 3, "ZuCo 2.0 has only two tasks."
+
+    df: pd.DataFrame = pd.read_csv(input_file)
+
+    df["Corpus"] = f"zuco{wave}_{task}"
+
+    # rename columns
     df.rename(
-        columns={"sentence_id": "item", "word_id": "zone"},
-        inplace=True)
-    # TODO: Load correct corpus data and not aggregated over participants
-    df["WorkerId"] = "1"
-    df["item"] = df["item"].astype(str)
+        columns={
+            "Sent_ID": "item",
+            "Word_ID": "zone",
+            "Word": "word",
+            "subject": "WorkerId"
+        },
+        inplace=True
+    )
+
+    df["WorkerId"] = df["WorkerId"].astype(str)
+
     if output_file is None:
         return df
     df.to_csv(output_file)
     return None
+
+
+@overload
+def prepare_RTs_zuco1_1(
+        input_file: str, output_file: str
+        ) -> None:
+    ...
+
+
+@overload
+def prepare_RTs_zuco1_1(
+        input_file: str, output_file: None = None
+        ) -> pd.DataFrame:
+    ...
+
+
+def prepare_RTs_zuco1_1(
+        input_file: str, output_file: str | None = None,
+        ) -> None | pd.DataFrame:
+    return prepare_RTs_zuco(1, 1, input_file, output_file)
+
+
+@overload
+def prepare_RTs_zuco1_2(
+        input_file: str, output_file: str
+        ) -> None:
+    ...
+
+
+@overload
+def prepare_RTs_zuco1_2(
+        input_file: str, output_file: None = None
+        ) -> pd.DataFrame:
+    ...
+
+
+def prepare_RTs_zuco1_2(
+        input_file: str, output_file: str | None = None,
+        ) -> None | pd.DataFrame:
+    return prepare_RTs_zuco(1, 2, input_file, output_file)
+
+
+@overload
+def prepare_RTs_zuco2_1(
+        input_file: str, output_file: str
+        ) -> None:
+    ...
+
+
+@overload
+def prepare_RTs_zuco2_1(
+        input_file: str, output_file: None = None
+        ) -> pd.DataFrame:
+    ...
+
+
+def prepare_RTs_zuco2_1(
+        input_file: str, output_file: str | None = None,
+        ) -> None | pd.DataFrame:
+    return prepare_RTs_zuco(2, 1, input_file, output_file)

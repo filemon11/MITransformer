@@ -1,7 +1,10 @@
 from .naturalstories import (  # noqa: F401
     load_natural_stories, split_naturalstories,
     prepare_RTs_naturalstories)
-from .zuco import load_zuco, prepare_RTs_zuco  # noqa: F401
+from .zuco import (  # noqa: F401
+    load_zuco, split_zuco, split_zuco2_1,
+    prepare_RTs_zuco1_1,
+    prepare_RTs_zuco1_2, prepare_RTs_zuco2_1)
 from .frank import (  # noqa: F401
     load_frank, split_frank, prepare_RTs_frank_ET,
     prepare_RTs_frank_SP)

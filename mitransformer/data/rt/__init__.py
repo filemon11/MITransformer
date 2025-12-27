@@ -9,5 +9,6 @@ from .corpora import (  # noqa: F401
     CorpusLoader, CorpusSplitter, CorpusPreparer,
     split_naturalstories, split_frank, load_meco, prepare_RTs_meco1,
     prepare_RTs_meco2, prepare_RTs_frank_ET, prepare_RTs_frank_SP,
-    prepare_RTs_naturalstories, prepare_RTs_zuco, load_geco,
+    prepare_RTs_naturalstories, split_zuco, prepare_RTs_zuco1_1,
+    prepare_RTs_zuco1_2, prepare_RTs_zuco2_1, load_geco,
     prepare_RTs_geco, split_geco)
