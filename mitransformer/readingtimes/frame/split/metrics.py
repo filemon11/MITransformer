@@ -7,7 +7,7 @@ import torch.distributed as dist
 from transformers import AutoTokenizer, AutoModelForCausalLM  # type: ignore
 from ....train.losses import entropy
 from ....train import attdistr, losses
-from .... import data
+from .... import data, models
 
 from ...lingutils import (
     UntokSplitFunc, UntokSplitAdd,
@@ -28,9 +28,11 @@ import pathlib
 import os
 from itertools import cycle
 from abc import ABC, abstractmethod
+from collections import defaultdict
 
 from typing import (
-    Type, Any, Iterable, Callable, Literal, Collection, Tuple,)
+    Type, Any, Iterable, Callable, Literal, Collection, Tuple,
+    DefaultDict)
 
 LANG = "en"
 
@@ -252,6 +254,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             use_ddp: bool = False,
             rank: int = 0,
             tempdir: str = ".temp",
+            use_mmap: bool = False,
             *args, **kwargs
             ) -> tuple[pd.Series, dict[str, Any]]:
 
@@ -322,7 +325,8 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             # huggingface weights.)
 
         else:
-            pathlib.Path(tempdir).mkdir(parents=True, exist_ok=True)
+            if use_mmap:
+                pathlib.Path(tempdir).mkdir(parents=True, exist_ok=True)
             assert dataset is not None
             if token_mapper_dir is not None:
                 if isinstance(token_mapper_dir, str):
@@ -335,7 +339,13 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
 
             attention_logits_mmaps: dict[
                 str, mmap_ninja.RaggedMmap] = {}
-            additional_mmaps: dict[str, mmap_ninja.RaggedMmap] = {}
+            additional_mmaps: dict[
+                models.AdditionalKeys, mmap_ninja.RaggedMmap] = {}
+            attention_logits_global: DefaultDict[
+                str, list[torch.Tensor]] = defaultdict(list)
+            additional_global: DefaultDict[
+                models.AdditionalKeys,
+                list[torch.Tensor]] = defaultdict(list)
 
             probs_global: list[torch.Tensor] = []
             tensorlist: list[torch.Tensor]
@@ -363,54 +373,77 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
 
                 probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
                 probs_global.extend(probs)
-                if not use_ddp or rank == 0:
-                    for key, attention in attention_logits.items():
-                        np_att = [att.numpy() for att in attention]
-                        path = os.path.join(tempdir, f"att_{key}")
-                        if key not in attention_logits_mmaps:
-                            attention_logits_mmaps[key] = (
-                                mmap_ninja.RaggedMmap.from_lists(
-                                    path, np_att))
-                        else:
-                            attention_logits_mmaps[key].extend(np_att)
+                if use_mmap:
+                    if not use_ddp or rank == 0:
+                        for key, attention in attention_logits.items():
+                            np_att = [att.numpy() for att in attention]
+                            path = os.path.join(tempdir, f"att_{key}")
+                            if key not in attention_logits_mmaps:
+                                attention_logits_mmaps[key] = (
+                                    mmap_ninja.RaggedMmap.from_lists(
+                                        path, np_att))
+                            else:
+                                attention_logits_mmaps[key].extend(np_att)
 
+                        for key, tensorlist in (  # type: ignore
+                                additional.items()):
+                            np_additional = [add.numpy() for add in tensorlist]
+                            path = os.path.join(tempdir, f"additional_{key}")
+                            if key not in attention_logits_mmaps:
+                                additional_mmaps[key] = (  # type: ignore
+                                    mmap_ninja.RaggedMmap.from_lists(
+                                        path, np_additional))
+                            else:
+                                additional_mmaps[key].extend(  # type: ignore
+                                    np_additional)
+                else:
+                    for key, attention in attention_logits.items():
+                        attention_logits_global[key].extend(attention)
                     for key, tensorlist in additional.items():  # type: ignore
-                        np_additional = [add.numpy() for add in tensorlist]
-                        path = os.path.join(tempdir, f"additional_{key}")
-                        if key not in attention_logits_mmaps:
-                            additional_mmaps[key] = (
-                                mmap_ninja.RaggedMmap.from_lists(
-                                    path, np_additional))
-                        else:
-                            additional_mmaps[key].extend(np_additional)
+                        additional_global[key].extend(  # type: ignore
+                                additional[key])  # type: ignore
 
             assert all(
                 comparison := [len(p) == len(t) for p, t in zip(
                     probs_global, df["word"])]), (
                         comparison, probs_global, df["word"])
 
-            if use_ddp:
-                dist.barrier()
-            return pd.Series(probs_global), {
-                "attention_logits": {
+            attention_logits_output: dict[
+                str, mmap_ninja.RaggedMmap] | DefaultDict[
+                    str, list[torch.Tensor]]
+            additional_output: dict[
+                models.AdditionalKeys, mmap_ninja.RaggedMmap] | DefaultDict[
+                    models.AdditionalKeys, list[torch.Tensor]]
+            if use_mmap:
+                attention_logits_output = {
                     key: mmap_ninja.RaggedMmap(
                         os.path.join(tempdir, f"att_{key}"),
                         wrapper_fn=torch.Tensor,
                         copy_before_wrapper_fn=False
                     )
-                    for key in attention_logits_mmaps.keys()},
-                "dataset": dataset,
-                "transform": transform,
-                "token_mapper_dir": token_mapper_dir,
-                "trainer": trainer,
-                "masks_setting": masks_setting,
-                **{
+                    for key in attention_logits_mmaps.keys()}
+                additional_output = {
                     key: mmap_ninja.RaggedMmap(
                         os.path.join(tempdir, f"additional_{key}"),
                         wrapper_fn=torch.Tensor,
                         copy_before_wrapper_fn=False
                     )
-                    for key in additional_mmaps.keys()}}  # type: ignore
+                    for key in additional_mmaps.keys()}
+            else:
+                attention_logits_output = attention_logits_global
+                additional_output = additional_global
+
+            if use_mmap and use_ddp:
+                dist.barrier()
+
+            return pd.Series(probs_global), {
+                "attention_logits": attention_logits_output,
+                "dataset": dataset,
+                "transform": transform,
+                "token_mapper_dir": token_mapper_dir,
+                "trainer": trainer,
+                "masks_setting": masks_setting,
+                **additional_output}  # type: ignore
 
     def batched_call(
             self, df: pd.DataFrame,
