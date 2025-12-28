@@ -58,7 +58,7 @@ def promote_func(func: SimpleFunc) -> FullFunc:
 
 # --- Core helper ---
 
-def _untokense(
+def _untokenise(
     items: Iterable[T],
     space_after: Iterable[bool],
     func: FullFunc,
@@ -271,7 +271,7 @@ def untokenise(
         case _:
             raise ValueError(f"Unsupported mode: {mode}")
 
-    yield from _untokense(items, space_after, func, additional)
+    yield from _untokenise(items, space_after, func, additional)
 
 
 def untokenise_by_POS(

@@ -371,6 +371,14 @@ def create_parser() -> argparse.ArgumentParser:
             'concatenated  by the optimiser.'),
         default="naturalstories")
     hyperopt_parser.add_argument(
+        '--load_psyling_mmap',
+        type=argtypes.OptNone(str),
+        default=None,
+        help=(
+            'If specified, loads mmap of psycholinguistic'
+            ' evaluation dataset from .temp directory. This'
+            ' argument specifies the file name.'),)
+    hyperopt_parser.add_argument(
         '--shift', type=int, default=0,
         help=(
             'Argument for adding spillover versions of the metrics.'

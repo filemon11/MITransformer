@@ -23,14 +23,14 @@ from ....data.dataset import (
     head_list_to_adjacency_matrix, shift_masks)
 from ....train import LMTrainer, inverse_sigmoid, select_true, unpad
 
-import mmap_ninja
+import mmap_ninja  # type: ignore
 import pathlib
 import os
 from itertools import cycle
 from abc import ABC, abstractmethod
 
 from typing import (
-    Type, Any, Iterable, Callable, Literal, Collection, Tuple)
+    Type, Any, Iterable, Callable, Literal, Collection, Tuple,)
 
 LANG = "en"
 
@@ -50,6 +50,20 @@ class SplitTokMetricMaker(ABC):
             ) -> tuple[pd.Series, dict[str, Any]]:
         ...
 
+    def batched_call(
+            self, df: pd.DataFrame,
+            batch_size: int,
+            args: list[Any], kwargs: dict[str, Any]
+            ) -> Iterable[tuple[pd.Series, dict[str, Any]]]:
+        # Can be overridden with faster versions that omit
+        # loading overhead
+        # NOTE: relies on args/kwargs being objects that can
+        # be changed by the Frame (through assigning other
+        # metric maker's results).
+        for start in range(0, len(df), batch_size):
+            yield self(
+                df.iloc[start:start+batch_size], *args, **kwargs)
+
 
 class SplitTokWordMetricMaker(SplitTokMetricMaker):
     def __init__(self, word_col: str, *args, **kwargs):
@@ -67,13 +81,24 @@ class SplitTokMetricMakerPOS(SplitTokWordMetricMaker):
 
 
 class SplitTokMetricMakerPosition(SplitTokWordMetricMaker):
+    def application(self, row: pd.DataFrame) -> list[int]:
+        return list(range(len(row[self.word_col])))
+
     def __call__(
             self, df: pd.DataFrame,
             *args, **kwargs
             ) -> tuple[pd.Series, dict[str, Any]]:
         return df.apply(
-            lambda r: list(
-                range(len(r[self.word_col]))), axis=1), dict()  # type: ignore
+            lambda r: self.application(r), axis=1), dict()  # type: ignore
+
+    def batched_call(
+            self, df: pd.DataFrame,
+            batch_size: int,
+            args: list[Any], kwargs: dict[str, Any]
+            ) -> Iterable[tuple[pd.Series, dict[str, Any]]]:
+        for start in range(0, len(df), batch_size):
+            yield self(
+                df.iloc[start:start+batch_size], *args, **kwargs)
 
 
 class SplitTokConlluDatasetMetricMaker(SplitTokMetricMaker):
@@ -386,6 +411,104 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                         copy_before_wrapper_fn=False
                     )
                     for key in additional_mmaps.keys()}}  # type: ignore
+
+    def batched_call(
+            self, df: pd.DataFrame,
+            batch_size: int,
+            args: list[Any], kwargs: dict[str, Any]
+            ) -> Iterable[tuple[pd.Series, dict[str, Any]]]:
+
+        trainer: LMTrainer | str = kwargs["trainer"]
+        token_mapper_dir: TokenMapper | str | None = None
+        if "token_mapper_dir" in kwargs:
+            token_mapper_dir = kwargs["token_mapper_dir"]
+        dataset: CoNLLUDataset | SentenceDataset | None = None
+        if "dataset" in kwargs:
+            dataset = kwargs["dataset"]
+        masked: bool = True
+        if "masked" in kwargs:
+            masked = kwargs["masked"]
+        transform: TransformMaskHeadChild | None = None
+        if "transform" in kwargs:
+            transform = kwargs["transform"]
+        masks_setting: Literal[
+            "current", "next"] | None = "current"
+        if "masks_setting" in kwargs:
+            masks_setting = kwargs["masks_setting"]
+        return_arc_logits: bool = True
+        if "return_arc_logits" in kwargs:
+            return_arc_logits = kwargs["return_arc_logits"]
+        return_logits: bool = True
+        if "return_logits" in kwargs:
+            return_logits = kwargs["return_logits"]
+        return_label_ids: bool = True
+        if "return_label_ids" in kwargs:
+            return_label_ids = kwargs["return_label_ids"]
+
+        if dataset is None:
+            assert self.conllu_col is not None
+
+            tokenlists: Sequence[TokenList] = df[self.conllu_col].tolist()
+            if masked:
+                assert masks_setting is not None
+                assert transform is not None
+                dataset = CoNLLUDataset.from_conllu(
+                    tokenlists, transform, masks_setting=masks_setting)
+            else:
+                dataset = SentenceDataset.from_conllu(
+                    tokenlists)
+
+        if isinstance(trainer, str):
+            raise NotImplementedError(
+                "Batching not implemented for huggingface models and"
+                " surprisal metric maker.")
+
+        else:
+            trainer.config.batch_size = batch_size
+
+            assert dataset is not None
+            if token_mapper_dir is not None:
+                if isinstance(token_mapper_dir, str):
+                    token_mapper: TokenMapper = TokenMapper.load(
+                        token_mapper_dir)
+                else:
+                    token_mapper = token_mapper_dir
+
+                dataset.map_to_ids(token_mapper)
+
+            tensorlist: list[torch.Tensor]
+            for (
+                pred_probs, attention_logits,
+                additional) in trainer.predict_batched(
+                    dataset,
+                    make_prob=True,
+                    only_true=True,
+                    return_arc_logits=return_arc_logits,
+                    return_logits=return_logits,
+                    return_label_ids=return_label_ids):
+
+                if trainer.config.device != "cpu":
+                    attention_logits = {
+                        key: [tensor.to("cpu") for tensor in tensorlist]
+                        for key, tensorlist in attention_logits.items()}
+
+                    pred_probs = [tensor.to("cpu") for tensor in pred_probs]
+
+                    for key, tensorlist in additional.items():  # type: ignore
+                        additional[key] = [  # type: ignore
+                            tensor.to("cpu")
+                            for tensor in tensorlist]  # type: ignore
+
+                probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
+                yield pd.Series(probs), {
+                    "attention_logits": attention_logits,
+                    "dataset": dataset,
+                    "transform": transform,
+                    "token_mapper_dir": token_mapper_dir,
+                    "trainer": trainer,
+                    "masks_setting": masks_setting,
+                    **additional
+                }
 
 
 class SplitTokMetricMakerMask(SplitTokMetricMaker):
@@ -999,7 +1122,6 @@ class SplitTokMetricMakerCosine(SplitTokMetricMaker):
             embeddings: Sequence[torch.Tensor],
             activations: Sequence[torch.Tensor],
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
-
         cosine: list[np.ndarray] = [
             losses.cosine_loss(
                 embeddings=emb,

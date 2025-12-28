@@ -1,4 +1,6 @@
 import pandas as pd
+import numpy as np
+import numbers
 
 from .raw.metrics import gen_without_tok
 from .split.metrics import gen_and_untok
@@ -240,23 +242,38 @@ def split_df(df: pd.DataFrame, ends: Iterable[bool]) -> pd.DataFrame:
 def add_column_(
         list_frame: pd.DataFrame, colname: str,
         content: Sequence[Sequence[Any]] | pd.Series,
+        row_selection: None | pd.Series | np.ndarray | Sequence[bool] = None,
         ) -> None:
 
     if len(list_frame) > 0:
         # Assert that number of rows matches
-        assert len(list_frame) == len(content), (
-            f"Number of dataframe rows ({len(list_frame)}) and "
+        selected_frame = list_frame
+        if row_selection is not None:
+            selected_frame = list_frame[row_selection]
+        assert len(selected_frame) == len(content), (
+            f"Number of dataframe rows ({len(selected_frame)}) and "
             f"number of new content elements ({len(content)}) do "
             f"not match. Tried to add {colname}.")
 
-        # # Assert that number elements in each sentence matches
-        # series = list_frame.iloc[:, -1]
-        # for i, (series_l, content_l) in enumerate(zip(series, content)):
-        #     assert len(series_l) == len(content_l), (
-        #         f"Number of items is not equal at position {i}"
-        #         f"({len(series_l)} vs {len(content_l)})")
-
-    list_frame[colname] = content
+    if row_selection is not None:
+        if colname not in list_frame.columns:
+            list_frame[colname] = [
+                np.array([np.nan], dtype=np.float64)]*len(list_frame)
+        series = list_frame[colname].copy()
+        try:
+            if isinstance(content[0][0], numbers.Number):
+                content = [
+                    np.array(li, dtype=np.float64)  # type: ignore
+                    for li in content]  # type: ignore
+            elif isinstance(content[0], np.ndarray):
+                content = [
+                    arr.astype(np.float64) for arr in content]  # type: ignore
+        except KeyError:
+            pass
+        series.iloc[row_selection] = content  # type: ignore
+        list_frame[colname] = series
+    else:
+        list_frame[colname] = content
 
 
 def generate_sentence_end_list(
@@ -339,14 +356,18 @@ class SplitFrame(Frame):
             self,
             colkey: str,
             colname: str,
-            content: Sequence[Sequence[Any]] | pd.Series,
+            content: Sequence[Sequence[Any]] | pd.Series | None,
             additional: dict[str, Any],
             shift: bool | None,
             to_unsplit: bool,
             untokenise_func: None | UntokSplitFunc = None,
+            row_selection: (
+                None | pd.Series | np.ndarray | Sequence[bool]) = None
             ) -> None:
-        add_column_(
-            self.df, colname, content)
+        if content is not None:
+            add_column_(
+                self.df, colname, content,
+                row_selection=row_selection)
         self.colnames[colkey] = colname
         self.add_override_additional(**additional)
 
@@ -356,9 +377,14 @@ class SplitFrame(Frame):
         self.shift[colname] = shift
         self.to_unsplit[colname] = to_unsplit
 
-    def add_(self,
-             *args: str | tuple[str, str],
-             **kwargs) -> None:
+    def _add_(
+            self,
+            append_untokenise_func: bool = True,
+            row_selection: (
+                None | pd.Series | np.ndarray | Sequence[bool]) = None,
+            *args: str | tuple[str, str],
+            **kwargs,
+            ) -> None:
         self.add_override_additional(**kwargs)
 
         assert len(args) > 0
@@ -376,28 +402,34 @@ class SplitFrame(Frame):
 
         untok_type = self.generators[coltype][2]
         untok: None | UntokSplitFunc
-        if untok_type is not None:
+        if append_untokenise_func and untok_type is not None:
             untok = untok_type(
                 coltype, **(self.colnames | {colkey: colname}))
         else:
             untok = None
 
+        df = self.df
+        if row_selection is not None:
+            df = df[row_selection]
+
+        MetricMaker, shift, _, to_unsplit = self.generators[coltype]
         self.add_column_(
-            colkey, colname,
-            *self.generators[coltype][0](**self.colnames)(
-                self.df, **self.additional),
-            self.generators[coltype][1],
-            self.generators[coltype][3],
-            untok)
-        if len(args) > 1:
-            self.add_(
-                *args[1:])
+            colkey,
+            colname,
+            *MetricMaker(**self.colnames)(
+                df, **self.additional),
+            shift=shift,
+            to_unsplit=to_unsplit,
+            untokenise_func=untok,
+            row_selection=row_selection)
 
-    def reload_(
+    def _add_batched_(
             self,
+            batch_size: int = 10,
+            append_untokenise_func: bool = True,
             *args: str | tuple[str, str],
-            **kwargs) -> None:
-
+            **kwargs,
+            ) -> Iterable[None]:
         self.add_override_additional(**kwargs)
 
         assert len(args) > 0
@@ -413,16 +445,99 @@ class SplitFrame(Frame):
         colname = alt_name if alt_name is not None else coltype
         colkey = f"{colname}_col"
 
-        self.add_column_(
-            colkey, colname,
-            *self.generators[coltype][0](**self.colnames)(
-                self.df, **self.additional),
-            self.generators[coltype][1],
-            self.generators[coltype][3])
+        untok_type = self.generators[coltype][2]
+        untok: None | UntokSplitFunc
+        if append_untokenise_func and untok_type is not None:
+            untok = untok_type(
+                coltype, **(self.colnames | {colkey: colname}))
+        else:
+            untok = None
+
+        df = self.df
+
+        MetricMaker, shift, _, to_unsplit = self.generators[coltype]
+        assert getattr(MetricMaker, "batched_call", None) is not None, (
+            f"Batching not supported for {MetricMaker}."
+        )
+        metric_iterable = MetricMaker(
+            **self.colnames).batched_call(  # type: ignore
+                df, batch_size, [],
+                self.additional)
+        for start, (content, additional) in zip(
+                range(0, len(self.df), batch_size), metric_iterable):
+            mask = np.zeros(len(self.df), dtype=bool)
+            mask[start:start+batch_size] = True
+
+            self.add_column_(
+                colkey,
+                colname,
+                content,
+                additional,
+                shift=shift,
+                to_unsplit=to_unsplit,
+                untokenise_func=untok,
+                row_selection=mask)
+            yield None
+
+            # We don't need to add another untok func
+            untok = None
+
+    def add_(
+            self,
+            *args: str | tuple[str, str],
+            **kwargs) -> None:
+
+        self._add_(True, None, *args, **kwargs)
+
+        if len(args) > 1:
+            self.add_(
+                *args[1:])
+
+    def add_batched_(
+            self,
+            batch_size: int = 10,
+            *args: str | tuple[str, str],
+            **kwargs) -> None:
+        """The additional dict is not guaranteed
+        to contain entries for the full dataset but
+        may contain only those entries relevant for the
+        current batch."""
+
+        try:
+            iterators = [
+                iter(self._add_batched_(
+                    batch_size, True, arg, **kwargs))
+                for arg in args]
+            for _ in zip(*iterators):
+                continue
+        except StopIteration:
+            pass
+
+    def reload_(
+            self,
+            *args: str | tuple[str, str],
+            **kwargs) -> None:
+
+        self._add_(False, None, *args, **kwargs)
 
         if len(args) > 1:
             self.reload_(
                 *args[1:])
+
+    def reload_batched_(
+            self,
+            batch_size: int = 10,
+            *args: str | tuple[str, str],
+            **kwargs) -> None:
+
+        try:
+            for iterator in [
+                    iter(self._add_batched_(
+                        batch_size, False, arg, **kwargs))
+                    for arg in args]:
+                next(iterator)
+        except StopIteration:
+            pass
 
     def shift_(
             self,

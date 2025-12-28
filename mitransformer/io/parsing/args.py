@@ -101,6 +101,7 @@ class HyperoptParserArgs(ParserArgs):
     pruner_startup_trials: int
     n_trials: int
     psyling_dataset: Tuple[RTCorpus, ...]
+    load_psyling_mmap: str | None
     lme_formula: LMEParseResults
     shift: int
     sampler: Literal["tpe", "random"]
