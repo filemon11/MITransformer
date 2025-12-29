@@ -73,7 +73,11 @@ def fit_gpboost(
         group_rand_coef_data=Z,
         ind_effect_group_rand_coef=pointers,
         drop_intercept_group_rand_effect=drop_rand_intr,
-        likelihood="gaussian")
+        likelihood="gaussian",
+        gp_approx="vecchia")
+    # Vecchia approximations tested:
+    # only miniscule decreases in accuracy
+
     model.fit(y=y, X=X)
 
     return model, df
