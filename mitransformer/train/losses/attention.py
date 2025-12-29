@@ -336,6 +336,7 @@ def get_attention_entropy(
 
         # prevent numerical problem for one-item
         # distribution
-        entropy[..., (1-start_at)+prefix_dummies] = 1
+        if (1-start_at)+prefix_dummies < entropy.shape[-1]:
+            entropy[..., (1-start_at)+prefix_dummies] = 1
 
     return utils.reduce(entropy, reduction)
