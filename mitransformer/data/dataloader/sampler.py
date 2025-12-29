@@ -14,16 +14,16 @@ The masks use boolean arrays/tensors.
 """
 
 import torch
-from torch.utils.data import Sampler
+from torch.utils.data import BatchSampler
+import torch.distributed as dist
 
 import numpy as np
-
-from random import shuffle
-from collections import defaultdict
+import math
+import bisect
 
 from .. import dataset
 
-from typing import (TypedDict,)
+from typing import (TypedDict, Iterator)
 
 from ...utils.logmaker import getLogger
 
@@ -33,85 +33,188 @@ logger = getLogger(__name__)
 SentenceTokens = TypedDict("SentenceTokens", {"tokens": list[str]})
 
 
-class BySequenceLengthSampler(Sampler):
+class BySequenceLengthSampler(BatchSampler):
     def __init__(
-            self, data_source: dataset.NLPDataset[SentenceTokens],
-            bucket_boundaries, batch_size=64,
-            drop_last=True, include_smaller=False, include_larger=False):
-        self.data_source = data_source
-        ind_n_len = []
-        for i, s in enumerate(data_source):     # type: ignore
-            ind_n_len.append((i, len(s['tokens'])))
+            self, data_source: dataset.TokenisedDataset[dataset.SentenceIds],
+            min_size: int, max_size: int, batch_size=64,
+            drop_last=True, include_smaller=False, include_larger=False,
+            seed: int = 0):
 
-        self.ind_n_len = ind_n_len
-        self.bucket_boundaries = bucket_boundaries
+        self.epoch = 0
+        self.seed = seed
+        self.data_source = data_source
         self.batch_size = batch_size
         self.drop_last = drop_last
 
-        if self.drop_last:
-            print(
-                "WARNING: drop_last=True, dropping last non batch-size"
-                "batch in every bucket ... ")
+        boundaries: list[int] = list(range(min_size, max_size + 2))
+        # includes max_size items
 
-        boundaries = list(self.bucket_boundaries)
         if include_smaller:
-            boundaries = [np.iinfo(np.int16).min] + boundaries
+            boundaries = [0] + boundaries
         if include_larger:
             boundaries = boundaries + [np.iinfo(np.int16).max]
 
-        self.buckets_min = torch.tensor(boundaries[:-1])
-        self.buckets_max = torch.tensor(boundaries[1:])
-        self.boundaries = torch.tensor(self.bucket_boundaries)
+        self.boundaries = boundaries
+        self.num_buckets = len(boundaries) - 1
 
-    def shuffle_tensor(self, t):
+        self.buckets: list[list[int]] = [[] for _ in range(self.num_buckets)]
+
+        for idx, sample in enumerate(iter(data_source)):
+            assert "input_ids" in sample
+            seq_len = len(sample["input_ids"])
+
+            bucket_id = bisect.bisect_right(boundaries, seq_len) - 1
+            if 0 <= bucket_id < self.num_buckets:
+                self.buckets[bucket_id].append(idx)
+
+        self._num_batches = 0
+        for bucket in self.buckets:
+            n = len(bucket)
+            if n == 0:
+                continue
+            if self.drop_last:
+                self._num_batches += n // self.batch_size
+            else:
+                self._num_batches += math.ceil(n / self.batch_size)
+
+    def shuffle_tensor(self, t: torch.Tensor) -> torch.Tensor:
         return t[torch.randperm(len(t))]
 
-    def __iter__(self):
-        data_buckets = defaultdict(list)
-        # where p is the id number and seq_len is the length of this id number.
-        for p, seq_len in self.ind_n_len:
-            pid = self.element_to_bucket_id(p, seq_len)
+    def __iter__(self) -> Iterator[list[int]]:
+        g = torch.Generator()
+        g.manual_seed(self.seed + self.epoch)
 
-            if pid is None:
+        batches: list[list[int]] = []
+
+        for bucket in self.buckets:
+            if len(bucket) == 0:
                 continue
 
-            data_buckets[pid].append(p)
+            # Shuffle indices inside bucket
+            perm = torch.randperm(len(bucket), generator=g)
+            shuffled = [bucket[i] for i in perm.tolist()]
 
-        tensored: dict[str, list | torch.Tensor] = dict(data_buckets)
-        for k in tensored.keys():
-            tensored[k] = torch.tensor(tensored[k])
+            # Split into batches
+            for i in range(0, len(shuffled), self.batch_size):
+                batch = shuffled[i:i + self.batch_size]
+                if len(batch) < self.batch_size:
+                    if self.drop_last:
+                        continue
+                    else:
+                        # add extra samples to make it evenly divisible
+                        padding_size = self.batch_size - len(batch)
+                        pad_idx = torch.randint(
+                            0, len(shuffled), (padding_size,), generator=g)
+                        batch += [shuffled[i] for i in pad_idx.tolist()]
+                batches.append(batch)
 
-        iter_list = []
-        for k in tensored.keys():
-
-            t = self.shuffle_tensor(tensored[k])
-            batch = torch.split(t, self.batch_size, dim=0)
-
-            if self.drop_last and len(batch[-1]) != self.batch_size:
-                batch = batch[:-1]
-
-            iter_list += batch
-
-        shuffle(iter_list)
-        # shuffle all the batches so they arent ordered by bucket
-
-        # size
-        for i in iter_list:
-            yield i.numpy().tolist()    # as it was stored in an array
+        # Shuffle batches across buckets
+        perm = torch.randperm(len(batches), generator=g)
+        for i in perm.tolist():
+            yield batches[i]
 
     def __len__(self):
-        return len(self.data_source)
+        return self._num_batches
 
-    def element_to_bucket_id(self, x, seq_length):
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
 
-        valid_buckets: torch.Tensor
-        valid_buckets = ((seq_length >= self.buckets_min)
-                         * (seq_length < self.buckets_max))
 
-        nonzero = valid_buckets.nonzero()
-        if nonzero.shape[0] == 0:
-            return None
+class DistributedBySequenceLengthSampler(BatchSampler):
+    def __init__(
+            self, data_source: dataset.NLPDataset[SentenceTokens],
+            min_size: int, max_size: int, batch_size=64,
+            drop_last=True, include_smaller=False, include_larger=False,
+            seed: int = 0, num_replicas: int | None = None,
+            rank: int | None = None):
 
-        bucket_id = nonzero[0].item()
+        # ---- distributed setup ----
+        if num_replicas is None:
+            num_replicas = dist.get_world_size()
+        if rank is None:
+            rank = dist.get_rank()
 
-        return bucket_id
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.seed = seed
+        self.epoch = 0
+
+        self.batch_size = batch_size
+        self.total_batch_size = batch_size * num_replicas
+        self.drop_last = drop_last
+
+        # ---- bucket boundaries ----
+
+        boundaries: list[int] = list(range(min_size, max_size + 2))
+        # includes max_size items
+
+        if include_smaller:
+            boundaries = [0] + boundaries
+        if include_larger:
+            boundaries = boundaries + [np.iinfo(np.int16).max]
+
+        self.boundaries = boundaries
+        self.num_buckets = len(boundaries) - 1
+
+        self.buckets: list[list[int]] = [[] for _ in range(self.num_buckets)]
+
+        for idx, sample in enumerate(iter(data_source)):
+            seq_len = len(sample["tokens"])
+
+            bucket_id = bisect.bisect_right(boundaries, seq_len) - 1
+            if 0 <= bucket_id < self.num_buckets:
+                self.buckets[bucket_id].append(idx)
+
+    def shuffle_tensor(self, t: torch.Tensor) -> torch.Tensor:
+        return t[torch.randperm(len(t))]
+
+    def __iter__(self) -> Iterator[list[int]]:
+        g = torch.Generator()
+        g.manual_seed(self.seed + self.epoch)
+
+        batches: list[list[int]] = []
+
+        for bucket in self.buckets:
+            n = len(bucket)
+            if n == 0:
+                continue
+
+            perm = torch.randperm(len(bucket), generator=g)
+            shuffled = [bucket[i] for i in perm.tolist()]
+
+            for i in range(0, n, self.total_batch_size):
+                batch = shuffled[i:i + self.total_batch_size]
+
+                if len(batch) < self.total_batch_size:
+                    if self.drop_last:
+                        continue
+                    # add extra samples to make it evenly divisible
+                    padding_size = self.total_batch_size - len(batch)
+                    pad_idx = torch.randint(
+                        0, len(shuffled), (padding_size,), generator=g)
+                    batch += [shuffled[i] for i in pad_idx.tolist()]
+
+                batches.append(batch)
+
+        # shuffle batches globally
+        perm = torch.randperm(len(batches), generator=g)
+        shuffled = [batches[i] for i in perm.tolist()]
+
+        # shard by rank
+        for batch in shuffled:
+            yield batch[self.rank: self.total_batch_size: self.num_replicas]
+
+    def __len__(self):
+        total = 0
+        for bucket in self.buckets:
+            n = len(bucket)
+            if n == 0:
+                continue
+            if self.drop_last:
+                total += n // self.total_batch_size
+            else:
+                total += math.ceil(n / self.total_batch_size)
+        return total
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
