@@ -81,6 +81,7 @@ class GeneralConfig(utils.Params):
     include_current: bool = True
     losses: None | Mapping[str, int | float] = MappingProxyType(
         {"lm": 1})
+    k_negatives: None | int = None
 
 
 @dataclass
@@ -92,6 +93,7 @@ class TrainConfig(GeneralConfig):
     use_steps: bool = False
     max_steps: int | None = None
     gradient_acc: int | None = None
+    seed: int = 0
 
 
 class LMTrainer():
@@ -330,7 +332,8 @@ class LMTrainer():
             ) -> torch.Tensor:
         return losses.lm_loss(
             logits, labels, ignore_index,
-            reduction, self.config.discriminative)
+            reduction, self.config.discriminative,
+            k_negatives=self.config.k_negatives)
 
     def arc_loss(
             self, score_preds: torch.Tensor,
@@ -991,8 +994,8 @@ class LMTrainer():
         device = train_config.device
         assert device is not None
 
-        train = self.get_loader(train)
-        eval = self.get_loader(eval)
+        train = self.get_loader(train, "train")
+        eval = self.get_loader(eval, "eval")
 
         eval_interval = train_config.eval_interval
 
@@ -1025,7 +1028,12 @@ class LMTrainer():
                 self.config.rank,
                 logger, f"Epoch: {epoch}/{max_epochs}")
             if self.use_ddp:
-                train.sampler.set_epoch(epoch)  # type: ignore
+                if train.sampler is not None and hasattr(
+                        train.sampler, "set_epoch"):
+                    train.sampler.set_epoch(epoch)  # type: ignore
+                if train.batch_sampler is not None and hasattr(
+                        train.batch_sampler, "set_epoch"):
+                    train.batch_sampler.set_epoch(epoch)  # type: ignore
 
             # Steps
             for train_metric in self._train(train):
@@ -1113,8 +1121,8 @@ class LMTrainer():
             **kwargs) -> TestResult:
         assert self.train_config is not None, "Config missing training params."
 
-        train = self.get_loader(train)
-        eval = self.get_loader(eval)
+        train = self.get_loader(train, "train")
+        eval = self.get_loader(eval, "eval")
 
         # TODO: upgrade to Python 3.13 and replace with gen.report()
         gen = self.train_iter(train, eval, **kwargs)
@@ -1194,9 +1202,9 @@ class LMTrainer():
         metrics_dict: dict[str, metrics.LMMetric] = {}
         for n, ds in datasets.items():
             if isinstance(ds, (data.DataLoader, data.TokenisedDataset)):
-                ds = self.get_loader(ds)
+                ds = self.get_loader(ds, "test")
                 self.init_hooks(ds, n, token_mapper=token_mapper)
-                metrics_dict[n] = self._eval(self.get_loader(ds))
+                metrics_dict[n] = self._eval(ds)
                 info(
                     self.config.rank, logger,
                     f"Test metric for {n} split:\n{metrics_dict[n].info}")
@@ -1274,8 +1282,8 @@ class LMTrainer():
         # joined back together.
         loader = data.get_loader(  # type: ignore
             dataset,
-            batch_size=self.config.batch_size,
             bucket=False,
+            batch_size=self.config.batch_size,
             shuffle=False, droplast=False,
             n_workers=self.config.n_workers)
         self.init_hooks(
@@ -1528,18 +1536,34 @@ class LMTrainer():
     # this is not typed in detail like data.data.get_loader
     def get_loader(self, in_data: (
                 data.TokenisedDataset[data.IdsSentence]
-                | data.DataLoader[data.IdsSentence, data.IdBatch])
+                | data.DataLoader[data.IdsSentence, data.IdBatch]),
+            mode: Literal["train", "eval", "test"]
             ) -> data.DataLoader[data.IdsSentence, data.IdBatch]:
+
         if not isinstance(in_data, data.DataLoader):
+
+            bucket = False
+            shuffle = False
+            droplast = False
+            seed = 0
+            if mode == "train" or mode == "eval":
+                bucket = True
+                shuffle = True
+                assert self.train_config is not None
+                seed = self.train_config.seed
+            elif mode == "train":
+                droplast = True
+
             assert self.config.batch_size <= len(in_data), (
                 "Batch size larger than dataset. "
                 f"dataset size: {len(in_data)}, batch size: "
                 f"{self.config.batch_size}")
             return data.get_loader(
                 in_data, batch_size=self.config.batch_size,
-                bucket=False,
-                shuffle=False, droplast=False,
+                bucket=bucket,
+                shuffle=shuffle, droplast=droplast,
                 world_size=self.config.world_size,
                 rank=self.config.rank,
-                n_workers=self.config.n_workers)
+                n_workers=self.config.n_workers,
+                seed=seed)
         return in_data

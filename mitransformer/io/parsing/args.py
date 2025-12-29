@@ -66,6 +66,7 @@ class TrainParserArgs(ParserArgs):
     length_weighted: bool
     include_current: bool
     losses: None | dict[str, float | int]
+    k_negatives: None | int
     arc_loss_weighted: bool
     discriminative: bool
 
@@ -127,6 +128,7 @@ class HyperoptParserArgs(ParserArgs):
     loss_alpha: float | hyperopt.Range | hyperopt.Choices[float | None] | None
     losses: list[dict[
         str, float | int | None]] | dict[str, float | int | None] | None
+    k_negatives: None | int | hyperopt.Choices[int | None] | hyperopt.Range
 
     arc_loss_weighted: bool | hyperopt.Choices[bool]
     discriminative: bool | hyperopt.Choices[bool]
@@ -175,6 +177,7 @@ class TestParserArgs(ParserArgs):
     batch_size: int | Undefined
     loss_alpha: float | None | Undefined
     losses: dict[str, float | int] | None | Undefined
+    k_negatives: None | int | Undefined
     arc_loss_weighted: bool | Undefined
 
     att_plot: bool
@@ -213,6 +216,7 @@ class RTParserArgs(ParserArgs):
     batch_size: int | Undefined
     loss_alpha: float | None | Undefined
     losses: dict[str, float | int] | None | Undefined
+    k_negatives: None | int | Undefined
     arc_loss_weighted: bool | Undefined
 
     shift: int

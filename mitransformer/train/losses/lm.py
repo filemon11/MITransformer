@@ -10,7 +10,8 @@ def lm_loss(
         logits: torch.Tensor, labels: torch.Tensor,
         ignore_index: int = -100,
         reduction: Literal["sum", "mean", "none"] = "mean",
-        discriminative: bool = False) -> torch.Tensor:
+        discriminative: bool = False,
+        k_negatives: int | None = None) -> torch.Tensor:
 
     logits = torch.swapaxes(logits, 1, 2)
     if discriminative:
@@ -43,35 +44,36 @@ def lm_loss(
         loss = loss.sum() / mask.sum()
 
     else:
-        k = 99
-        # TODO make this an argument
+        if k_negatives is not None:
+            k = 99
+            # TODO make this an argument
 
-        # mask ignored labels once
-        valid = labels != ignore_index
+            # mask ignored labels once
+            valid = labels != ignore_index
 
-        # sample negatives
-        neg = torch.randint(
-            0, logits.shape[1] - 1, (
-                logits.shape[0], k, *labels.shape[1:]),
-            device=logits.device
-        )
+            # sample negatives
+            neg = torch.randint(
+                0, logits.shape[1] - 1, (
+                    logits.shape[0], k, *labels.shape[1:]),
+                device=logits.device
+            )
 
-        # create pos indices
-        pos = torch.where(
-            valid, labels, torch.zeros_like(labels)).unsqueeze(1)
+            # create pos indices
+            pos = torch.where(
+                valid, labels, torch.zeros_like(labels)).unsqueeze(1)
 
-        # shift negatives to avoid positive class
-        neg = neg + (neg >= pos).long()
+            # shift negatives to avoid positive class
+            neg = neg + (neg >= pos).long()
 
-        # build indices: [positive | negatives]
-        idx = torch.cat([pos, neg], dim=1)
+            # build indices: [positive | negatives]
+            idx = torch.cat([pos, neg], dim=1)
 
-        # gather
-        logits = logits.gather(1, idx)
+            # gather
+            logits = logits.gather(1, idx)
 
-        # targets: positive is always index 0
-        labels = torch.zeros_like(labels)
-        labels[~valid] = ignore_index
+            # targets: positive is always index 0
+            labels = torch.zeros_like(labels)
+            labels[~valid] = ignore_index
 
         loss = F.cross_entropy(
             logits, labels,

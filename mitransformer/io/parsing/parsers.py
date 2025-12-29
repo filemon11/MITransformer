@@ -210,6 +210,11 @@ def create_parser() -> argparse.ArgumentParser:
             "Dictionary of losses for combined loss setting "
             "and their weights. Must include 'lm'."))
     trainer_group.add_argument(
+        '--k_negatives', type=argtypes.OptNone(int),
+        default=None,
+        help=(
+            "k negatives to approximate softmax"))
+    trainer_group.add_argument(
         '--arc_loss_weighted', type=argtypes.str_to_bool, default=False,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
     trainer_group.add_argument(
@@ -553,18 +558,15 @@ def create_parser() -> argparse.ArgumentParser:
         type=argtypes.OptNone(
             argtypes.HyperoptSpace(argtypes.StrToDict(
                 str, argtypes.HyperoptSpace(argtypes.OptNone(float))))),
-        # TODO: sampler is not choosing from tuples and dicts yet.
-        # Maybe it will be necessary to encode spaces into
-        # a separate class because currently the sampler
-        # chooses from lists and tuples which might conflict
-        # tuple arguments with StrToTuple.
-        # Maybe subclass tuple and list?
         default={"lm": 1},
         help=(
             "Dictionary of losses for combined loss setting "
             "and their weights. Must include 'lm'."))
-    # TODO: make it possible to define continuous spaces for loss weights
-    # separately as well as sampling s.t. the weights sum to 1.
+    hyperopt_flexible_trainer_group.add_argument(
+        '--k_negatives', type=argtypes.HyperoptSpace(argtypes.OptNone(int)),
+        default=None,
+        help=(
+            "k negatives to approximate softmax"))
     hyperopt_flexible_trainer_group.add_argument(
         '--arc_loss_weighted',
         type=argtypes.HyperoptSpace(argtypes.str_to_bool),
@@ -936,6 +938,11 @@ def create_parser() -> argparse.ArgumentParser:
             "Dictionary of losses for combined loss setting "
             "and their weights. Must include 'lm'."))
     trainer_group.add_argument(
+        '--k_negatives', type=argtypes.OptNone(int),
+        default=Undefined,
+        help=(
+            "k negatives to approximate softmax"))
+    trainer_group.add_argument(
         '--arc_loss_weighted', type=argtypes.str_to_bool, default=Undefined,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
 
@@ -1097,6 +1104,11 @@ def create_parser() -> argparse.ArgumentParser:
         help=(
             "Dictionary of losses for combined loss setting "
             "and their weights. Must include 'lm'."))
+    trainer_group.add_argument(
+        '--k_negatives', type=argtypes.OptNone(int),
+        default=Undefined,
+        help=(
+            "k negatives to approximate softmax"))
     trainer_group.add_argument(
         '--arc_loss_weighted', type=argtypes.str_to_bool, default=Undefined,
         help="Overrepresent arcs against non-arcs in arc loss calculation")
