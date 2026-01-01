@@ -47,6 +47,7 @@ def get_loader(
         max_size: int = 50,
         shuffle: bool = True,
         droplast: bool = True,
+        fill_incomplete: bool = True,
         rank: int | None = 0,
         world_size: int = 1,
         n_workers: int = 0,
@@ -65,6 +66,7 @@ def get_loader(
         max_size: int = 50,
         shuffle: bool = True,
         droplast: bool = True,
+        fill_incomplete: bool = True,
         rank: int | None = 0,
         world_size: int = 1,
         n_workers: int = 0,
@@ -83,6 +85,7 @@ def get_loader(
         max_size: int = 50,
         shuffle: bool = True,
         droplast: bool = True,
+        fill_incomplete: bool = True,
         rank: int | None = 0,
         world_size: int = 1,
         n_workers: int = 0,
@@ -101,6 +104,7 @@ def get_loader(
         max_size: int = 50,
         shuffle: bool = True,
         droplast: bool = True,
+        fill_incomplete: bool = True,
         rank: int | None = 0,
         world_size: int = 1,
         n_workers: int = 0,
@@ -119,6 +123,7 @@ def get_loader(
         max_size: int = 50,
         shuffle: bool = True,
         droplast: bool = True,
+        fill_incomplete: bool = True,
         rank: int | None = 0,
         world_size: int = 1,
         n_workers: int = 0,
@@ -137,6 +142,7 @@ def get_loader(
         max_size: int = 50,
         shuffle: bool = True,
         droplast: bool = True,
+        fill_incomplete: bool = True,
         rank: int | None = 0,
         world_size: int = 1,
         n_workers: int = 0,
@@ -154,6 +160,7 @@ def get_loader(
         max_size: int = 50,
         shuffle: bool = True,
         droplast: bool = True,
+        fill_incomplete: bool = True,
         rank: int | None = 0,
         world_size: int = 1,
         n_workers: int = 0,
@@ -176,6 +183,7 @@ def get_loader(
                 max_size,
                 batch_size,
                 drop_last=droplast,
+                fill_incomplete=fill_incomplete,
                 seed=seed)
         else:
             batch_sampler = sampler.DistributedBySequenceLengthSampler(
@@ -184,6 +192,7 @@ def get_loader(
                 max_size,
                 batch_size=batch_size // world_size,
                 drop_last=droplast,
+                fill_incomplete=fill_incomplete,
                 num_replicas=world_size,
                 rank=rank,
                 seed=seed
@@ -206,7 +215,7 @@ def get_loader(
         else:
             sampl = DistributedSampler(
                 ds, num_replicas=world_size,
-                rank=rank, shuffle=shuffle, drop_last=False,
+                rank=rank, shuffle=shuffle, drop_last=droplast,
                 seed=seed)
 
         connect_with_dummy = False

@@ -18,13 +18,14 @@ import os
 from dataclasses import dataclass, field
 from collections import defaultdict
 from types import MappingProxyType
+import itertools
 
 from ..utils import pickle
 
 from typing import (Self, Literal, cast,
                     Container, Iterable, Mapping,
                     Any, Generator, TypedDict, NotRequired,
-                    TypeVar, DefaultDict)
+                    TypeVar, DefaultDict,)
 
 from ..utils.logmaker import getLogger, info, get_timestr, warning
 
@@ -35,6 +36,16 @@ M = TypeVar("M", bound=metrics.LMMetric)
 N = TypeVar("N")
 K = TypeVar("K")
 V = TypeVar("V")
+
+
+class Undefined():
+    """A special class that represents an undefined
+    value. This is useful for argument parsing to
+    distinguish between None and an undefined parameter
+    for instance, when loading a standard configuration
+    file and giving the user the option to overwrite
+    parts of that configuration."""
+    pass
 
 
 class AdditionalPrediction(TypedDict):
@@ -976,6 +987,7 @@ class LMTrainer():
             return True
         return False
 
+    @torch.compile()
     def train_iter(
             self,
             train: (
@@ -1106,6 +1118,7 @@ class LMTrainer():
             pbar_steps.close()
         return (epoch, total_steps), (best_epoch, best_step)
 
+    @torch.compile()
     def train(
             self,
             train: (
@@ -1193,6 +1206,7 @@ class LMTrainer():
                 for batch in tqdm(loader, desc="Batches")]
         return self.gather_metrics(metrics.sum_metrics(metrics_list))
 
+    @torch.compile()
     def test(
             self, token_mapper: data.TokenMapper | None = None,
             **datasets: (
@@ -1210,6 +1224,7 @@ class LMTrainer():
                     f"Test metric for {n} split:\n{metrics_dict[n].info}")
         return metrics_dict
 
+    @torch.compile()
     def predict(
             self, dataset: data.TokenisedDataset[data.IdsSentence],
             make_prob: bool = False,
@@ -1261,6 +1276,7 @@ class LMTrainer():
             probs_global, dict(attention_logits_global),
             dict(additional_global))  # type: ignore
 
+    @torch.compile()
     def predict_batched(
             self, dataset: data.TokenisedDataset[data.IdsSentence],
             make_prob: bool = False,
@@ -1284,8 +1300,12 @@ class LMTrainer():
             dataset,
             bucket=False,
             batch_size=self.config.batch_size,
-            shuffle=False, droplast=False,
-            n_workers=self.config.n_workers)
+            shuffle=False,
+            droplast=False,
+            fill_incomplete=False,
+            n_workers=self.config.n_workers,
+            rank=self.config.rank,
+            world_size=self.config.world_size)
         self.init_hooks(
             loader, (dataset_name if dataset_name is not None else "ds"),
             token_mapper=token_mapper)
@@ -1420,6 +1440,7 @@ class LMTrainer():
                     unpadded_logits, unpadded_arc_logits_out,
                     cast(AdditionalPrediction, unpadded_additional_out))
 
+    @torch.compile()
     def generate(
             self, token_mapper: data.TokenMapper,
             start: str | None = None, max_len: int = 40) -> str:
@@ -1511,7 +1532,11 @@ class LMTrainer():
         if self.use_ddp:
             lists = self.gather_ddp(seq)
             if interleave:
-                return [item for tup in zip(*lists) for item in tup]
+                return [  # type: ignore
+                    item for tup in itertools.zip_longest(  # type: ignore
+                        *lists, fillvalue=Undefined)
+                    for item in tup if item != Undefined]
+
             return [item for seq in lists for item in seq]
         else:
             return seq
@@ -1545,14 +1570,17 @@ class LMTrainer():
             bucket = False
             shuffle = False
             droplast = False
+            fill_incomplete = True
             seed = 0
             if mode == "train" or mode == "eval":
                 bucket = True
                 shuffle = True
                 assert self.train_config is not None
                 seed = self.train_config.seed
-            elif mode == "train":
+            if mode == "train":
                 droplast = True
+            if mode == "test":
+                fill_incomplete = False
 
             assert self.config.batch_size <= len(in_data), (
                 "Batch size larger than dataset. "
@@ -1565,5 +1593,6 @@ class LMTrainer():
                 world_size=self.config.world_size,
                 rank=self.config.rank,
                 n_workers=self.config.n_workers,
-                seed=seed)
+                seed=seed,
+                fill_incomplete=fill_incomplete)
         return in_data

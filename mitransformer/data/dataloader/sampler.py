@@ -14,7 +14,11 @@ The masks use boolean arrays/tensors.
 """
 
 import torch
+from torch.utils.data.dataset import Dataset
 from torch.utils.data import BatchSampler
+from torch.utils.data.distributed import (
+    DistributedSampler as BaseDistributedSampler,
+    _T_co)
 import torch.distributed as dist
 
 import numpy as np
@@ -23,7 +27,7 @@ import bisect
 
 from .. import dataset
 
-from typing import (TypedDict, Iterator)
+from typing import (TypedDict, Iterator, Optional)
 
 from ...utils.logmaker import getLogger
 
@@ -37,7 +41,8 @@ class BySequenceLengthSampler(BatchSampler):
     def __init__(
             self, data_source: dataset.TokenisedDataset[dataset.SentenceIds],
             min_size: int, max_size: int, batch_size=64,
-            drop_last=True, include_smaller=False, include_larger=False,
+            drop_last=True, fill_incomplete: bool = True,
+            include_smaller=False, include_larger=False,
             seed: int = 0):
 
         self.epoch = 0
@@ -45,6 +50,7 @@ class BySequenceLengthSampler(BatchSampler):
         self.data_source = data_source
         self.batch_size = batch_size
         self.drop_last = drop_last
+        self.fill_incomplete: bool = fill_incomplete
 
         boundaries: list[int] = list(range(min_size, max_size + 2))
         # includes max_size items
@@ -80,6 +86,7 @@ class BySequenceLengthSampler(BatchSampler):
     def shuffle_tensor(self, t: torch.Tensor) -> torch.Tensor:
         return t[torch.randperm(len(t))]
 
+    @torch.compile()
     def __iter__(self) -> Iterator[list[int]]:
         g = torch.Generator()
         g.manual_seed(self.seed + self.epoch)
@@ -100,7 +107,7 @@ class BySequenceLengthSampler(BatchSampler):
                 if len(batch) < self.batch_size:
                     if self.drop_last:
                         continue
-                    else:
+                    elif self.fill_incomplete:
                         # add extra samples to make it evenly divisible
                         padding_size = self.batch_size - len(batch)
                         pad_idx = torch.randint(
@@ -124,7 +131,8 @@ class DistributedBySequenceLengthSampler(BatchSampler):
     def __init__(
             self, data_source: dataset.NLPDataset[SentenceTokens],
             min_size: int, max_size: int, batch_size=64,
-            drop_last=True, include_smaller=False, include_larger=False,
+            drop_last=True, fill_incomplete: bool = True,
+            include_smaller=False, include_larger=False,
             seed: int = 0, num_replicas: int | None = None,
             rank: int | None = None):
 
@@ -142,6 +150,7 @@ class DistributedBySequenceLengthSampler(BatchSampler):
         self.batch_size = batch_size
         self.total_batch_size = batch_size * num_replicas
         self.drop_last = drop_last
+        self.fill_incomplete: bool = fill_incomplete
 
         # ---- bucket boundaries ----
 
@@ -188,11 +197,12 @@ class DistributedBySequenceLengthSampler(BatchSampler):
                 if len(batch) < self.total_batch_size:
                     if self.drop_last:
                         continue
-                    # add extra samples to make it evenly divisible
-                    padding_size = self.total_batch_size - len(batch)
-                    pad_idx = torch.randint(
-                        0, len(shuffled), (padding_size,), generator=g)
-                    batch += [shuffled[i] for i in pad_idx.tolist()]
+                    elif self.fill_incomplete:
+                        # add extra samples to make it evenly divisible
+                        padding_size = self.total_batch_size - len(batch)
+                        pad_idx = torch.randint(
+                            0, len(shuffled), (padding_size,), generator=g)
+                        batch += [shuffled[i] for i in pad_idx.tolist()]
 
                 batches.append(batch)
 
@@ -218,3 +228,59 @@ class DistributedBySequenceLengthSampler(BatchSampler):
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
+
+
+class DistributedSampler(BaseDistributedSampler):
+    """Is the standard torch implementation with the
+    addition of a ``fill_incomplete`` argument.
+    If false and ``drop_last`` is also false,
+    returns unequal number of elements for the workers
+    if not cleanly divisible."""
+    def __init__(
+            self,
+            dataset: Dataset,
+            num_replicas: Optional[int] = None,
+            rank: Optional[int] = None,
+            shuffle: bool = True,
+            seed: int = 0,
+            drop_last: bool = False,
+            fill_incomplete: bool = True,
+            ) -> None:
+        super().__init__(
+            dataset, num_replicas, rank, shuffle, seed,
+            drop_last
+        )
+        self.fill_incomplete = fill_incomplete
+
+    def __iter__(self) -> Iterator[_T_co]:  # type: ignore
+        if self.shuffle:
+            # deterministically shuffle based on epoch and seed
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.epoch)
+            indices = torch.randperm(
+                len(self.dataset),  # type: ignore[arg-type]
+                generator=g).tolist()
+        else:
+            indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
+
+        if not self.drop_last:
+            if self.fill_incomplete:
+                # add extra samples to make it evenly divisible
+                padding_size = self.total_size - len(indices)
+                if padding_size <= len(indices):
+                    indices += indices[:padding_size]
+                else:
+                    indices += (
+                        indices * math.ceil(padding_size / len(indices)))[
+                        :padding_size
+                    ]
+        else:
+            # remove tail of data to make it evenly divisible.
+            indices = indices[: self.total_size]
+        assert len(indices) == self.total_size
+
+        # subsample
+        indices = indices[self.rank: self.total_size: self.num_replicas]
+        assert len(indices) == self.num_samples
+
+        return iter(indices)  # type: ignore
