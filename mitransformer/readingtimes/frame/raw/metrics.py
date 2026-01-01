@@ -1,18 +1,10 @@
 import pandas as pd
-import wordfreq
+
+from ... import lingutils
 
 from abc import ABC, abstractmethod
 
 from typing import Type, Any
-
-
-LANG = "en"
-
-# Methods
-
-
-def get_frequency(token: str, language: str = LANG):
-    return wordfreq.zipf_frequency(token, language)
 
 
 # Classes
@@ -40,7 +32,8 @@ class UnsplitUntokFrequency(UnsplitUntokWordMetricMaker):
             self, unsplit_untok_df: pd.DataFrame
             ) -> tuple[pd.Series, dict[str, Any]]:
         return unsplit_untok_df.apply(
-            lambda r: get_frequency(r[self.word_col]), axis=1), dict()
+            lambda r: lingutils.get_frequency(
+                r[self.word_col]), axis=1), dict()
 
 
 class UnsplitUntokLength(UnsplitUntokWordMetricMaker):

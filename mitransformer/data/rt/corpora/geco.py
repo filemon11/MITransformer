@@ -108,6 +108,8 @@ def load_geco(
 
     df: pd.DataFrame = pd.read_excel(
         input_file, keep_default_na=False, na_values=None)
+    df = df[~(df["WORD"].isna())]
+    df = df[~(df["WORD"] == "")]
     df["WORD"] = df["WORD"].astype(str)
 
     # Remove duplicates because we are only interested in
@@ -136,6 +138,7 @@ def load_geco(
                 token_mapper.encode([t]),
                 to_string=True, join_with="")[0])
 
+    df = df[~(df["WORD"] == " ")]
     # This corpus comes with story ids, sentences numbers (per story)
     # and word numbers (also per story, i.e. zone in story).
     # Therefore, the sentence numbers are not important for identification
@@ -171,8 +174,13 @@ def prepare_RTs_geco(
 def prepare_RTs_geco(
         input_file: str, output_file: str | None = None
         ) -> None | pd.DataFrame:
+    # NOTE: Removes all trials containing words containing
+    # ...<letter> because these are split by spacy which creates
+    # alignment problems
 
     df: pd.DataFrame = pd.read_excel(input_file)
+    df = df[~(df["WORD"].isna())]
+    df = df[~(df["WORD"] == "")]
 
     # Create new zone entries
     df_by_worker_by_item = df.groupby(["PP_NR", "PART"])
@@ -199,6 +207,9 @@ def prepare_RTs_geco(
     for col in ("FFD", "GPT", "GD"):
         df[col] = df[col].replace(".", 0)
 
+    df = df[[
+        "Corpus", "item", "zone", "WorkerId",
+        "word", "GPT", "FFD", "GD"]]
     if output_file is None:
         return df
     df.to_csv(output_file)

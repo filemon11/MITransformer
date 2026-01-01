@@ -182,7 +182,11 @@ def load_zuco(
 
     df: pd.DataFrame = pd.read_csv(
         input_file, keep_default_na=False, na_values=None)
+
     df["Word"] = df["Word"].astype(str)
+
+    df = df[~(df["Word"].isna())]
+    df = df[~(df["Word"] == "")]
 
     # Remove duplicates because we are only interested in
     # the text here
@@ -235,6 +239,9 @@ def prepare_RTs_zuco(
 
     df: pd.DataFrame = pd.read_csv(input_file)
 
+    df = df[~(df["Word"].isna())]
+    df = df[~(df["Word"] == "")]
+
     df["Corpus"] = f"zuco{wave}_{task}"
 
     # rename columns
@@ -250,6 +257,9 @@ def prepare_RTs_zuco(
 
     df["WorkerId"] = df["WorkerId"].astype(str)
 
+    df = df[[
+        "Corpus", "item", "zone", "WorkerId",
+        "word", "GPT", "FFD", "GD"]]
     if output_file is None:
         return df
     df.to_csv(output_file)

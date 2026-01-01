@@ -1,4 +1,8 @@
+import wordfreq
+
 from typing import Mapping
+
+LANG = "en"
 
 TAGSET = None  # "universal"  # None
 
@@ -76,3 +80,7 @@ def pos_merge(
 
 def deprel_merge(tag: str) -> str:
     return merge(tag, DEPREL_MERGE_MAPPING)
+
+
+def get_frequency(token: str, language: str = LANG):
+    return wordfreq.zipf_frequency(token, language)

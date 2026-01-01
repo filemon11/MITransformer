@@ -43,19 +43,21 @@ class Objective:
             self.data_provider.datasets["train"] = get_loader(  # type: ignore
                     self.data_provider.datasets["train"],  # type: ignore
                     batch_size=self.arguments.batch_size,
-                    bucket=False,
-                    shuffle=True, droplast=True,
+                    bucket=True,
+                    shuffle=True, droplast=False,
                     world_size=self.n_devices,
                     rank=self.arguments.rank,
-                    n_workers=self.arguments.n_workers)
+                    n_workers=self.arguments.n_workers,
+                    seed=arguments.seed)
             self.data_provider.datasets["eval"] = get_loader(  # type: ignore
                     self.data_provider.datasets["eval"],  # type: ignore
                     batch_size=self.arguments.batch_size,
-                    bucket=False,
-                    shuffle=False, droplast=False,
+                    bucket=True,
+                    shuffle=True, droplast=False,
                     world_size=self.n_devices,
                     rank=self.arguments.rank,
-                    n_workers=self.arguments.n_workers)
+                    n_workers=self.arguments.n_workers,
+                    seed=arguments.seed)
         except TypeError:
             self.data_provider = None
 

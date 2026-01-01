@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from typing import (
     Iterable, Literal, Callable,
     overload, Protocol, runtime_checkable, Sequence, Optional,
-    NamedTuple, Any)
+    NamedTuple, Any, TypeVar, Iterator)
 
 
 @runtime_checkable
@@ -89,8 +89,8 @@ def _untokenise(
 
 @overload
 def untokenise(
-    items: Iterable[Addable],
     space_after: Iterable[bool],
+    items: Iterable[Addable],
     mode: Literal["add"],
     additional: None = None,
     punctuation: set[str] = ...,
@@ -99,8 +99,8 @@ def untokenise(
 
 @overload
 def untokenise(
-    items: Iterable[Addable],
     space_after: Iterable[bool],
+    items: Iterable[Addable],
     mode: Literal["mean"],
     additional: None = None,
     punctuation: set[str] = ...,
@@ -109,8 +109,8 @@ def untokenise(
 
 @overload
 def untokenise(
-    items: Iterable[Multipliable],
     space_after: Iterable[bool],
+    items: Iterable[Multipliable],
     mode: Literal["mult"] = "mult",
     additional: None = None,
     punctuation: set[str] = ...,
@@ -119,8 +119,8 @@ def untokenise(
 
 @overload
 def untokenise(
-    items: Iterable[T],
     space_after: Iterable[bool],
+    items: Iterable[T],
     mode: Literal["first", "last"],
     additional: None = None,
     punctuation: set[str] = ...,
@@ -129,8 +129,8 @@ def untokenise(
 
 @overload
 def untokenise(
-    items: Iterable[T],
     space_after: Iterable[bool],
+    items: Iterable[T],
     mode: Literal["pos"],
     additional: Optional[Iterable[PosInfo]] = None,
     punctuation: set[str] = ...,
@@ -139,21 +139,30 @@ def untokenise(
 
 @overload
 def untokenise(
-    items: Iterable[T],
     space_after: Iterable[bool],
+    items: Iterable[T],
     mode: Literal["head"],
     additional: Optional[Iterable[HeadInfo]] = None,
     punctuation: set[str] = ...,
 ) -> Iterable[T]: ...
 
 
-# --- Real Implementation ---
+@overload
+def untokenise(
+    space_after: Iterable[bool],
+    items: Iterable[T],
+    mode: Literal["recsumrec"],
+    additional: None = None,
+    punctuation: set[str] = ...,
+) -> Iterable[T]: ...
+
 
 def untokenise(
-    items: Iterable[T],
     space_after: Iterable[bool],
+    items: Iterable[T],
     mode: Literal[
-        "mult", "add", "last", "first", "pos", "head", "mean"] = "mult",
+        "mult", "add", "last", "first", "pos", "head", "mean",
+        "recsumrec"] = "mult",
     additional: Optional[Iterable[Any]] = None,
     punctuation: set[str] = set(),
 ) -> Iterable[T]:
@@ -253,6 +262,31 @@ def untokenise(
 
         return mean_val, None, (total, count), None
 
+    def reciprocal_sum_full(
+            current: tuple[T, Any, Memory, Memory, int],
+            new: tuple[T, Any],
+            ) -> tuple[T, Any, Memory, Memory]:
+        """
+        Combine values using:
+            s_combined = 1 / sum_i (1 / s_i)
+
+        Assumes T supports division and addition (e.g. float).
+        """
+
+        curr_val, _, short_mem, _, _ = current
+        new_val, _ = new
+
+        if short_mem is None:
+            # First combination: initialize reciprocal sum
+            recip_sum = (1 / curr_val) + (1 / new_val)
+        else:
+            recip_sum = short_mem
+            recip_sum += 1 / new_val
+
+        combined_val = 1 / recip_sum
+
+        return combined_val, None, recip_sum, None
+
     match mode:
         case "add":
             func: FullFunc = promote_func(add_simple)
@@ -268,6 +302,8 @@ def untokenise(
             func = head_full  # type: ignore
         case "mean":
             func = mean_full  # type: ignore
+        case "recsumrec":
+            func = reciprocal_sum_full  # type: ignore
         case _:
             raise ValueError(f"Unsupported mode: {mode}")
 
@@ -275,8 +311,8 @@ def untokenise(
 
 
 def untokenise_by_POS(
-        items: Iterable[T],
         space_after: Iterable[bool],
+        items: Iterable[T],
         pos_tags: Iterable[str],
         punctuation: set[str] = PUNCTUATION[TAGSET]
         ) -> Iterable[T]:
@@ -288,14 +324,14 @@ def untokenise_by_POS(
 
 
 def untokenise_by_head(
-        items: Iterable[T],
         space_after: Iterable[bool],
+        items: Iterable[T],
         heads: Iterable[int],
         pos_tags: Iterable[str],
         punctuation: set[str] = PUNCTUATION[TAGSET]
         ) -> Iterable[T]:
     additional = (HeadInfo(p, h) for p, h in zip(pos_tags, heads))
-    return untokenise(
+    return untokenise(  # type: ignore
         mode="head", space_after=space_after,
         items=items,
         punctuation=punctuation, additional=additional)
@@ -333,12 +369,13 @@ class UntokSplitPOS(UntokSplitFunc):
         self.punctuation = punctuation
 
     def __call__(self, untok_df: pd.DataFrame) -> Sequence:
-        it = [list(untokenise_by_POS(
-            untok_df[self.col][i],
-            untok_df[self.space_after_col][i],
-            untok_df[self.pos_col][i],
-            self.punctuation
-            )) for i in range(len(untok_df))]
+        it = [list(untokenise_by_POS(  # type: ignore
+            sa, it, po, self.punctuation)) for sa, (it, po) in
+            build_sentences(
+                untok_df[self.space_after_col],  # type: ignore
+                (
+                    untok_df[self.col],
+                    untok_df[self.pos_col]))]  # type: ignore
         return it
 
 
@@ -354,14 +391,14 @@ class UntokSplitHead(UntokSplitFunc):
         self.punctuation = punctuation
 
     def __call__(self, untok_df: pd.DataFrame) -> Sequence:
-        it = [list(untokenise_by_head(
-            untok_df[self.col][i],
-            untok_df[self.space_after_col][i],
-            untok_df[self.head_col][i],
-            untok_df[self.pos_col][i],
-            self.punctuation
-            ))
-                for i in range(len(untok_df))]
+        it = [list(untokenise_by_head(  # type: ignore
+            sa, it, he, po, self.punctuation)) for sa, (it, he, po) in
+            build_sentences(
+                untok_df[self.space_after_col],  # type: ignore
+                (
+                    untok_df[self.col],
+                    untok_df[self.head_col],
+                    untok_df[self.pos_col]))]  # type: ignore
 
         return it
 
@@ -373,10 +410,11 @@ class UntokSplitAdd(UntokSplitFunc):
         super().__init__(col, space_after_col)
 
     def __call__(self, untok_df: pd.DataFrame) -> Sequence:
-        it = [list(untokenise(
-            untok_df[self.col][i],
-            untok_df[self.space_after_col][i], "add"))
-                for i in range(len(untok_df))]
+        it = [list(untokenise(  # type: ignore
+            sa, measures[0], "add")) for sa, measures in
+            build_sentences(
+                untok_df[self.space_after_col],  # type: ignore
+                (untok_df[self.col],))]  # type: ignore
         return it
 
 
@@ -387,10 +425,11 @@ class UntokSplitMean(UntokSplitFunc):
         super().__init__(col, space_after_col)
 
     def __call__(self, untok_df: pd.DataFrame) -> Sequence:
-        it = [list(untokenise(
-            untok_df[self.col][i],
-            untok_df[self.space_after_col][i], "mean"))
-                for i in range(len(untok_df))]
+        it = [list(untokenise(  # type: ignore
+            sa, measures[0], "mean")) for sa, measures in
+            build_sentences(
+                untok_df[self.space_after_col],  # type: ignore
+                (untok_df[self.col],))]  # type: ignore
         return it
 
 
@@ -401,10 +440,11 @@ class UntokSplitLast(UntokSplitFunc):
         super().__init__(col, space_after_col)
 
     def __call__(self, untok_df: pd.DataFrame) -> Sequence:
-        it = [list(untokenise(
-            untok_df[self.col][i],
-            untok_df[self.space_after_col][i], "last"))
-                for i in range(len(untok_df))]
+        it = [list(untokenise(  # type: ignore
+            sa, measures[0], "last")) for sa, measures in
+            build_sentences(
+                untok_df[self.space_after_col],  # type: ignore
+                (untok_df[self.col],))]  # type: ignore
         return it
 
 
@@ -415,10 +455,27 @@ class UntokSplitFirst(UntokSplitFunc):
         super().__init__(col, space_after_col)
 
     def __call__(self, untok_df: pd.DataFrame) -> Sequence:
-        it = [list(untokenise(
-            untok_df[self.col][i],
-            untok_df[self.space_after_col][i], "first"))
-                for i in range(len(untok_df))]
+        it = [list(untokenise(  # type: ignore
+            sa, measures[0], "first")) for sa, measures in
+            build_sentences(
+                untok_df[self.space_after_col],  # type: ignore
+                (untok_df[self.col],))]  # type: ignore
+        return it
+
+
+class UntokSplitRecSumRec(UntokSplitFunc):
+    def __init__(
+            self, col: str, space_after_col: str,
+            *args, **kwargs):
+        """Reciprocal sum of reciprocals"""
+        super().__init__(col, space_after_col)
+
+    def __call__(self, untok_df: pd.DataFrame) -> Sequence:
+        it = [list(untokenise(  # type: ignore
+            sa, measures[0], "recsumrec")) for sa, measures in
+            build_sentences(
+                untok_df[self.space_after_col],  # type: ignore
+                (untok_df[self.col],))]  # type: ignore
         return it
 
 
@@ -428,3 +485,60 @@ def untokenise_split_df(
         ) -> pd.DataFrame:
     return untokenise_split_df_primitive(
         df, {f.col: f for f in untok_funcs})
+
+
+S = TypeVar("S")
+
+
+def build_sentences(
+        space_after: Sequence[Sequence[bool]],
+        other_measures: Sequence[Sequence[Sequence[S]]]
+        ) -> Iterable[tuple[Sequence[bool], tuple[Sequence[S], ...]]]:
+    space_after_list = [list(sentence) for sentence in space_after]
+    other_measures_list = [
+        [list(sentence) for sentence in measure] for measure in other_measures]
+
+    iterator: Iterator[tuple[list[bool] | list[T], ...]]
+    iterator = iter(zip(space_after_list, *other_measures_list))
+    # measures: list[list[T]]
+    # for sa, *measures in iterator:
+    #     yield (sa, tuple(measures))
+
+    sa: list[bool]
+    other: list[list[T]]
+    for sa, *other in iterator:
+        # space after at the end of a sentence marks
+        # no space, i.e. the first token of the following sentence
+        # should contract with the end of the previous sentence.
+        if not sa[-1]:
+            sa[-1] = False
+            finished = False
+            stack: list[
+                tuple[Sequence[bool], tuple[Sequence[S], ...]]] = []
+            next_sa: list[bool]
+            next_other: list[list[T]]
+            while not finished:
+                try:
+                    next_sa, *next_other = next(iterator)
+                except StopIteration:
+                    # Can happen if the very last entry is False.
+                    # This appears to be an artifact
+                    break
+                i = 0
+                for i, (word_sa, *word_other) in enumerate(
+                        zip(next_sa, *next_other)):
+                    sa.append(word_sa)
+                    for ot, wo in zip(other, word_other):
+                        ot.append(wo)
+
+                    if word_sa:
+                        finished = True
+                        break
+                stack.append((
+                    next_sa[i+1:],
+                    tuple([next_ot[i+1:] for next_ot in next_other])))
+            yield (sa, tuple(other))
+            for item in stack:
+                yield item
+        else:
+            yield (sa, tuple(other))

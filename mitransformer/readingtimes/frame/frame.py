@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import numbers
+import re
+from copy import deepcopy
 
 from .raw.metrics import gen_without_tok
 from .split.metrics import gen_and_untok
@@ -40,6 +42,16 @@ class Frame():
         self.tokenised = tokenised
         self.untok_funcs = untok_funcs
         self.additional = additional
+
+    def __getitem__(self, index):
+        return self.df[index]
+
+    def __setitem__(self, index, value) -> None:
+        self.df[index] = value
+
+    @property
+    def columns(self) -> pd.Index:
+        return self.df.columns
 
     def add_override_additional(self, **kwargs) -> None:
         for key, item in kwargs.items():
@@ -171,7 +183,12 @@ class UnsplitFrame(Frame):
 #         self.df.drop(columns=args, axis=1, inplace=True)
 
     def split(self, lengths: Iterable[int]) -> "SplitFrame":
-        ends = [item for le in lengths for item in [False]*(le-1)+[True]]
+        lengths_list = list(lengths)
+        assert 0 not in lengths_list
+        ends = [
+            item for le in lengths_list
+            for item in [False]*(le-1)+[True] if le > 0]
+        assert len(self.df) == len(ends), (len(self.df), len(ends), lengths)
         new_df = split_df(self.df, ends)
         return SplitFrame(
             new_df, self.colnames,
@@ -230,11 +247,11 @@ def split_df(df: pd.DataFrame, ends: Iterable[bool]) -> pd.DataFrame:
     column_names = df.columns
     list_frame = pd.DataFrame({
         column_names[0]: split_to_sentence_list(
-            df[column_names[0]], ends
+            df[column_names[0]], list(ends)
         )})
     for colname in column_names[1:]:
         content = split_to_sentence_list(
-            df[colname], ends)
+            df[colname], list(ends))
         add_column_(list_frame, colname, list(content))
     return list_frame
 
@@ -333,7 +350,13 @@ class SplitFrame(Frame):
         self.trunc_right: int = trunc_right
 
     def copy(self) -> Self:
-        new_frame = super().copy()
+        # apply deepcopy since the dataframe holds lists in its rows
+        new_frame = self.__class__(
+            df=deepcopy(self.df), colnames=self.colnames.copy(),
+            tokenised=self.tokenised,
+            untok_funcs=self.untok_funcs.copy(),
+            additional=self.additional.copy()
+        )
         new_frame.generators = self.generators.copy()
         new_frame.shift = self.shift.copy()
         new_frame.to_unsplit = self.to_unsplit.copy()
@@ -531,11 +554,12 @@ class SplitFrame(Frame):
             **kwargs) -> None:
 
         try:
-            for iterator in [
-                    iter(self._add_batched_(
-                        batch_size, False, arg, **kwargs))
-                    for arg in args]:
-                next(iterator)
+            iterators = [
+                iter(self._add_batched_(
+                    batch_size, True, arg, **kwargs))
+                for arg in args]
+            for _ in zip(*iterators):
+                continue
         except StopIteration:
             pass
 
@@ -559,18 +583,100 @@ class SplitFrame(Frame):
         self.trunc_left += max(0, amount)
         self.trunc_right += max(0, -amount)
 
-    def untokenise_(self) -> None:
-        assert self.tokenised
+    def untokenise_(self, force: bool = False) -> None:
+        if not force:
+            assert self.tokenised
         self.df = untokenise_split_df(
             self.df,
             self.untok_funcs
             )
         self.tokenised = False
+        include = [
+            len(sentence) > 0
+            for sentence in self.df["word"]]
+        self.df = self.df[include].reset_index(drop=True)
 
     def untokenise(self) -> Self:
         new_frame = self.copy()
         new_frame.untokenise_()
         return new_frame
+
+    def adjust_untokenise_(self, words: Sequence[str]) -> None:
+        def process(s: str) -> str:
+            s = re.sub(r'\b\d+(?:,\d{3})*(?:\.\d+)?\b', '<num>', s)
+            return s
+
+        other_words_iter = iter(process(word) for word in words)
+
+        this_words_iter = iter(
+            process(word)
+            for sentence in self.df["word"]
+            for word in sentence
+        )
+
+        row_i_iter = iter(
+            row_i
+            for row_i in range(len(self.df))
+            for _ in self.df["word"][row_i]
+        )
+
+        word_j_iter = iter(
+            j
+            for sentence in self.df["word"]
+            for j in range(len(sentence))
+        )
+
+        try:
+            while True:
+                other_word = next(other_words_iter)
+                other_norm = other_word.replace(" ", "")
+
+                # Start with the first source token
+                parts = []
+                positions = []
+
+                this_word = next(this_words_iter)
+                row_i = next(row_i_iter)
+                word_j = next(word_j_iter)
+
+                parts.append(this_word)
+                positions.append((row_i, word_j))
+
+                combined = this_word.replace(" ", "")
+
+                # Keep consuming source tokens until we match
+                while combined != other_norm:
+                    next_word = next(this_words_iter)
+                    row_i = next(row_i_iter)
+                    word_j = next(word_j_iter)
+
+                    parts.append(next_word)
+                    positions.append((row_i, word_j))
+
+                    combined += next_word.replace(" ", "")
+
+                    # Early failure: combined too long
+                    if not other_norm.startswith(combined):
+                        raise Exception(
+                            f"Mismatch while combining {parts} → '{combined}'"
+                            f", expected '{other_word}'"
+                        )
+
+                # If we used more than one token, remove spaces between them
+                for (r, c) in positions[:-1]:
+                    self.df["space_after"][r][c] = False
+
+        except StopIteration:
+            # All iterators should be exhausted
+            for it in (
+                other_words_iter,
+                this_words_iter,
+                row_i_iter,
+                word_j_iter,
+            ):
+                assert len(list(it)) == 0
+
+        self.untokenise_(force=True)
 
     def unsplit(self) -> UnsplitFrame:
         names_to_not_unsplit = {

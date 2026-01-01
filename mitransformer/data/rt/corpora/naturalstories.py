@@ -157,6 +157,7 @@ def prepare_RTs_naturalstories(
     df = pd.read_csv(input_file, sep='\t', header=0)
     df["Corpus"] = "naturalstories"
     df["item"] = df["item"].astype(str)
+    df = df[["Corpus", "item", "zone", "WorkerId", "word", "RT"]]
     if output_file is None:
         return df
     df.to_csv(output_file)

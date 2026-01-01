@@ -103,7 +103,8 @@ def get_space_after(tokenlist: TokenList) -> npt.NDArray[np.bool_]:
 
     spaces.extend(
         token_space_after(token)
-        for token in tokenlist)
+        for token in tokenlist[:-1])
+    spaces.append(True)
     return np.array(spaces, dtype=np.bool_)
 
 

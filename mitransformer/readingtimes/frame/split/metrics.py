@@ -8,10 +8,12 @@ from transformers import AutoTokenizer, AutoModelForCausalLM  # type: ignore
 from ....train.losses import entropy
 from ....train import attdistr, losses
 from .... import data, models
+from ... import lingutils
 
 from ...lingutils import (
-    UntokSplitFunc, UntokSplitAdd,
-    UntokSplitHead, UntokSplitFirst, untokenise,
+    UntokSplitFunc, UntokSplitAdd, UntokSplitLast,
+    UntokSplitHead, UntokSplitFirst, UntokSplitRecSumRec,
+    untokenise,
     pos_merge, TAGSET, CONTENT_POS)
 from ....data import (
     CoNLLUDataset, SentenceDataset, parse_list_of_words_with_spacy,
@@ -93,14 +95,30 @@ class SplitTokMetricMakerPosition(SplitTokWordMetricMaker):
         return df.apply(
             lambda r: self.application(r), axis=1), dict()  # type: ignore
 
-    def batched_call(
+
+class SplitTokMetricMakerFrequency(SplitTokWordMetricMaker):
+    def application(self, row: pd.DataFrame) -> list[float]:
+        return list(
+            lingutils.get_frequency(word) for word in row[self.word_col])
+
+    def __call__(
             self, df: pd.DataFrame,
-            batch_size: int,
-            args: list[Any], kwargs: dict[str, Any]
-            ) -> Iterable[tuple[pd.Series, dict[str, Any]]]:
-        for start in range(0, len(df), batch_size):
-            yield self(
-                df.iloc[start:start+batch_size], *args, **kwargs)
+            *args, **kwargs
+            ) -> tuple[pd.Series, dict[str, Any]]:
+        return df.apply(
+            lambda r: self.application(r), axis=1), dict()  # type: ignore
+
+
+class SplitTokMetricMakerLength(SplitTokWordMetricMaker):
+    def application(self, row: pd.DataFrame) -> list[int]:
+        return list(len(word) for word in row[self.word_col])
+
+    def __call__(
+            self, df: pd.DataFrame,
+            *args, **kwargs
+            ) -> tuple[pd.Series, dict[str, Any]]:
+        return df.apply(
+            lambda r: self.application(r), axis=1), dict()  # type: ignore
 
 
 class SplitTokConlluDatasetMetricMaker(SplitTokMetricMaker):
@@ -229,7 +247,7 @@ class SplitTokMetricMakerTokenlist(SplitTokMetricMaker):
             conllu = parse_list_of_sentences_with_spacy(  # type: ignore
                 *zip(*yield_sentences(
                     words, sentence_ids, corpus_names)),  # type: ignore
-                min_len=min_len
+                min_len=None
             )
         tokenlists = load_conllu_from_str(conllu, max_len, min_len)
         return pd.Series(tokenlists), {}
@@ -532,7 +550,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                             tensor.to("cpu")
                             for tensor in tensorlist]  # type: ignore
 
-                probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
+                probs = [(-np.log(p[1:-1]+1e-4)).tolist() for p in pred_probs]
                 yield pd.Series(probs), {
                     "attention_logits": attention_logits,
                     "dataset": dataset,
@@ -2010,9 +2028,19 @@ gen_and_untok: dict[str, tuple[
     bool]] = {
         "pos": (SplitTokMetricMakerPOS, False, UntokSplitHead, True),
         "word": (SplitTokMetricMakerWord, False, UntokSplitAdd, True),
-        "space_after": (SplitTokMetricMakerSpaceAfter, False, None, False),
+        "space_after": (
+            SplitTokMetricMakerSpaceAfter, False, UntokSplitLast, True),
         "position": (
             SplitTokMetricMakerPosition, False, UntokSplitFirst, True),
+        "length": (
+            SplitTokMetricMakerLength, False, UntokSplitAdd, True),
+        "frequency": (
+            SplitTokMetricMakerFrequency, False, UntokSplitRecSumRec, True),
+        # Detokenisation as performed in wordfreq module:
+        # "Frequencies for multiple tokens are combined using the formula
+        #     1 / f = 1 / f1 + 1 / f2 + ...
+        # Thus the resulting frequency is less than any individual frequency,
+        # and the smallest frequency dominates the sum.""
         "conllu": (SplitTokMetricMakerTokenlist, None, None, False),
         "deprel": (SplitTokMetricMakerDeprels, False, UntokSplitHead, True),
         "head": (SplitTokMetricMakerHeadlist, False, None, False),

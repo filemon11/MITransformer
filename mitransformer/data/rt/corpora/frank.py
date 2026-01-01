@@ -142,6 +142,9 @@ def prepare_RTs_frank_ET(
     df["WorkerId"] = df["WorkerId"].astype(str)
     df["item"] = df["item"].astype(str)
     df["Corpus"] = "frank_ET"
+    df = df[[
+        "Corpus", "item", "zone", "WorkerId",
+        "word", "GPT", "FFD", "GD"]]
     if output_file is None:
         return df
     df.to_csv(output_file)
@@ -174,6 +177,7 @@ def prepare_RTs_frank_SP(
     df["WorkerId"] = df["WorkerId"].astype(str)
     df["item"] = df["item"].astype(str)
     df["Corpus"] = "frank_SP"
+    df = df[["Corpus", "item", "zone", "WorkerId", "word", "RT"]]
     if output_file is None:
         return df
     df.to_csv(output_file)

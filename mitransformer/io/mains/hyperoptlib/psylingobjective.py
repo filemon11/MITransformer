@@ -13,7 +13,7 @@ import optuna
 import pandas as pd
 import torch.distributed as dist
 
-from typing import Tuple, Iterable, Sequence
+from typing import Tuple, Iterable, Sequence, Collection
 
 from mitransformer.utils.logmaker import (
     getLogger, info)
@@ -120,6 +120,7 @@ class PsyLingObjective(objective.Objective):
         add_method = self.tok_frame.add_batched_
         loglik: None | float = None
         for step, metrics in enumerate(train_iterator, start=1):
+
             # Handle pruning based on the intermediate value.
 
             to_add = ["surprisal", *set(self.arguments.lme_formula[
@@ -131,7 +132,8 @@ class PsyLingObjective(objective.Objective):
             add_method(
                 self.arguments.batch_size,
                 *to_add,
-                dataset=self.dataset, trainer=trainer,
+                dataset=self.dataset,
+                trainer=trainer,
                 arc_distr_mode=self.arguments.distr_mode,
                 include_current=self.arguments.include_current,
                 length_weighted=self.arguments.length_weighted,
@@ -143,13 +145,20 @@ class PsyLingObjective(objective.Objective):
             # of token surprisals.
             frame: readingtimes.SplitFrame | readingtimes.UnsplitFrame
             untok_frame = self.tok_frame.untokenise()
+            untok_frame.adjust_untokenise_([
+                word for sentence in self.untok_frame.df["word"]
+                for word in sentence])  # type: ignore
+
+            # Do this separately because in untok_frame numbers are replaced
+            # with <num>. Therefore, frequency and length would not be
+            # correct.
             frame = self.untok_frame | untok_frame
 
             frame = frame.include_spillover(self.arguments.shift)
             frame.truncate_(right=1)
             frame = frame.unsplit()
 
-            print(frame.df.tail(n=10))
+            print(frame.df[["surprisal", "item", "zone"]].tail(n=10))
 
             # Joining
             # This may take some time. Should we precompute this,
@@ -169,12 +178,23 @@ class PsyLingObjective(objective.Objective):
             joined["item"] = joined["Corpus"] + joined["item"].astype(str)
             joined["WorkerId"] = joined["Corpus"] + joined["WorkerId"]
 
-            # Scale predictors
-            z_score_numerical_(
-                joined, {self.arguments.lme_formula["to_predict"], "zone"}
+            # # Remove outliers
+            joined = remove_outliers(
+                joined, self.arguments.lme_formula["covariates"],
+                self.arguments.rank
+            )
+            # # Scale predictors
+            z_score_(
+                joined, self.arguments.lme_formula["covariates"]
             )
 
+            relevant = [
+                self.arguments.lme_formula["to_predict"],
+                *self.arguments.lme_formula["covariates"],
+                *self.arguments.lme_formula["random_effects"],]
+            joined = joined[relevant]
             joined.dropna(inplace=True)
+
             # Fit lme
             lme, d0 = readingtimes.fit_gpboost(
                 joined,
@@ -271,25 +291,45 @@ def get_frames(
         psyling_df)
     # omits undefined args
 
+    tok_untok_frame = tok_frame.untokenise()
+    tok_untok_frame.adjust_untokenise_(orig_frame.df["word"])  # type: ignore
+
+    assert (i := len(orig_frame.df)) == (j := sum(
+        len(sentence) for sentence in tok_untok_frame.df["word"])), (i, j)
+
+    include = [
+        len(sentence) > 0
+        for sentence in tok_untok_frame.df[readingtimes.TOKEN_COL]]
+    tok_untok_frame.df = tok_untok_frame.df[include].reset_index(drop=True)
+
+    # include = [
+    #     len(sentence) > 0
+    #     for sentence in tok_frame.df[readingtimes.TOKEN_COL]]
+    # tok_frame.df = tok_frame.df[include].reset_index(drop=True)
+
     untok_frame = orig_frame.split([
-        len(sentence) for sentence in tok_frame.untokenise().df[
+        len(sentence) for sentence in tok_untok_frame.df[
             readingtimes.TOKEN_COL]])
 
-    def compare(sentence: Sequence) -> bool:
-        include = True
-        length = len(sentence)
-        if max_len is not None:
-            include = length <= max_len
-        if min_len is not None:
-            include = include and min_len <= length
-        return include
+    # def compare(sentence: Sequence) -> bool:
+    #     include = True
+    #     length = len(sentence)
+    #     if max_len is not None:
+    #         include = length <= max_len
+    #     if min_len is not None:
+    #         include = include and min_len <= length
+    #     return include
 
-    if max_len is not None:
-        include = [
-            compare(sentence)
-            for sentence in untok_frame.df[readingtimes.TOKEN_COL]]
-        untok_frame.df = untok_frame.df[include].reset_index(drop=True)
-        tok_frame.df = tok_frame.df[include].reset_index(drop=True)
+    # TODO: Find a solution for this
+    # ATTENTION: Cannot do this. tok_frame can contain sentences of
+    # different length than
+    # untok_frame
+    # include = [
+    #     compare(sentence)
+    #     for sentence in untok_frame.df[readingtimes.TOKEN_COL]]
+
+    # untok_frame.df = untok_frame.df[include].reset_index(drop=True)
+    # tok_frame.df = tok_frame.df[include].reset_index(drop=True)
 
     return tok_frame, untok_frame
 
@@ -377,7 +417,8 @@ def get_measurements(
 
 
 def z_score_(
-        df: pd.DataFrame, cols: Sequence[str]) -> None:
+        df: pd.DataFrame, cols: Collection[str]) -> None:
+    cols = list(cols)
     df[cols] = (
         df[cols]
         - df[cols].mean()) / df[cols].std()
@@ -389,3 +430,28 @@ def z_score_numerical_(
         set(df.select_dtypes(include="number").columns)
         - set(exception))
     z_score_(df, num_cols)
+
+
+def remove_outliers(
+        df: pd.DataFrame,
+        cols: Collection[str], rank: int | None = None
+        ) -> pd.DataFrame:
+    cols = list(cols)
+    q1 = df[cols].quantile(0.25)
+    q3 = df[cols].quantile(0.75)
+    iqr = q3 - q1
+    mask = (
+        (df[cols] < (q1 - 1.5 * iqr))
+        | (df[cols] > (q3 + 1.5 * iqr))).any(axis=1)
+    info(rank, logger, f"Removed {sum(mask)} out of {len(df)} rows.")
+    return df[~mask]
+
+
+def remove_outliers_numerical(
+        df: pd.DataFrame,
+        exception: Iterable[str], rank: int | None = None
+        ) -> pd.DataFrame:
+    num_cols = list(
+        set(df.select_dtypes(include="number").columns)
+        - set(exception))
+    return remove_outliers(df, num_cols, rank)

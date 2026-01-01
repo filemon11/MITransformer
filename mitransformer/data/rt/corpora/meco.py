@@ -246,6 +246,9 @@ def prepare_RTs_meco(
         inplace=True)
     df["Corpus"] = f"meco{meco_wave}"
 
+    df = df[[
+        "Corpus", "item", "zone", "WorkerId",
+        "word", "GPT", "FFD", "GD"]]
     if output_file is None:
         return df
     df.to_csv(output_file)
