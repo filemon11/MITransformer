@@ -29,13 +29,14 @@ def fit_gpboost(
         provided as a covariate. You can be explicit and provide '1' but
         '0' overrides '1'.
     """
-    df = df.dropna().reset_index(drop=True)
-
+    predictors = list(predictors)
     group_vars: list[str] | None = None
     if random_effects is not None and len(random_effects) > 0:
         group_vars = list(random_effects.keys())
 
-    predictors = list(predictors)
+    df = df[
+        [y_col, *predictors, *(group_vars if group_vars is not None else [])]
+        ].dropna().reset_index(drop=True)
 
     group: None | np.ndarray = None
     drop_rand_intr: list[bool] | None = None
@@ -74,7 +75,7 @@ def fit_gpboost(
         ind_effect_group_rand_coef=pointers,
         drop_intercept_group_rand_effect=drop_rand_intr,
         likelihood="gaussian",
-        gp_approx="vecchia")
+        gp_approx="vecchia",)
     # Vecchia approximations tested:
     # only miniscule decreases in accuracy
 
