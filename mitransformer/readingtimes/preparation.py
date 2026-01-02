@@ -39,7 +39,10 @@ def io_corpus_convert(
         input_file: str,
         output_file: None = None,
         token_mapper_dir: str | None = None,
-        verbose: bool = False
+        verbose: bool = False,
+        min_len: None | int = None,
+        max_len: None | int = None,
+        rank: int | None = None,
         ) -> pd.DataFrame:
     ...
 
@@ -51,7 +54,10 @@ def io_corpus_convert(
         input_file: str,
         output_file: str,
         token_mapper_dir: str | None = None,
-        verbose: bool = False
+        verbose: bool = False,
+        min_len: None | int = None,
+        max_len: None | int = None,
+        rank: int | None = None,
         ) -> None:
     ...
 
@@ -62,7 +68,10 @@ def io_corpus_convert(
         input_file: str,
         output_file: str | None = None,
         token_mapper_dir: str | None = None,
-        verbose: bool = False
+        verbose: bool = False,
+        min_len: None | int = None,
+        max_len: None | int = None,
+        rank: int | None = None,
         ) -> pd.DataFrame | None:
     if os.path.split(model_dir)[1][:4] == "hug:":
         df = data.prepare_RT_text(
@@ -70,14 +79,20 @@ def io_corpus_convert(
             input_file,
             token_mapper_dir=token_mapper_dir,
             make_lower=False,
-            verbose=verbose)
+            verbose=verbose,
+            min_len=min_len,
+            max_len=max_len,
+            rank=rank)
     else:
         # Convert original format to sensible csv
         df = data.prepare_RT_text(
             corpus,
             input_file,
             token_mapper_dir=token_mapper_dir,
-            verbose=verbose)
+            verbose=verbose,
+            min_len=min_len,
+            max_len=max_len,
+            rank=rank)
 
     if output_file is None:
         return df

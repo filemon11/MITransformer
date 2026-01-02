@@ -192,6 +192,30 @@ def load_meco(
         df["wordnum"].to_list())
 
 
+def load_meco1(
+        input_file: str,
+        make_lower: bool = True,
+        token_mapper_dir: str | None = None,
+        verbose: bool = False,
+        lang: str = "en"
+        ) -> tuple[list[str], list[str], list[int]]:
+    return load_meco(
+        input_file, make_lower, token_mapper_dir,
+        verbose, lang=lang)
+
+
+def load_meco2(
+        input_file: str,
+        make_lower: bool = True,
+        token_mapper_dir: str | None = None,
+        verbose: bool = False,
+        lang: str = "en_uk"
+        ) -> tuple[list[str], list[str], list[int]]:
+    return load_meco(
+        input_file, make_lower, token_mapper_dir,
+        verbose, lang=lang)
+
+
 @overload
 def prepare_RTs_meco(
         meco_wave: Literal[1, 2],

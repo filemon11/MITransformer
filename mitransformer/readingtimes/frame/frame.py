@@ -645,7 +645,16 @@ class SplitFrame(Frame):
                 combined = this_word.replace(" ", "")
 
                 # Keep consuming source tokens until we match
-                while combined != other_norm:
+                max_checks = 100
+                current_checks = 0
+                while combined != other_norm and combined + "-" != other_norm:
+                    if current_checks > max_checks:
+                        raise Exception(
+                            "Maximal number of iterations passed "
+                            f"({max_checks})."
+                            f"Mismatch while combining {parts} → '{combined}'"
+                            f", expected '{other_word}'"
+                        )
                     next_word = next(this_words_iter)
                     row_i = next(row_i_iter)
                     word_j = next(word_j_iter)
@@ -661,6 +670,7 @@ class SplitFrame(Frame):
                             f"Mismatch while combining {parts} → '{combined}'"
                             f", expected '{other_word}'"
                         )
+                    current_checks += 1
 
                 # If we used more than one token, remove spaces between them
                 for (r, c) in positions[:-1]:

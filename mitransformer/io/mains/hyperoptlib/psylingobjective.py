@@ -46,12 +46,16 @@ class PsyLingObjective(objective.Objective):
                 "custom", dataset,
                 data.rt_corpus_to_text_file[dataset],
                 verbose=True,
-                token_mapper_dir=None)
+                token_mapper_dir=None,
+                min_len=self.arguments.min_len_eval_test,
+                max_len=self.arguments.max_len_eval_test,
+                rank=self.arguments.rank)
             for dataset in arguments.psyling_dataset])
+        info(self.arguments.rank, logger, "Retreaved psyling corpora.")
 
         self.tok_frame, self.untok_frame = get_frames(
-            psyling_df, max_len=self.arguments.max_len_eval_test,
-            min_len=self.arguments.min_len_eval_test)
+            psyling_df, rank=self.arguments.rank)
+        info(self.arguments.rank, logger, "Generated psyling dataframes.")
 
         transform = None
         assert self.data_provider is not None
@@ -73,6 +77,9 @@ class PsyLingObjective(objective.Objective):
             transform, self.data_provider.datasets["token_mapper"],
             **load_kwargs  # type: ignore
         )
+        info(
+            self.arguments.rank, logger,
+            "Loaded psyling dataset for generating surprisal.")
 
         # Load measurements
         is_et_corpus = [
@@ -84,6 +91,9 @@ class PsyLingObjective(objective.Objective):
         self.measurements = get_measurements(
             self.is_et_corpus, arguments.psyling_dataset, psyling_df
         )
+        info(
+            self.arguments.rank, logger,
+            "Loaded psyling measurements.")
 
         # # Is this necessary?
         # self.measurements[self.arguments.lme_formula["to_predict"]] = np.log(
@@ -195,6 +205,8 @@ class PsyLingObjective(objective.Objective):
             joined = joined[relevant]
             joined.dropna(inplace=True)
 
+            # TODO: fir separately for each corpus and
+            # take mean per row loglik
             # Fit lme
             lme, d0 = readingtimes.fit_gpboost(
                 joined,
@@ -275,8 +287,7 @@ class PsyLingObjective(objective.Objective):
 
 def get_frames(
         psyling_df: pd.DataFrame,
-        max_len: int | None = None,
-        min_len: int | None = None
+        rank: int | None = None
         ) -> Tuple[readingtimes.SplitFrame, readingtimes.SplitFrame]:
 
     orig_frame = readingtimes.UnsplitFrame(
@@ -287,49 +298,29 @@ def get_frames(
             metric)
 
     # Create conllu frame
+    info(rank, logger, "Getting conllu frame...")
     tok_frame = readingtimes.get_conllu_frame(
         psyling_df)
     # omits undefined args
 
+    info(rank, logger, "Adjusting tokenisation (1/2)...")
     tok_untok_frame = tok_frame.untokenise()
+    info(rank, logger, "Adjusting tokenisation (2/2)...")
     tok_untok_frame.adjust_untokenise_(orig_frame.df["word"])  # type: ignore
+    info(rank, logger, "Adjusted tokenisation.")
 
-    assert (i := len(orig_frame.df)) == (j := sum(
-        len(sentence) for sentence in tok_untok_frame.df["word"])), (i, j)
+    assert len(orig_frame.df) == sum(
+        len(sentence) for sentence in tok_untok_frame.df["word"])
 
-    include = [
-        len(sentence) > 0
-        for sentence in tok_untok_frame.df[readingtimes.TOKEN_COL]]
-    tok_untok_frame.df = tok_untok_frame.df[include].reset_index(drop=True)
-
+    # TODO: is this necessary?
     # include = [
-    #     len(sentence) > 0
-    #     for sentence in tok_frame.df[readingtimes.TOKEN_COL]]
-    # tok_frame.df = tok_frame.df[include].reset_index(drop=True)
+    # len(sentence) > 0
+    # for sentence in tok_untok_frame.df[readingtimes.TOKEN_COL]]
+    # tok_untok_frame.df = tok_untok_frame.df[include].reset_index(drop=True)
 
     untok_frame = orig_frame.split([
         len(sentence) for sentence in tok_untok_frame.df[
             readingtimes.TOKEN_COL]])
-
-    # def compare(sentence: Sequence) -> bool:
-    #     include = True
-    #     length = len(sentence)
-    #     if max_len is not None:
-    #         include = length <= max_len
-    #     if min_len is not None:
-    #         include = include and min_len <= length
-    #     return include
-
-    # TODO: Find a solution for this
-    # ATTENTION: Cannot do this. tok_frame can contain sentences of
-    # different length than
-    # untok_frame
-    # include = [
-    #     compare(sentence)
-    #     for sentence in untok_frame.df[readingtimes.TOKEN_COL]]
-
-    # untok_frame.df = untok_frame.df[include].reset_index(drop=True)
-    # tok_frame.df = tok_frame.df[include].reset_index(drop=True)
 
     return tok_frame, untok_frame
 

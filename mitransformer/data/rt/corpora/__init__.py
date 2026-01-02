@@ -9,7 +9,7 @@ from .frank import (  # noqa: F401
     load_frank, split_frank, prepare_RTs_frank_ET,
     prepare_RTs_frank_SP)
 from .meco import (  # noqa: F401
-    load_meco, prepare_RTs_meco1, prepare_RTs_meco2,
+    load_meco1, load_meco2, prepare_RTs_meco1, prepare_RTs_meco2,
     split_meco1, split_meco2)
 from .geco import (  # noqa: F401
     load_geco, prepare_RTs_geco, split_geco)

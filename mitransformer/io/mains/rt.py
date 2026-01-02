@@ -63,7 +63,9 @@ def main_rt(
 
     # Load candidates
     corpus_df = readingtimes.io_corpus_convert(
-        model_name, corpus, in_file, verbose=True)
+        model_name, corpus, in_file, verbose=True,
+        min_len=arguments.min_len_eval_test,
+        max_len=arguments.max_len_eval_test)
     # Note: we are loading the RT data twice: once for
     # the lme eval and once for collecting the input of the
     # LM. We might want to unify this process

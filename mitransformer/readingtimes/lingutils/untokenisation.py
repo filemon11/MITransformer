@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from typing import (
     Iterable, Literal, Callable,
     overload, Protocol, runtime_checkable, Sequence, Optional,
-    NamedTuple, Any, TypeVar, Iterator)
+    NamedTuple, Any, TypeVar)
 
 
 @runtime_checkable
@@ -370,7 +370,7 @@ class UntokSplitPOS(UntokSplitFunc):
 
     def __call__(self, untok_df: pd.DataFrame) -> Sequence:
         it = [list(untokenise_by_POS(  # type: ignore
-            sa, it, po, self.punctuation)) for sa, (it, po) in
+            sa, it, po, self.punctuation)) for sa, (it, po) in  # type: ignore
             build_sentences(
                 untok_df[self.space_after_col],  # type: ignore
                 (
@@ -392,7 +392,8 @@ class UntokSplitHead(UntokSplitFunc):
 
     def __call__(self, untok_df: pd.DataFrame) -> Sequence:
         it = [list(untokenise_by_head(  # type: ignore
-            sa, it, he, po, self.punctuation)) for sa, (it, he, po) in
+            sa, it, he, po, self.punctuation)) for sa, (
+                it, he, po) in  # type: ignore
             build_sentences(
                 untok_df[self.space_after_col],  # type: ignore
                 (
@@ -440,6 +441,7 @@ class UntokSplitLast(UntokSplitFunc):
         super().__init__(col, space_after_col)
 
     def __call__(self, untok_df: pd.DataFrame) -> Sequence:
+
         it = [list(untokenise(  # type: ignore
             sa, measures[0], "last")) for sa, measures in
             build_sentences(
@@ -491,54 +493,60 @@ S = TypeVar("S")
 
 
 def build_sentences(
-        space_after: Sequence[Sequence[bool]],
-        other_measures: Sequence[Sequence[Sequence[S]]]
-        ) -> Iterable[tuple[Sequence[bool], tuple[Sequence[S], ...]]]:
-    space_after_list = [list(sentence) for sentence in space_after]
-    other_measures_list = [
-        [list(sentence) for sentence in measure] for measure in other_measures]
+    space_after: Sequence[Sequence[bool]],
+    other_measures: Sequence[Sequence[Sequence[S]]],
+) -> Iterable[tuple[list[bool], tuple[list[S], ...]]]:
 
-    iterator: Iterator[tuple[list[bool] | list[T], ...]]
-    iterator = iter(zip(space_after_list, *other_measures_list))
-    # measures: list[list[T]]
-    # for sa, *measures in iterator:
-    #     yield (sa, tuple(measures))
+    # Make everything mutable
+    sa_all = [list(sent) for sent in space_after]
+    measures_all = [
+        [list(sent) for sent in measure]
+        for measure in other_measures
+    ]
 
-    sa: list[bool]
-    other: list[list[T]]
-    for sa, *other in iterator:
-        # space after at the end of a sentence marks
-        # no space, i.e. the first token of the following sentence
-        # should contract with the end of the previous sentence.
-        if not sa[-1]:
-            sa[-1] = False
-            finished = False
-            stack: list[
-                tuple[Sequence[bool], tuple[Sequence[S], ...]]] = []
-            next_sa: list[bool]
-            next_other: list[list[T]]
-            while not finished:
-                try:
-                    next_sa, *next_other = next(iterator)
-                except StopIteration:
-                    # Can happen if the very last entry is False.
-                    # This appears to be an artifact
+    n_sentences = len(sa_all)
+    n_measures = len(measures_all)
+
+    i = 0
+    while i < n_sentences:
+        # Start current sentence
+        sa = sa_all[i]
+        others = [measures_all[m][i] for m in range(n_measures)]
+
+        # Try to extend into following sentences
+        j = i + 1
+        while sa and not sa[-1] and j < n_sentences:
+            next_sa = sa_all[j]
+            next_others = [measures_all[m][j] for m in range(n_measures)]
+
+            k = 0
+            while k < len(next_sa):
+                sa.append(next_sa[k])
+                for o, no in zip(others, next_others):
+                    o.append(no[k])
+
+                # Stop extending once a space is encountered
+                if next_sa[k]:
                     break
-                i = 0
-                for i, (word_sa, *word_other) in enumerate(
-                        zip(next_sa, *next_other)):
-                    sa.append(word_sa)
-                    for ot, wo in zip(other, word_other):
-                        ot.append(wo)
+                k += 1
 
-                    if word_sa:
-                        finished = True
-                        break
-                stack.append((
-                    next_sa[i+1:],
-                    tuple([next_ot[i+1:] for next_ot in next_other])))
-            yield (sa, tuple(other))
-            for item in stack:
-                yield item
-        else:
-            yield (sa, tuple(other))
+            # Remaining tail of the next sentence
+            if k + 1 < len(next_sa):
+                sa_all[j] = next_sa[k+1:]
+                for m in range(n_measures):
+                    measures_all[m][j] = next_others[m][k+1:]
+                break
+            else:
+                # Entire sentence was consumed
+                sa_all[j] = []
+                for m in range(n_measures):
+                    measures_all[m][j] = []
+                j += 1
+
+        yield sa, tuple(others)
+
+        # Yield empty sentences for fully consumed ones
+        for k in range(i + 1, j):
+            yield [], tuple([] for _ in range(n_measures))
+
+        i = max(i + 1, j)
