@@ -373,8 +373,20 @@ def create_parser() -> argparse.ArgumentParser:
         help=(
             'name of the dataset for psycholinguistic evaluation.'
             'Can be several datasets separated via comma. These are '
-            'concatenated  by the optimiser.'),
+            'concatenated by the optimiser.'),
         default="naturalstories")
+    hyperopt_parser.add_argument(
+        '--average_psyling',
+        type=bool,
+        default=True,
+        help=(
+            'If True, fits lme separately to each psyling '
+            'dataset and takes the average -loglik per row '
+            'as the hyperopt goal. If False, concatenates the '
+            'datasets and fits only one lme. In this setting '
+            'you can specify group random effects for the '
+            'corpus using the term "Corpus".'),
+    )
     hyperopt_parser.add_argument(
         '--load_psyling_mmap',
         type=argtypes.OptNone(str),

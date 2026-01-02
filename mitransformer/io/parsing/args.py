@@ -102,6 +102,7 @@ class HyperoptParserArgs(ParserArgs):
     pruner_startup_trials: int
     n_trials: int
     psyling_dataset: Tuple[RTCorpus, ...]
+    average_psyling: bool
     load_psyling_mmap: str | None
     lme_formula: LMEParseResults
     shift: int

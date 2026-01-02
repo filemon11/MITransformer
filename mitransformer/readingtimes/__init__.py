@@ -4,6 +4,6 @@ from .preparation import (  # noqa: F401
 from .lme import (  # noqa: F401
     lme, fit_gpboost, get_model_comparison,
     get_model_props, ModelProps, ComparisonProps,
-    model_props_to_str)
+    model_props_to_str, ParseResult)
 from .datajoin import join, io_join  # noqa: F401
 from .frame import SplitFrame, UnsplitFrame  # noqa: F401

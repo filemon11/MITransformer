@@ -49,7 +49,8 @@ class PsyLingObjective(objective.Objective):
                 token_mapper_dir=None,
                 min_len=self.arguments.min_len_eval_test,
                 max_len=self.arguments.max_len_eval_test,
-                rank=self.arguments.rank)
+                rank=self.arguments.rank,
+                remove_unk=True)
             for dataset in arguments.psyling_dataset])
         info(self.arguments.rank, logger, "Retreaved psyling corpora.")
 
@@ -168,7 +169,7 @@ class PsyLingObjective(objective.Objective):
             frame.truncate_(right=1)
             frame = frame.unsplit()
 
-            print(frame.df[["surprisal", "item", "zone"]].tail(n=10))
+            print(frame.df.head(n=10))
 
             # Joining
             # This may take some time. Should we precompute this,
@@ -188,59 +189,87 @@ class PsyLingObjective(objective.Objective):
             joined["item"] = joined["Corpus"] + joined["item"].astype(str)
             joined["WorkerId"] = joined["Corpus"] + joined["WorkerId"]
 
-            # # Remove outliers
-            joined = remove_outliers(
-                joined, self.arguments.lme_formula["covariates"],
-                self.arguments.rank
-            )
-            # # Scale predictors
-            z_score_(
-                joined, self.arguments.lme_formula["covariates"]
-            )
-
             relevant = [
+                "Corpus",
                 self.arguments.lme_formula["to_predict"],
                 *self.arguments.lme_formula["covariates"],
                 *self.arguments.lme_formula["random_effects"],]
             joined = joined[relevant]
             joined.dropna(inplace=True)
 
-            # TODO: fir separately for each corpus and
-            # take mean per row loglik
-            # Fit lme
-            lme, d0 = readingtimes.fit_gpboost(
-                joined,
-                y_col=self.arguments.lme_formula["to_predict"],
-                predictors=self.arguments.lme_formula["covariates"],
-                random_effects=self.arguments.lme_formula["random_effects"]
-            )
-            del joined
-
-            model_props = readingtimes.get_model_props(lme, len(d0))
-            info(
-                arguments.rank, logger,
-                readingtimes.model_props_to_str(
-                    model_props,
-                    ["Intercept"] + list(
-                        self.arguments.lme_formula["covariates"]),
-                    ["Error_term"]
-                    + [
-                        group for group, coefs in
-                        self.arguments.lme_formula["random_effects"].items()
-                        if 1 in coefs]
-                    + [
-                        f"{group}_{c}"
-                        for group, coefs
-                        in self.arguments.lme_formula["random_effects"].items()
-                        for c in coefs if c not in (1, 0)]
+            if self.arguments.average_psyling:
+                # # Remove outliers
+                joined = remove_outliers_per_group(
+                    joined, self.arguments.lme_formula["covariates"],
+                    "Corpus", rank=self.arguments.rank
                 )
-            )
-            del lme
+                # # Scale predictors
+                z_score_per_group_(
+                    joined, self.arguments.lme_formula["covariates"],
+                    "Corpus"
+                )
+            else:
+                # # Remove outliers
+                joined = remove_outliers(
+                    joined, self.arguments.lme_formula["covariates"],
+                    rank=self.arguments.rank
+                )
+                # # Scale predictors
+                z_score_(
+                    joined, self.arguments.lme_formula["covariates"],
+                )
+            # Fit lme
+            if self.arguments.average_psyling:
+                measures: list[float] = []
+                for corpus in joined["Corpus"].unique():
+                    lme, d0 = readingtimes.fit_gpboost(
+                        joined[joined["Corpus"] == corpus],
+                        y_col=self.arguments.lme_formula["to_predict"],
+                        predictors=self.arguments.lme_formula["covariates"],
+                        random_effects=self.arguments.lme_formula[
+                            "random_effects"]
+                    )
 
-            # TODO: decide plausible lme structure
+                    model_props = readingtimes.get_model_props(lme, len(d0))
+                    info(self.arguments.rank, logger, f"---{corpus}---")
+                    print_lme_info(
+                        model_props, self.arguments.lme_formula,
+                        self.arguments.rank
+                    )
+                    del lme
+                    loglik = -model_props["negloglik_per_row"]
+                    measures.append(loglik)
 
-            # Get optimisation metric
-            loglik = -model_props["negloglik"]
+                    trainer.writer.custom_add_scalar(
+                        f"loglik_{corpus}", loglik, step, "psyling_eval")
+
+                    info(
+                        arguments.rank, logger,
+                        f"Psyling eval loglik {corpus}: {loglik}")
+
+                # TODO: decide plausible lme structure
+
+                # Get optimisation metric
+                assert len(measures) > 0
+                loglik = sum(measures) / len(measures)
+
+            else:
+                lme, d0 = readingtimes.fit_gpboost(
+                    joined,
+                    y_col=self.arguments.lme_formula["to_predict"],
+                    predictors=self.arguments.lme_formula["covariates"],
+                    random_effects=self.arguments.lme_formula["random_effects"]
+                )
+
+                model_props = readingtimes.get_model_props(lme, len(d0))
+                print_lme_info(
+                    model_props, self.arguments.lme_formula,
+                    self.arguments.rank
+                )
+                del lme
+                loglik = -model_props["negloglik_per_row"]
+
+            del joined
 
             # Add to metric writer
             trainer.writer.custom_add_scalar(
@@ -423,6 +452,25 @@ def z_score_numerical_(
     z_score_(df, num_cols)
 
 
+def z_score_per_group_(
+        df: pd.DataFrame, cols: Collection[str],
+        group_col: str) -> None:
+    cols = list(cols)
+    df[cols] = (
+        df
+        .groupby(group_col)[cols]
+        .transform(lambda x: (x - x.mean()) / x.std()))
+
+
+def z_score_numerical_per_group_(
+        df: pd.DataFrame, exception: Iterable[str],
+        group_col: str) -> None:
+    num_cols = list(
+        set(df.select_dtypes(include="number").columns)
+        - set(exception))
+    z_score_per_group_(df, num_cols, group_col)
+
+
 def remove_outliers(
         df: pd.DataFrame,
         cols: Collection[str], rank: int | None = None
@@ -438,6 +486,40 @@ def remove_outliers(
     return df[~mask]
 
 
+def remove_outliers_per_group(
+        df: pd.DataFrame,
+        cols: Collection[str],
+        group_col: str,
+        rank: int | None = None
+        ) -> pd.DataFrame:
+    cols = list(cols)
+    grouped = df.groupby(group_col)
+
+    q1 = grouped[cols].transform("quantile", 0.25)
+    q3 = grouped[cols].transform("quantile", 0.75)
+    iqr = q3 - q1
+    mask = (
+        (df[cols] < (q1 - 1.5 * iqr))
+        | (df[cols] > (q3 + 1.5 * iqr))).any(axis=1)
+
+    removed_per_group = (
+        df.loc[mask]
+        .groupby(group_col)
+        .size()
+    )
+    total_per_group = (
+        grouped
+        .size()
+    )
+
+    for (grp, n), (_, t) in zip(
+            removed_per_group.items(), total_per_group.items()):
+        info(rank, logger, f"Group '{grp}': removed {n} out of {t} rows")
+    info(rank, logger, f"Removed {sum(mask)} out of {len(df)} rows total.")
+    df = df[~mask]
+    return df
+
+
 def remove_outliers_numerical(
         df: pd.DataFrame,
         exception: Iterable[str], rank: int | None = None
@@ -446,3 +528,28 @@ def remove_outliers_numerical(
         set(df.select_dtypes(include="number").columns)
         - set(exception))
     return remove_outliers(df, num_cols, rank)
+
+
+def print_lme_info(
+        model_props: readingtimes.ModelProps,
+        lme_formula: readingtimes.ParseResult,
+        rank: int | None = None):
+    info(
+        rank, logger,
+        readingtimes.model_props_to_str(
+            model_props,
+            ["Intercept"] + list(
+                lme_formula["covariates"]),
+            ["Error_term"]
+            + [
+                group for group, coefs in
+                lme_formula[
+                    "random_effects"].items()
+                if 1 in coefs]
+            + [
+                f"{group}_{c}"
+                for group, coefs
+                in lme_formula[
+                    "random_effects"].items()
+                for c in coefs if c not in (1, 0)]
+        ))

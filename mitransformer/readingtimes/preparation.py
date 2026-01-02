@@ -42,6 +42,7 @@ def io_corpus_convert(
         verbose: bool = False,
         min_len: None | int = None,
         max_len: None | int = None,
+        remove_unk: bool = False,
         rank: int | None = None,
         ) -> pd.DataFrame:
     ...
@@ -57,6 +58,7 @@ def io_corpus_convert(
         verbose: bool = False,
         min_len: None | int = None,
         max_len: None | int = None,
+        remove_unk: bool = False,
         rank: int | None = None,
         ) -> None:
     ...
@@ -71,6 +73,7 @@ def io_corpus_convert(
         verbose: bool = False,
         min_len: None | int = None,
         max_len: None | int = None,
+        remove_unk: bool = False,
         rank: int | None = None,
         ) -> pd.DataFrame | None:
     if os.path.split(model_dir)[1][:4] == "hug:":
@@ -82,7 +85,8 @@ def io_corpus_convert(
             verbose=verbose,
             min_len=min_len,
             max_len=max_len,
-            rank=rank)
+            rank=rank,
+            remove_unk=remove_unk)
     else:
         # Convert original format to sensible csv
         df = data.prepare_RT_text(
@@ -92,7 +96,8 @@ def io_corpus_convert(
             verbose=verbose,
             min_len=min_len,
             max_len=max_len,
-            rank=rank)
+            rank=rank,
+            remove_unk=remove_unk)
 
     if output_file is None:
         return df

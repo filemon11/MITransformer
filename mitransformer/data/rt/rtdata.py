@@ -170,6 +170,7 @@ def prepare_RT_text(
         verbose: bool = False,
         min_len: None | int = None,
         max_len: None | int = None,
+        remove_unk: bool = False,
         rank: None | int = None,
         ) -> pd.DataFrame:
 
@@ -185,13 +186,15 @@ def prepare_RT_text(
         token_col: tokens,
         text_id_col: text_ids,
         wnum_col: wnums})
+
     length1 = len(df)
 
     if min_len is not None or max_len is not None:
         df = filter_sentences_by_length(  # type: ignore
             df, token_col=token_col,
             text_id_col=text_id_col,
-            min_len=min_len, max_len=max_len  # type: ignore
+            min_len=min_len, max_len=max_len,  # type: ignore
+            remove_unk=remove_unk
         )
     length2 = len(df)
 
@@ -218,6 +221,7 @@ def filter_sentences_by_length(
         text_id_col: str,
         min_len: int,
         max_len: int | None = None,
+        remove_unk: bool = False
         ) -> pd.DataFrame:
     ...
 
@@ -229,6 +233,7 @@ def filter_sentences_by_length(
         text_id_col: str,
         min_len: int | None,
         max_len: int,
+        remove_unk: bool = False
         ) -> pd.DataFrame:
     ...
 
@@ -239,6 +244,7 @@ def filter_sentences_by_length(
         text_id_col: str,
         min_len: int | None = None,
         max_len: int | None = None,
+        remove_unk: bool = False
         ) -> pd.DataFrame:
     """
     Filter dataframe to only keep tokens belonging to sentences
@@ -268,6 +274,9 @@ def filter_sentences_by_length(
         doc = nlp(text)
 
         for sent in doc.sents:
+            if remove_unk and any(["<unk>" in word.text for word in sent]):
+                continue
+
             s_start = sent.start_char
             s_end = sent.end_char
 
