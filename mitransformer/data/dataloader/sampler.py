@@ -27,14 +27,11 @@ import bisect
 
 from .. import dataset
 
-from typing import (TypedDict, Iterator, Optional)
+from typing import (Iterator, Optional)
 
 from ...utils.logmaker import getLogger
 
 logger = getLogger(__name__)
-
-
-SentenceTokens = TypedDict("SentenceTokens", {"tokens": list[str]})
 
 
 class BySequenceLengthSampler(BatchSampler):
@@ -129,7 +126,7 @@ class BySequenceLengthSampler(BatchSampler):
 
 class DistributedBySequenceLengthSampler(BatchSampler):
     def __init__(
-            self, data_source: dataset.NLPDataset[SentenceTokens],
+            self, data_source: dataset.TokenisedDataset[dataset.SentenceIds],
             min_size: int, max_size: int, batch_size=64,
             drop_last=True, fill_incomplete: bool = True,
             include_smaller=False, include_larger=False,
@@ -168,7 +165,8 @@ class DistributedBySequenceLengthSampler(BatchSampler):
         self.buckets: list[list[int]] = [[] for _ in range(self.num_buckets)]
 
         for idx, sample in enumerate(iter(data_source)):
-            seq_len = len(sample["tokens"])
+            assert "input_ids" in sample
+            seq_len = len(sample["input_ids"])
 
             bucket_id = bisect.bisect_right(boundaries, seq_len) - 1
             if 0 <= bucket_id < self.num_buckets:
