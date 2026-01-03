@@ -76,6 +76,8 @@ class PsyLingObjective(objective.Objective):
             self.tok_frame.df["conllu"].tolist(),
             self.arguments.masked, self.arguments.masks_setting,
             transform, self.data_provider.datasets["token_mapper"],
+            use_ddp=self.arguments.use_ddp,
+            rank=self.arguments.rank,
             **load_kwargs  # type: ignore
         )
         info(
@@ -389,7 +391,7 @@ def create_dataset(
         temp_mmap_filename: str = "temp_mmap",
         only_load_mmap: bool = False,
         use_ddp: bool = False,
-        rank: int = 0,
+        rank: int | None = None,
         ) -> data.MemMapDataset | data.MemMapDepDataset:
 
     if not only_load_mmap:
