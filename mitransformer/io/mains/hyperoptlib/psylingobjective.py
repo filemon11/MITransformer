@@ -395,13 +395,14 @@ def create_dataset(
     if not only_load_mmap:
         pathlib.Path(tempdir).mkdir(parents=True, exist_ok=True)
 
-        with open(os.path.join(tempdir, "temp_dataset"), "w") as temp:
-            for sentence in tokenlists:
-                temp.write(sentence.serialize())
-
         # Prevent memory writes by different processes
         if not use_ddp or rank == 0:
             dataset: data.MemMapDataset | data.MemMapDepDataset
+
+            with open(os.path.join(tempdir, "temp_dataset"), "w") as temp:
+                for sentence in tokenlists:
+                    temp.write(sentence.serialize())
+
             if masked:
                 assert masks_setting is not None
                 assert transform is not None
