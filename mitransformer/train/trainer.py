@@ -1510,7 +1510,7 @@ class LMTrainer():
             outputs: list[N] = [data]*self.config.world_size
             dist.all_gather_object(outputs, data)
             if isinstance(
-                    data, (torch.Tensor, metrics.LMMetric)) and data.is_cuda:
+                    data, (torch.Tensor, metrics.Metric)) and data.is_cuda:
                 outputs = [t.to(data.device) for t in outputs]  # type: ignore
             return outputs
         return [data]

@@ -207,6 +207,12 @@ class Metric(params.Params, ABC):
                 return v.device
         return torch.device("cpu")
 
+    @property
+    def is_cuda(self) -> bool:
+        if self.device == "cpu" or self.device == torch.device("cpu"):
+            return False
+        return True
+
     def detach_(self) -> None:
         for name in self.fields.keys():
             v = self._get_raw(name)

@@ -2,7 +2,7 @@ from .composed import (  # noqa: F401
     SupervisedMetric, EvalMetric, SupervisedEvalMetric,
     CostsMetric, CostsEvalMetric, LMMetric,
     DynamicWeightedEvalMetric, DynamicWeightedMetric)
-from .base import WeightedMetric  # noqa: F401
+from .base import WeightedMetric, Metric  # noqa: F401
 from .writer import MetricWriter, metric_writer  # noqa: F401
 from .utils import (  # noqa: F401
     minimise)
