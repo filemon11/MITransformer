@@ -2,12 +2,20 @@ from . import base, field
 
 import torch
 
-from typing import Sequence, Type
+from typing import Sequence, Any
 
 # ---------------------- concrete metric classes ---------------------------
 
-_dynamic_weighted_metric_registry: dict[tuple[str, ...], str] = {}
-_dynamic_weighted_eval_metric_registry: dict[tuple[str, ...], str] = {}
+_dynamic_weighted_metric_cache: dict[tuple[str, ...], Any] = {}
+_dynamic_weighted_eval_metric_cache: dict[tuple[str, ...], Any] = {}
+
+
+def _recreate_dynamic_weighted_metric(loss_names):
+    return DynamicWeightedMetric(loss_names)
+
+
+def _recreate_dynamic_weighted_eval_metric(loss_names):
+    return DynamicWeightedEvalMetric(loss_names)
 
 
 class LMMetric(base.Metric):
@@ -68,35 +76,35 @@ class CostsEvalMetric(CostsMetric, EvalMetric):
     }
 
 
-def DynamicWeightedMetric(
-        loss_names: Sequence[str]
-        ) -> Type[base.WeightedMetric]:
+def DynamicWeightedMetric(loss_names: Sequence):
     key = tuple(loss_names)
-    if key in _dynamic_weighted_metric_registry:
-        return globals()[_dynamic_weighted_metric_registry[key]]
+    if key in _dynamic_weighted_metric_cache:
+        return _dynamic_weighted_metric_cache[key]
 
-    class_name = f"DynamicWeightedMetric_{'_'.join(key)}"
-    fields_dict = {
-        **base.WeightedMetric.fields,
-        **{ln: field.loss("num") for ln in loss_names}}
-    cls = type(class_name, (base.WeightedMetric,), {"fields": fields_dict})
-    globals()[class_name] = cls  # ensure top-level reference for pickle
-    _dynamic_weighted_metric_registry[key] = class_name
-    return cls  # type: ignore
+    class_dict = {
+        "fields": {**base.WeightedMetric.fields, **{
+            name: field.loss("num") for name in key}},
+        "__reduce__": lambda cls: (_recreate_dynamic_weighted_metric, (key,))
+    }
+    new_class = type(f"DynamicWeightedMetric_{'_'.join(key)}", (
+        base.WeightedMetric,), class_dict)
+    _dynamic_weighted_metric_cache[key] = new_class
+    return new_class
 
 
-def DynamicWeightedEvalMetric(
-        loss_names: Sequence[str]
-        ) -> Type[base.WeightedMetric]:
+def DynamicWeightedEvalMetric(loss_names: Sequence):
     key = tuple(loss_names)
-    if key in _dynamic_weighted_eval_metric_registry:
-        return globals()[_dynamic_weighted_eval_metric_registry[key]]
+    if key in _dynamic_weighted_eval_metric_cache:
+        return _dynamic_weighted_eval_metric_cache[key]
 
     TrainMetric = DynamicWeightedMetric(loss_names)
-    class_name = f"DynamicWeightedEvalMetric_{'_'.join(key)}"
-    # Merge fields for EvalMetric
-    fields_dict = {**TrainMetric.fields, **EvalMetric.fields}
-    cls = type(class_name, (TrainMetric, EvalMetric), {"fields": fields_dict})
-    globals()[class_name] = cls  # top-level reference
-    _dynamic_weighted_eval_metric_registry[key] = class_name
-    return cls  # type: ignore
+    class_dict = {
+        "fields": {**TrainMetric.fields, **EvalMetric.fields},
+        "__reduce__": lambda cls: (
+            _recreate_dynamic_weighted_eval_metric, (key,))
+    }
+    new_class = type(
+        f"DynamicWeightedEvalMetric_{'_'.join(key)}", (
+            TrainMetric, EvalMetric), class_dict)
+    _dynamic_weighted_eval_metric_cache[key] = new_class
+    return new_class
