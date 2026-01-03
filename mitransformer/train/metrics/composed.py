@@ -1,6 +1,7 @@
 from . import base, field
 
 import torch
+import sys
 
 from typing import Sequence, Any
 
@@ -8,14 +9,8 @@ from typing import Sequence, Any
 
 _dynamic_weighted_metric_cache: dict[tuple[str, ...], Any] = {}
 _dynamic_weighted_eval_metric_cache: dict[tuple[str, ...], Any] = {}
-
-
-def _recreate_dynamic_weighted_metric(loss_names):
-    return DynamicWeightedMetric(loss_names)
-
-
-def _recreate_dynamic_weighted_eval_metric(loss_names):
-    return DynamicWeightedEvalMetric(loss_names)
+# NOTE: this is a stupid way of implementing it and should be
+# changed at some point...
 
 
 class LMMetric(base.Metric):
@@ -81,13 +76,21 @@ def DynamicWeightedMetric(loss_names: Sequence):
     if key in _dynamic_weighted_metric_cache:
         return _dynamic_weighted_metric_cache[key]
 
-    class_dict = {
-        "fields": {**base.WeightedMetric.fields, **{
-            name: field.loss("num") for name in key}},
-        "__reduce__": lambda cls: (_recreate_dynamic_weighted_metric, (key,))
-    }
-    new_class = type(f"DynamicWeightedMetric_{'_'.join(key)}", (
-        base.WeightedMetric,), class_dict)
+    name = f"DynamicWeightedMetric_{'_'.join(key)}"
+
+    new_class = type(
+        name,
+        (base.WeightedMetric,),
+        {"fields": {
+            **base.WeightedMetric.fields,
+            **{name: field.loss("num") for name in key}
+        }}
+    )
+
+    module = sys.modules[__name__]
+    new_class.__module__ = __name__
+    setattr(module, name, new_class)
+
     _dynamic_weighted_metric_cache[key] = new_class
     return new_class
 
@@ -98,13 +101,19 @@ def DynamicWeightedEvalMetric(loss_names: Sequence):
         return _dynamic_weighted_eval_metric_cache[key]
 
     TrainMetric = DynamicWeightedMetric(loss_names)
-    class_dict = {
-        "fields": {**TrainMetric.fields, **EvalMetric.fields},
-        "__reduce__": lambda cls: (
-            _recreate_dynamic_weighted_eval_metric, (key,))
-    }
+    name = f"DynamicWeightedEvalMetric_{'_'.join(key)}"
+
     new_class = type(
-        f"DynamicWeightedEvalMetric_{'_'.join(key)}", (
-            TrainMetric, EvalMetric), class_dict)
+        name,
+        (TrainMetric, EvalMetric),
+        {"fields": {
+            **TrainMetric.fields,
+            **EvalMetric.fields}}
+    )
+
+    module = sys.modules[__name__]
+    new_class.__module__ = __name__
+    setattr(module, name, new_class)
+
     _dynamic_weighted_eval_metric_cache[key] = new_class
     return new_class
