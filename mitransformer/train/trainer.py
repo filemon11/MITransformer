@@ -663,7 +663,8 @@ class LMTrainer():
                         and weights is not None
                     )
                     losses = ["lm_loss"] + list(additional_losses.keys())
-                    return metrics.DynamicWeightedEvalMetric(losses)(
+                    return metrics.DynamicWeightedEvalMetric(
+                            losses)(  # type: ignore
                         num=num_instances,
                         lm_loss=lm_loss,
                         main_metric=self.config.early_stop_metric,
@@ -684,7 +685,7 @@ class LMTrainer():
                     and weights is not None
                 )
                 losses = ["lm_loss"] + list(additional_losses.keys())
-                return metrics.DynamicWeightedMetric(losses)(
+                return metrics.DynamicWeightedMetric(losses)(  # type: ignore
                     num=num_instances,
                     lm_loss=lm_loss,
                     main_metric=self.config.early_stop_metric,
