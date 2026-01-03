@@ -1175,7 +1175,7 @@ class LMTrainer():
             assert self.train_config is not None, (
                 "Config missing training params.")
             metrics_list: list[metrics.LMMetric] = list()
-            for i, batch in tqdm(enumerate(loader), desc="Batches"):
+            for i, batch in tqdm(enumerate(loader), desc="Train batches"):
                 metrics_list.append(self.train_step(
                     batch,
                     loader.dataset.keys_for_padding["label_ids"],
@@ -1204,7 +1204,7 @@ class LMTrainer():
                     batch,
                     self.config.dependency_mode,
                     loader.dataset.keys_for_padding["label_ids"])
-                for batch in tqdm(loader, desc="Batches")]
+                for batch in tqdm(loader, desc="Eval batches")]
         return self.gather_metrics(metrics.sum_metrics(metrics_list))
 
     @torch.compile()
@@ -1239,6 +1239,7 @@ class LMTrainer():
             return_activations: bool | None = None,
             return_logits: bool | None = None,
             return_label_ids: bool = False,
+            to_device: str | None = None,
             ) -> tuple[
                 list[torch.Tensor], dict[str, list[torch.Tensor]],
                 AdditionalPrediction]:
@@ -1263,7 +1264,8 @@ class LMTrainer():
                 return_embeddings=return_embeddings,
                 return_activations=return_activations,
                 return_logits=return_logits,
-                return_label_ids=return_label_ids,):
+                return_label_ids=return_label_ids,
+                to_device=to_device):
 
             for key, attention in attention_logits.items():
                 attention_logits_global[key].extend(attention)
@@ -1291,6 +1293,7 @@ class LMTrainer():
             return_activations: bool | None = None,
             return_logits: bool | None = None,
             return_label_ids: bool = False,
+            to_device: str | None = None,
             ) -> Iterable[tuple[
                 list[torch.Tensor], dict[str, list[torch.Tensor]],
                 AdditionalPrediction]]:
@@ -1324,7 +1327,7 @@ class LMTrainer():
             logits: torch.Tensor
             arc_logits: dict[str, torch.Tensor] | None
             additional: models.AdditionalResults
-            for batch in tqdm(loader, desc="Batches"):
+            for batch in tqdm(loader, desc="Prediction batches"):
                 unpadded_arc_logits = {}
                 unpadded_additional = {}
                 batch = self.batch_to(batch, device=self.config.device)
@@ -1426,6 +1429,18 @@ class LMTrainer():
                         )
                     )
 
+                if to_device is not None:
+                    unpadded_arc_logits = {
+                        key: [tensor.to(to_device) for tensor in tensorlist]
+                        for key, tensorlist in unpadded_arc_logits.items()}
+
+                    unpadded_logits = [
+                        tensor.to(to_device) for tensor in unpadded_logits]
+
+                    for key, tensorlist in unpadded_additional.items():
+                        unpadded_additional[key] = [  # type: ignore
+                            tensor.to(to_device)
+                            for tensor in tensorlist]  # type: ignore
                 # This should collect the data across all processes.
                 # The distributed sampler chunked it in an interleaved
                 # fashion and did not shuffle it, so getting back

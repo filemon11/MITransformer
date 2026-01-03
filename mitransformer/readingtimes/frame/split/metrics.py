@@ -375,7 +375,8 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                     only_true=True,
                     return_arc_logits=return_arc_logits,
                     return_logits=return_logits,
-                    return_label_ids=return_label_ids):
+                    return_label_ids=return_label_ids,
+                    to_device="cpu"):
 
                 if trainer.config.device != "cpu":
                     attention_logits = {
@@ -536,7 +537,8 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                     only_true=True,
                     return_arc_logits=return_arc_logits,
                     return_logits=return_logits,
-                    return_label_ids=return_label_ids):
+                    return_label_ids=return_label_ids,
+                    to_device="cpu"):
 
                 if trainer.config.device != "cpu":
                     attention_logits = {
