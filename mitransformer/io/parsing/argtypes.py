@@ -97,7 +97,14 @@ class HyperoptSpace(Generic[T]):
                     f"Constructor for {self.type} does not accept an argument")
 
         try:
-            options = [self.type(v) for v in split]  # type: ignore
+            def remove_brackets(s: T) -> T:
+                if isinstance(s, str):
+                    if s.startswith("(") and s.endswith(")"):
+                        return s[1:-1]  # type: ignore
+                return s
+
+            options = [
+                self.type(remove_brackets(v)) for v in split]  # type: ignore
         except TypeError:
             raise Exception(
                 f"Constructor for {self.type} does not accept an argument")

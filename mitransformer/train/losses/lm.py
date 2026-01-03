@@ -45,16 +45,13 @@ def lm_loss(
 
     else:
         if k_negatives is not None:
-            k = 99
-            # TODO make this an argument
-
             # mask ignored labels once
             valid = labels != ignore_index
 
             # sample negatives
             neg = torch.randint(
                 0, logits.shape[1] - 1, (
-                    logits.shape[0], k, *labels.shape[1:]),
+                    logits.shape[0], k_negatives, *labels.shape[1:]),
                 device=logits.device
             )
 

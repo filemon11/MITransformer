@@ -108,7 +108,6 @@ class Objective:
 
         if should_prune:
             raise optuna.exceptions.TrialPruned()
-        # trial.set_user_attr("metric_dicts", metric_dicts)
 
         opt_metric = getattr(metrics["eval"], self.arguments.optimise.lower())
         if isinstance(opt_metric, pd.DataFrame):

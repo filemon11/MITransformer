@@ -29,7 +29,7 @@ def main_hyperopt(
     with ddp.new_pg(
             world_size, "gloo") as pg, metric_writer(log_dir=ld) as writer:
         objective: hyperoptlib.Objective
-        if arguments.optimise == "loglik":
+        if arguments.psyling_eval or arguments.optimise == "loglik":
             objective = hyperoptlib.PsyLingObjective(
                 world_size, arguments, writer, pg)
         else:

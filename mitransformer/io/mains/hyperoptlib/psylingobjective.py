@@ -278,9 +278,19 @@ class PsyLingObjective(objective.Objective):
             info(
                 arguments.rank, logger,
                 f"Psyling eval loglik: {loglik}")
-            trial.report(
-                loglik,
-                step)
+
+            if self.arguments.optimise == "loglik":
+                trial.report(
+                    loglik,
+                    step)
+            else:
+                opt_metric = getattr(
+                    metrics["eval"], self.arguments.optimise.lower())
+                if isinstance(opt_metric, pd.DataFrame):
+                    opt_metric = float(opt_metric.to_numpy().sum())
+                trial.report(
+                    opt_metric,
+                    step)
 
             if trial.should_prune():
                 should_prune = True
@@ -300,18 +310,33 @@ class PsyLingObjective(objective.Objective):
         arg_dict |= additional_dict
 
         if self.writer is not None:
-            self.writer.add_params(
-                arg_dict,
-                {
-                    "loglik": loglik,
-                    **metrics["eval"].to_dict()},
-                run_name=str(trial.number),
-                global_step=arguments.eval_interval*step)
+            if self.arguments.optimise == "loglik":
+                self.writer.add_params(
+                    arg_dict,
+                    {
+                        "loglik": loglik,
+                        **metrics["eval"].to_dict()},
+                    run_name=str(trial.number),
+                    global_step=arguments.eval_interval*step)
+            else:
+                self.writer.add_params(
+                    arguments.to_dict(),
+                    metrics["eval"],
+                    run_name=str(trial.number),
+                    global_step=arguments.eval_interval*step)
 
         if should_prune:
             raise optuna.exceptions.TrialPruned()
 
-        return loglik
+        if self.arguments.optimise == "loglik":
+            return loglik
+
+        else:
+            opt_metric = getattr(
+                metrics["eval"], self.arguments.optimise.lower())
+            if isinstance(opt_metric, pd.DataFrame):
+                opt_metric = opt_metric.to_numpy().sum()
+            return float(opt_metric)
 
 
 def get_frames(

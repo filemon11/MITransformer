@@ -97,6 +97,7 @@ class TrainParserArgs(ParserArgs):
 class HyperoptParserArgs(ParserArgs):
     optimise: Literal[
         "perplexity", "uas", "loss", "lm_loss", "arc_loss", "loglik"]
+    psyling_eval: bool
     n_warmup_steps: int
     sampler_startup_trials: int
     pruner_startup_trials: int

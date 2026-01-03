@@ -27,7 +27,10 @@ def hyperopt_arguments_sampler(
         str_choices: list[str] = [
             f"{num}_{str(choice)}" for num, choice in enumerate(arg)]
         str_arg: str = trial.suggest_categorical(name, str_choices)
-        arg = arg[int(str_arg.split("_", 1)[0])]
+        choice_num = int(str_arg.split("_", 1)[0])
+        arg = arg[choice_num]
+        arg = hyperopt_arguments_sampler(
+            f"{name}_{choice_num}", arg, trial)  # for nested args
     elif (
             isinstance(arg, parsing.Range)):
         if arg.is_continuous:

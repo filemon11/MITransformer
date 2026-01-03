@@ -349,10 +349,15 @@ def create_parser() -> argparse.ArgumentParser:
         help=(
             "how many trials to run with random sampling before using TPE."))
     hyperopt_parser.add_argument(
+        '--psyling_eval', type=bool,
+        default=False,
+        help=(
+            "use psyling eval (also possible if not optimising for loglik)."))
+    hyperopt_parser.add_argument(
         '--pruner_startup_trials', type=int,
         default=5,
         help=(
-            "how many trials to run before pruning can happen at all. "))
+            "how many trials to run before pruning can happen at all."))
     hyperopt_parser.add_argument(
         '--sampler', type=str, choices=("tpe", "random"),
         default="random",
@@ -378,7 +383,7 @@ def create_parser() -> argparse.ArgumentParser:
     hyperopt_parser.add_argument(
         '--average_psyling',
         type=bool,
-        default=True,
+        default=False,
         help=(
             'If True, fits lme separately to each psyling '
             'dataset and takes the average -loglik per row '
@@ -575,7 +580,9 @@ def create_parser() -> argparse.ArgumentParser:
             "Dictionary of losses for combined loss setting "
             "and their weights. Must include 'lm'."))
     hyperopt_flexible_trainer_group.add_argument(
-        '--k_negatives', type=argtypes.HyperoptSpace(argtypes.OptNone(int)),
+        '--k_negatives', type=argtypes.OptNone(
+            argtypes.HyperoptSpace(
+                argtypes.OptNone(argtypes.HyperoptSpace(int)))),
         default=None,
         help=(
             "k negatives to approximate softmax"))
