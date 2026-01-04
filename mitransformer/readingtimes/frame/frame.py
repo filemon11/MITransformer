@@ -486,11 +486,14 @@ class SplitFrame(Frame):
             **self.colnames).batched_call(  # type: ignore
                 df, batch_size, [],
                 self.additional)
+        start = 0
+        provided = 0
         for start, (content, additional) in zip(
                 range(0, len(self.df), batch_size), metric_iterable):
             mask = np.zeros(len(self.df), dtype=bool)
             mask[start:start+batch_size] = True
 
+            provided += len(content)
             assert sum(mask) == len(content), (sum(mask), len(content))
             self.add_column_(
                 colkey,
@@ -505,6 +508,10 @@ class SplitFrame(Frame):
 
             # We don't need to add another untok func
             untok = None
+        assert len(df)-batch_size <= start, (
+            f"Metric maker for {colname} did not provide enough "
+            f"batches. {len(df)-provided} sentences missing."
+        )
 
     def add_(
             self,

@@ -552,7 +552,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                             tensor.to("cpu")
                             for tensor in tensorlist]  # type: ignore
 
-                probs = [(-np.log(p[1:-1]+1e-4)).tolist() for p in pred_probs]
+                probs = [(-np.log(p[1:-1]+1e-5)).tolist() for p in pred_probs]
                 yield pd.Series(probs), {
                     "attention_logits": attention_logits,
                     "dataset": dataset,
