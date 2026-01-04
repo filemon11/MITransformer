@@ -215,6 +215,7 @@ def get_loader(
             sampl = sampler.DistributedSampler(
                 ds, num_replicas=world_size,
                 rank=rank, shuffle=shuffle, drop_last=droplast,
+                fill_incomplete=fill_incomplete,
                 seed=seed)
 
         connect_with_dummy = False
