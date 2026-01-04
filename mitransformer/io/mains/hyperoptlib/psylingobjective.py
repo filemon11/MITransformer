@@ -171,7 +171,8 @@ class PsyLingObjective(objective.Objective):
             frame.truncate_(right=1)
             frame = frame.unsplit()
 
-            print(frame.df.head(n=10))
+            if self.arguments.rank is None or self.arguments.rank == 0:
+                print(frame.df.head(n=10))
 
             # Joining
             # This may take some time. Should we precompute this,
