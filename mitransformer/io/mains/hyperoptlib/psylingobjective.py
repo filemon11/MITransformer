@@ -358,6 +358,8 @@ def get_frames(
     info(rank, logger, "Getting conllu frame...")
     tok_frame = readingtimes.get_conllu_frame(
         psyling_df)
+
+    info(rank, logger, f"Identified {len(tok_frame.df)} psyling sentences.")
     # omits undefined args
 
     info(rank, logger, "Adjusting tokenisation (1/2)...")

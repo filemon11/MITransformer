@@ -508,9 +508,9 @@ class SplitFrame(Frame):
 
             # We don't need to add another untok func
             untok = None
-        assert len(df)-batch_size <= start, (
+        assert len(df) == provided, (
             f"Metric maker for {colname} did not provide enough "
-            f"batches. {len(df)-provided} sentences missing."
+            f"batches. {len(df)-provided} out of {len(df)} sentences missing."
         )
 
     def add_(
