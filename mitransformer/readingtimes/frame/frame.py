@@ -491,6 +491,7 @@ class SplitFrame(Frame):
             mask = np.zeros(len(self.df), dtype=bool)
             mask[start:start+batch_size] = True
 
+            assert sum(mask) == len(content), (sum(mask), len(content))
             self.add_column_(
                 colkey,
                 colname,
