@@ -276,6 +276,11 @@ class DistributedSampler(BaseDistributedSampler):
             # remove tail of data to make it evenly divisible.
             indices = indices[: self.total_size]
 
+        if not self.drop_last and not self.fill_incomplete:
+            assert len(indices) == len(
+                    self.dataset), (  # type: ignore[arg-type]
+                f"Faulty length in sampler: {len(indices)} but expected "
+                f"{len(self.dataset)}.")  # type: ignore[arg-type]
         # subsample
         indices = indices[self.rank:: self.num_replicas]
 

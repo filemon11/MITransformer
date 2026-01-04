@@ -1300,6 +1300,7 @@ class LMTrainer():
         """Returns logits and arc scores"""
         # TODO: Does this work with ddp? Batches are distributed but not
         # joined back together.
+        total_sentences = len(dataset)  # type: ignore
         loader = data.get_loader(  # type: ignore
             dataset,
             bucket=False,
@@ -1321,6 +1322,7 @@ class LMTrainer():
         unpadded_additional: dict[str, list[torch.Tensor]]
 
         self.transformerlm.eval()
+        provided = 0
         with torch.no_grad():
             # eval loop: no backprop on this data, to avoid storing
             # all intermediate variable
@@ -1448,6 +1450,7 @@ class LMTrainer():
                 # the lists of results. TODO: test
                 unpadded_logits = self.gather_list(
                     unpadded_logits, interleave=True)
+                provided += len(unpadded_logits)
                 unpadded_arc_logits_out = self.gather_dict_of_lists(
                     dict(unpadded_arc_logits), interleave=True)
                 unpadded_additional_out = self.gather_dict_of_lists(
@@ -1455,6 +1458,10 @@ class LMTrainer():
                 yield (
                     unpadded_logits, unpadded_arc_logits_out,
                     cast(AdditionalPrediction, unpadded_additional_out))
+        assert provided == total_sentences, (  # type: ignore
+            "Number processed sentences does not equal length of dataset. "
+            f"Expected: {total_sentences}, Received: {provided}."
+        )
 
     @torch.compile()
     def generate(
