@@ -529,6 +529,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 dataset.map_to_ids(token_mapper)
 
             tensorlist: list[torch.Tensor]
+            provided = 0
             for (
                 pred_probs, attention_logits,
                 additional) in trainer.predict_batched(
@@ -539,6 +540,8 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                     return_logits=return_logits,
                     return_label_ids=return_label_ids,
                     to_device="cpu"):
+
+                provided += len(pred_probs)
 
                 if trainer.config.device != "cpu":
                     attention_logits = {
@@ -562,6 +565,9 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                     "masks_setting": masks_setting,
                     **additional
                 }
+            assert len(df) == provided, (
+                "trainer.predict_batched did not provide the correct number"
+                f" of sentences. Expected: {len(df)}, got: {provided}.")
 
 
 class SplitTokMetricMakerMask(SplitTokMetricMaker):
