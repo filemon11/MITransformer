@@ -1331,7 +1331,7 @@ class LMTrainer():
             additional: models.AdditionalResults
             for i, batch in enumerate(tqdm(loader, desc="Prediction batches")):
                 print("Rank:", self.config.rank, "Batch:", i, "Length:", batch["input_ids"].shape[0])
-                if batch["input_ids"].shape[0] > 0:
+                if len(batch) > 0:
                     unpadded_arc_logits = {}
                     unpadded_additional = {}
                     batch = self.batch_to(batch, device=self.config.device)

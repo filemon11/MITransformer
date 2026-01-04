@@ -64,16 +64,19 @@ class Collate(CollateBase):
                 else:
                     output[key].append(content)     # type: ignore
 
-        def dict_to_torch(
+        def dict_to_torch_(
                 dictionary: dict[str, Any],
                 keys_to_torch: set[str]) -> None:
             for key in keys_to_torch:
+                if key not in dictionary:
+                    continue
                 if isinstance(dictionary[key], np.ndarray):
                     dictionary[key] = torch.from_numpy(
                         dictionary[key].astype(np.int64))
 
                 elif isinstance(dictionary[key], dict):
-                    dict_to_torch(dictionary[key], set(dictionary[key].keys()))
+                    dict_to_torch_(
+                        dictionary[key], set(dictionary[key].keys()))
 
                 elif dictionary[key] is None:
                     continue
@@ -91,7 +94,7 @@ class Collate(CollateBase):
                             np.array(dictionary[key]).astype(np.int64))
 
         output_dict: dict[str, Any] = dict(output)
-        dict_to_torch(output_dict, self.keys_to_torch)
+        dict_to_torch_(output_dict, self.keys_to_torch)
         return output_dict
 
 
