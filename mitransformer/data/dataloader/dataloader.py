@@ -214,6 +214,7 @@ def get_loader(
         else:
             sampl = sampler.DistributedSampler(
                 ds,
+                batch_size=batch_size // world_size,
                 num_replicas=world_size,
                 rank=rank,
                 shuffle=shuffle,
@@ -243,7 +244,7 @@ def get_loader(
                 pad_mask_with,
                 connect_with_dummy=connect_with_dummy,
                 connect_with_self=connect_with_self),
-            sampler=sampl,
+            batch_sampler=sampl,
             pin_memory=True,
             num_workers=n_workers,
             persistent_workers=True if n_workers > 0 else False)

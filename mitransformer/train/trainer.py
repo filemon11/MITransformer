@@ -1329,120 +1329,135 @@ class LMTrainer():
             logits: torch.Tensor
             arc_logits: dict[str, torch.Tensor] | None
             additional: models.AdditionalResults
-            for batch in tqdm(loader, desc="Prediction batches"):
-                unpadded_arc_logits = {}
-                unpadded_additional = {}
-                batch = self.batch_to(batch, device=self.config.device)
+            for i, batch in enumerate(tqdm(loader, desc="Prediction batches")):
+                print("Rank:", self.config.rank, "Batch:", i, "Length:", batch["input_ids"].shape[0])
+                if batch["input_ids"].shape[0] > 0:
+                    unpadded_arc_logits = {}
+                    unpadded_additional = {}
+                    batch = self.batch_to(batch, device=self.config.device)
 
-                if return_arc_logits is None:
-                    return_arc_logits = not self.config.combined_loss
-                if return_proj_states is None:
-                    return_proj_states = (
-                        self.config.combined_loss
-                        and self.config.distr_mode == "att-n")
-                if return_att is None:
-                    return_att = (
-                        self.config.combined_loss
-                        and self.config.distr_mode == "att")
-                if return_embeddings is None:
-                    return_embeddings = (
-                        self.config.combined_loss
-                        and self.config.losses is not None
-                        and "cosine" in self.config.losses
-                    )
-                if return_activations is None:
-                    return_activations = (
-                        self.config.combined_loss
-                        and self.config.losses is not None
-                        and "cosine" in self.config.losses
-                    )
+                    if return_arc_logits is None:
+                        return_arc_logits = not self.config.combined_loss
+                    if return_proj_states is None:
+                        return_proj_states = (
+                            self.config.combined_loss
+                            and self.config.distr_mode == "att-n")
+                    if return_att is None:
+                        return_att = (
+                            self.config.combined_loss
+                            and self.config.distr_mode == "att")
+                    if return_embeddings is None:
+                        return_embeddings = (
+                            self.config.combined_loss
+                            and self.config.losses is not None
+                            and "cosine" in self.config.losses
+                        )
+                    if return_activations is None:
+                        return_activations = (
+                            self.config.combined_loss
+                            and self.config.losses is not None
+                            and "cosine" in self.config.losses
+                        )
 
-                with torch.autocast(
-                        self.device_type, dtype=torch.float16,
-                        enabled=self.use_amp):
-                    logits, arc_logits, additional = self.transformerlm(
-                        **batch,
-                        return_arc_logits=return_arc_logits,
-                        return_proj_states=return_proj_states,
-                        return_att=return_att,
-                        return_embeddings=return_embeddings,
-                        return_activations=return_activations)
+                    with torch.autocast(
+                            self.device_type, dtype=torch.float16,
+                            enabled=self.use_amp):
+                        logits, arc_logits, additional = self.transformerlm(
+                            **batch,
+                            return_arc_logits=return_arc_logits,
+                            return_proj_states=return_proj_states,
+                            return_att=return_att,
+                            return_embeddings=return_embeddings,
+                            return_activations=return_activations)
 
-                self.run_hooks(batch, (logits, arc_logits))
-                labels = batch["label_ids"]
+                    self.run_hooks(batch, (logits, arc_logits))
+                    labels = batch["label_ids"]
 
-                if return_logits:
-                    unpadded_additional["logits"] = (
-                            functions.unpad(
-                                logits,
-                                labels, ignore_index
+                    if return_logits:
+                        unpadded_additional["logits"] = (
+                                functions.unpad(
+                                    logits,
+                                    labels, ignore_index
+                                    )
+                                )
+
+                    if make_prob:
+                        logits = functions.logits_to_probs(
+                            logits,
+                            not self.config.discriminative)
+
+                    if only_true:
+                        logits = functions.select_true(
+                            logits, labels, ignore_index)
+
+                    unpadded_logits = (
+                        functions.unpad(logits, labels, ignore_index))
+
+                    if arc_logits is not None:
+                        for key in arc_logits.keys():
+                            unpadded_arc_logits[key] = (
+                                functions.unpad_masks(
+                                    arc_logits[key].swapaxes(0, 1),
+                                    labels, ignore_index))
+
+                    additional_key: models.AdditionalKeys
+                    for additional_key in ("proj_states", "att"):
+                        if additional_key in additional:  # type: ignore
+                            num_after_square = 0
+                            if additional_key in ("proj_states",):
+                                num_after_square = 1
+                            unpadded_additional[additional_key] = (
+                                functions.unpad_masks(
+                                    additional[
+                                        additional_key
+                                        ].swapaxes(  # type: ignore
+                                            0, 1),
+                                    labels, ignore_index,
+                                    num_after_square=num_after_square))
+
+                    for additional_key in ("embeddings", "activations"):
+                        if additional_key in additional:  # type: ignore
+                            unpadded_additional[additional_key] = (
+                                functions.unpad(
+                                    additional[additional_key],  # type: ignore
+                                    labels, ignore_index
                                 )
                             )
+                            # probably removes embedding of <EOS> and
+                            # prediction of first padding token.
+                            # <EOS> dot pred(.) is part of loss.
 
-                if make_prob:
-                    logits = functions.logits_to_probs(
-                        logits,
-                        not self.config.discriminative)
-
-                if only_true:
-                    logits = functions.select_true(
-                        logits, labels, ignore_index)
-
-                unpadded_logits = (
-                    functions.unpad(logits, labels, ignore_index))
-
-                if arc_logits is not None:
-                    for key in arc_logits.keys():
-                        unpadded_arc_logits[key] = (
-                            functions.unpad_masks(
-                                arc_logits[key].swapaxes(0, 1),
-                                labels, ignore_index))
-
-                additional_key: models.AdditionalKeys
-                for additional_key in ("proj_states", "att"):
-                    if additional_key in additional:  # type: ignore
-                        num_after_square = 0
-                        if additional_key in ("proj_states",):
-                            num_after_square = 1
-                        unpadded_additional[additional_key] = (
-                            functions.unpad_masks(
-                                additional[
-                                    additional_key].swapaxes(  # type: ignore
-                                        0, 1),
-                                labels, ignore_index,
-                                num_after_square=num_after_square))
-
-                for additional_key in ("embeddings", "activations"):
-                    if additional_key in additional:  # type: ignore
-                        unpadded_additional[additional_key] = (
+                    if return_label_ids:
+                        unpadded_additional["label_ids"] = (
                             functions.unpad(
-                                additional[additional_key],  # type: ignore
-                                labels, ignore_index
+                                labels, labels, ignore_index
                             )
                         )
-                        # probably removes embedding of <EOS> and
-                        # prediction of first padding token.
-                        # <EOS> dot pred(.) is part of loss.
 
-                if return_label_ids:
-                    unpadded_additional["label_ids"] = (
-                        functions.unpad(
-                            labels, labels, ignore_index
-                        )
-                    )
+                    if to_device is not None:
+                        unpadded_arc_logits = {
+                            key: [
+                                tensor.to(to_device)for tensor in tensorlist]
+                            for key, tensorlist in unpadded_arc_logits.items()}
 
-                if to_device is not None:
+                        unpadded_logits = [
+                            tensor.to(to_device) for tensor in unpadded_logits]
+
+                        for key, tensorlist in unpadded_additional.items():
+                            unpadded_additional[key] = [  # type: ignore
+                                tensor.to(to_device)
+                                for tensor in tensorlist]  # type: ignore
+                else:
+                    unpadded_logits = []
+                    # should already be initialised. We only
+                    # Encounter empty batch after real batch (except if
+                    # dataset size is smaller than number of GPUs).
                     unpadded_arc_logits = {
-                        key: [tensor.to(to_device) for tensor in tensorlist]
-                        for key, tensorlist in unpadded_arc_logits.items()}
-
-                    unpadded_logits = [
-                        tensor.to(to_device) for tensor in unpadded_logits]
-
-                    for key, tensorlist in unpadded_additional.items():
-                        unpadded_additional[key] = [  # type: ignore
-                            tensor.to(to_device)
-                            for tensor in tensorlist]  # type: ignore
+                        key: [] for key
+                        in unpadded_arc_logits.keys()}  # type: ignore
+                    unpadded_additional = {
+                        key: [] for key
+                        in unpadded_additional.keys()}  # type: ignore
                 # This should collect the data across all processes.
                 # The distributed sampler chunked it in an interleaved
                 # fashion and did not shuffle it, so getting back
@@ -1459,7 +1474,7 @@ class LMTrainer():
                     unpadded_logits, unpadded_arc_logits_out,
                     cast(AdditionalPrediction, unpadded_additional_out))
         assert provided == total_sentences, (  # type: ignore
-            "Number processed sentences does not equal length of dataset. "
+            "Number of processed sentences does not equal length of dataset. "
             f"Expected: {total_sentences}, Received: {provided}."
         )
 

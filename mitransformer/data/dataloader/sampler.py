@@ -15,10 +15,7 @@ The masks use boolean arrays/tensors.
 
 import torch
 from torch.utils.data.dataset import Dataset
-from torch.utils.data import BatchSampler
-from torch.utils.data.distributed import (
-    DistributedSampler as BaseDistributedSampler,
-    _T_co)
+from torch.utils.data import BatchSampler, Sampler
 import torch.distributed as dist
 
 import numpy as np
@@ -228,7 +225,7 @@ class DistributedBySequenceLengthSampler(BatchSampler):
         self.epoch = epoch
 
 
-class DistributedSampler(BaseDistributedSampler):
+class DistributedSampler(Sampler):
     """Is the standard torch implementation with the
     addition of a ``fill_incomplete`` argument.
     If false and ``drop_last`` is also false,
@@ -237,6 +234,7 @@ class DistributedSampler(BaseDistributedSampler):
     def __init__(
             self,
             dataset: Dataset,
+            batch_size: int,
             num_replicas: Optional[int] = None,
             rank: Optional[int] = None,
             shuffle: bool = True,
@@ -244,13 +242,54 @@ class DistributedSampler(BaseDistributedSampler):
             drop_last: bool = False,
             fill_incomplete: bool = True,
             ) -> None:
-        super().__init__(
-            dataset, num_replicas, rank, shuffle, seed,
-            drop_last
-        )
-        self.fill_incomplete = fill_incomplete
+        if num_replicas is None:
+            if not dist.is_available():
+                raise RuntimeError(
+                    "Requires distributed package to be available")
+            num_replicas = dist.get_world_size()
+        if rank is None:
+            if not dist.is_available():
+                raise RuntimeError(
+                    "Requires distributed package to be available")
+            rank = dist.get_rank()
+        if rank >= num_replicas or rank < 0:
+            raise ValueError(
+                f"Invalid rank {rank}, "
+                f"rank should be in the interval [0, {num_replicas - 1}]"
+            )
+        self.dataset = dataset
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.epoch = 0
+        self.drop_last = drop_last
+        # If the dataset length is evenly divisible by # of replicas,
+        # then there
+        # is no need to drop any data, since the dataset will be split equally.
+        if self.drop_last and len(
+                self.dataset  # type: ignore[arg-type]
+                ) % self.num_replicas != 0:
+            # Split to nearest available length that is evenly divisible.
+            # This is to ensure each rank receives the same amount of data when
+            # using this Sampler.
+            self.num_samples = math.ceil(
+                (len(
+                    self.dataset)  # type: ignore[arg-type]
+                    - self.num_replicas)
+                / self.num_replicas
+            )
+        else:
+            self.num_samples = math.ceil(
+                len(
+                    self.dataset)  # type: ignore[arg-type]
+                / self.num_replicas)
+        self.total_size = self.num_samples * self.num_replicas
+        self.shuffle = shuffle
+        self.seed = seed
 
-    def __iter__(self) -> Iterator[_T_co]:  # type: ignore
+        self.fill_incomplete = fill_incomplete
+        self.batch_size = batch_size
+
+    def __iter__(self) -> Iterator[list[int]]:
         if self.shuffle:
             # deterministically shuffle based on epoch and seed
             g = torch.Generator()
@@ -281,7 +320,34 @@ class DistributedSampler(BaseDistributedSampler):
                     self.dataset), (  # type: ignore[arg-type]
                 f"Faulty length in sampler: {len(indices)} but expected "
                 f"{len(self.dataset)}.")  # type: ignore[arg-type]
+
+        max_len_indices = math.ceil(len(indices) / self.num_replicas)
+        max_num_batches = math.ceil(max_len_indices / self.batch_size)
+
         # subsample
         indices = indices[self.rank:: self.num_replicas]
 
-        return iter(indices)  # type: ignore
+        batches = [indices[i:i+self.batch_size] for i in range(
+            0, len(indices), self.batch_size)]
+        if len(batches) < max_num_batches:
+            batches += [[]]*(max_num_batches-len(batches))
+
+        for batch in batches:
+            yield batch
+
+    def __len__(self) -> int:
+        return self.num_samples
+
+    def set_epoch(self, epoch: int) -> None:
+        r"""
+        Set the epoch for this sampler.
+
+        When :attr:`shuffle=True`, this ensures all replicas
+        use a different random ordering for each epoch. Otherwise,
+        the next iteration of this
+        sampler will yield the same ordering.
+
+        Args:
+            epoch (int): Epoch number.
+        """
+        self.epoch = epoch
