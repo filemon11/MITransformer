@@ -150,7 +150,9 @@ class PsyLingObjective(objective.Objective):
                 arc_distr_mode=self.arguments.distr_mode,
                 include_current=self.arguments.include_current,
                 length_weighted=self.arguments.length_weighted,
-                return_arc_logits=False,)
+                return_arc_logits=False,
+                use_ddp=False,
+                rank=None)
             # TODO: allow unmasked dataset to be used
 
             # Untokenisation

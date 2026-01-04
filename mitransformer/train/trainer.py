@@ -1329,10 +1329,8 @@ class LMTrainer():
             logits: torch.Tensor
             arc_logits: dict[str, torch.Tensor] | None
             additional: models.AdditionalResults
-            for i, batch in enumerate(tqdm(loader, desc="Prediction batches")):
-                print("Rank:", self.config.rank, "Batch:", i)
+            for batch in tqdm(loader, desc="Prediction batches"):
                 if len(batch) > 0:
-                    print("Length:", batch["input_ids"].shape[0])
                     unpadded_arc_logits = {}
                     unpadded_additional = {}
                     batch = self.batch_to(batch, device=self.config.device)
@@ -1449,7 +1447,6 @@ class LMTrainer():
                                 tensor.to(to_device)
                                 for tensor in tensorlist]  # type: ignore
                 else:
-                    print("Length:", 0)
                     unpadded_logits = []
                     # should already be initialised. We only
                     # Encounter empty batch after real batch (except if

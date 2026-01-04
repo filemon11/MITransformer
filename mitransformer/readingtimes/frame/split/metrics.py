@@ -270,7 +270,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             return_logits: bool = True,
             return_label_ids: bool = True,
             use_ddp: bool = False,
-            rank: int = 0,
+            rank: int | None = None,
             tempdir: str = ".temp",
             use_mmap: bool = False,
             *args, **kwargs
@@ -279,7 +279,6 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
         # NOTE: This is a real burden on memory since the attention matrices
         # are loaded into memory for the whole dataset and remain in the frame.
         # TODO: Write them to disk in batches
-
         if dataset is None:
             assert self.conllu_col is not None
 
@@ -343,6 +342,10 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             # huggingface weights.)
 
         else:
+            trainer_use_ddp = trainer.config.use_ddp
+            trainer_rank = trainer.config.rank
+            trainer.config.use_ddp = use_ddp
+            trainer.config.rank = rank
             if use_mmap:
                 pathlib.Path(tempdir).mkdir(parents=True, exist_ok=True)
             assert dataset is not None
@@ -377,18 +380,6 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                     return_logits=return_logits,
                     return_label_ids=return_label_ids,
                     to_device="cpu"):
-
-                if trainer.config.device != "cpu":
-                    attention_logits = {
-                        key: [tensor.to("cpu") for tensor in tensorlist]
-                        for key, tensorlist in attention_logits.items()}
-
-                    pred_probs = [tensor.to("cpu") for tensor in pred_probs]
-
-                    for key, tensorlist in additional.items():  # type: ignore
-                        additional[key] = [  # type: ignore
-                            tensor.to("cpu")
-                            for tensor in tensorlist]  # type: ignore
 
                 probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
                 probs_global.extend(probs)
@@ -452,6 +443,9 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 attention_logits_output = attention_logits_global
                 additional_output = additional_global
 
+            trainer.config.use_ddp = trainer_use_ddp
+            trainer.config.rank = trainer_rank
+
             if use_mmap and use_ddp:
                 dist.barrier()
 
@@ -467,7 +461,8 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
     def batched_call(
             self, df: pd.DataFrame,
             batch_size: int,
-            args: list[Any], kwargs: dict[str, Any]
+            args: list[Any],
+            kwargs: dict[str, Any]
             ) -> Iterable[tuple[pd.Series, dict[str, Any]]]:
 
         trainer: LMTrainer | str = kwargs["trainer"]
@@ -496,6 +491,12 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
         return_label_ids: bool = True
         if "return_label_ids" in kwargs:
             return_label_ids = kwargs["return_label_ids"]
+        use_ddp: bool = False
+        if "use_ddp" in kwargs:
+            use_ddp = kwargs["use_ddp"]
+        rank: int | None = None
+        if "rank" in kwargs:
+            rank = kwargs["rank"]
 
         if dataset is None:
             assert self.conllu_col is not None
@@ -516,6 +517,11 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 " surprisal metric maker.")
 
         else:
+            trainer_use_ddp = trainer.config.use_ddp
+            trainer_rank = trainer.config.rank
+            trainer_batch_size = trainer.config.batch_size
+            trainer.config.use_ddp = use_ddp
+            trainer.config.rank = rank
             trainer.config.batch_size = batch_size
 
             assert dataset is not None
@@ -528,7 +534,6 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
 
                 dataset.map_to_ids(token_mapper)
 
-            tensorlist: list[torch.Tensor]
             provided = 0
             for (
                 pred_probs, attention_logits,
@@ -543,18 +548,6 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
 
                 provided += len(pred_probs)
 
-                if trainer.config.device != "cpu":
-                    attention_logits = {
-                        key: [tensor.to("cpu") for tensor in tensorlist]
-                        for key, tensorlist in attention_logits.items()}
-
-                    pred_probs = [tensor.to("cpu") for tensor in pred_probs]
-
-                    for key, tensorlist in additional.items():  # type: ignore
-                        additional[key] = [  # type: ignore
-                            tensor.to("cpu")
-                            for tensor in tensorlist]  # type: ignore
-
                 probs = [(-np.log(p[1:-1]+1e-5)).tolist() for p in pred_probs]
                 yield pd.Series(probs), {
                     "attention_logits": attention_logits,
@@ -568,6 +561,10 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             assert len(df) == provided, (
                 "trainer.predict_batched did not provide the correct number"
                 f" of sentences. Expected: {len(df)}, got: {provided}.")
+
+            trainer.config.use_ddp = trainer_use_ddp
+            trainer.config.rank = trainer_rank
+            trainer.config.batch_size = trainer_batch_size
 
 
 class SplitTokMetricMakerMask(SplitTokMetricMaker):
