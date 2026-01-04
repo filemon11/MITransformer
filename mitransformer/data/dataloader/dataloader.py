@@ -14,7 +14,6 @@ The masks use boolean arrays/tensors.
 """
 
 from torch.utils.data import DataLoader as torchDataLoader
-from torch.utils.data.distributed import DistributedSampler
 
 from .. import dataset
 from . import collator, sampler, batches
@@ -209,11 +208,11 @@ def get_loader(
             num_workers=n_workers,)
 
     else:
-        sampl: DistributedSampler | None
+        sampl: sampler.DistributedSampler | None
         if world_size == 1:
             sampl = None
         else:
-            sampl = DistributedSampler(
+            sampl = sampler.DistributedSampler(
                 ds, num_replicas=world_size,
                 rank=rank, shuffle=shuffle, drop_last=droplast,
                 seed=seed)
