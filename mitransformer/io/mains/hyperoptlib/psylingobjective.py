@@ -204,10 +204,10 @@ class PsyLingObjective(objective.Objective):
 
             if self.arguments.average_psyling:
                 # # Remove outliers
-                joined = remove_outliers_per_group(
-                    joined, self.arguments.lme_formula["covariates"],
-                    "Corpus", rank=self.arguments.rank
-                )
+                # joined = remove_outliers_per_group(
+                #     joined, self.arguments.lme_formula["covariates"],
+                #     "Corpus", rank=self.arguments.rank
+                # )
                 # # Scale predictors
                 z_score_per_group_(
                     joined, self.arguments.lme_formula["covariates"],
@@ -215,10 +215,10 @@ class PsyLingObjective(objective.Objective):
                 )
             else:
                 # # Remove outliers
-                joined = remove_outliers(
-                    joined, self.arguments.lme_formula["covariates"],
-                    rank=self.arguments.rank
-                )
+                # joined = remove_outliers(
+                #     joined, self.arguments.lme_formula["covariates"],
+                #     rank=self.arguments.rank
+                # )
                 # # Scale predictors
                 z_score_(
                     joined, self.arguments.lme_formula["covariates"],
