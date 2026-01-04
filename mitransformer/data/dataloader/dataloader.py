@@ -236,8 +236,9 @@ def get_loader(
         return DataLoader(
             ds,
             shuffle=None if sampl is not None else shuffle,
-            batch_size=batch_size // world_size,
-            drop_last=droplast,
+            batch_size=1 if sampl is not None else (
+                batch_size // world_size),
+            drop_last=False if sampl is not None else droplast,
             collate_fn=collator.PaddingCollate(
                 ds.keys_for_tensors,
                 ds.keys_for_padding,
