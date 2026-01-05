@@ -349,7 +349,7 @@ def create_parser() -> argparse.ArgumentParser:
         help=(
             "how many trials to run with random sampling before using TPE."))
     hyperopt_parser.add_argument(
-        '--psyling_eval', type=bool,
+        '--psyling_eval', type=argtypes.str_to_bool,
         default=False,
         help=(
             "use psyling eval (also possible if not optimising for loglik)."))
@@ -382,7 +382,7 @@ def create_parser() -> argparse.ArgumentParser:
         default="naturalstories")
     hyperopt_parser.add_argument(
         '--average_psyling',
-        type=bool,
+        type=argtypes.str_to_bool,
         default=False,
         help=(
             'If True, fits lme separately to each psyling '
@@ -1003,7 +1003,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     settings_group = rt_parser.add_argument_group('settings_group')
     settings_group.add_argument(
-        '--lme', type=bool,
+        '--lme', type=argtypes.str_to_bool,
         default=True,
         help=("Run linear mixed effects evaluation."))
     settings_group.add_argument(
