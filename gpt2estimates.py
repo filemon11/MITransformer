@@ -76,7 +76,7 @@ for j, batch in enumerate(tqdm(dataloader)):
         labels,
         tokeniser.pad_token_id)
 
-    unpadded_output = unpad(-probs.log(), labels, tokeniser.pad_token_id)
+    unpadded_output = unpad(-probs.log2(), labels, tokeniser.pad_token_id)
 
     total_toks = 0
     for i, out_sen in enumerate(unpadded_output):

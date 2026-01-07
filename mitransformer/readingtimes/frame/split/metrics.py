@@ -317,7 +317,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 tokeniser.pad_token_id)
 
             unpadded_output = unpad(
-                -model_outputs.log(), labels, tokeniser.pad_token_id)
+                -model_outputs.log2(), labels, tokeniser.pad_token_id)
 
             surprisals = []
             for i, out_sen in enumerate(unpadded_output):
@@ -381,7 +381,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                     return_label_ids=return_label_ids,
                     to_device="cpu"):
 
-                probs = [(-np.log(p[1:-1])).tolist() for p in pred_probs]
+                probs = [(-np.log2(p[1:-1])).tolist() for p in pred_probs]
                 probs_global.extend(probs)
                 if use_mmap:
                     if not use_ddp or rank == 0:
@@ -548,7 +548,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
 
                 provided += len(pred_probs)
 
-                probs = [(-np.log(p[1:-1]+1e-5)).tolist() for p in pred_probs]
+                probs = [(-np.log2(p[1:-1]+1e-5)).tolist() for p in pred_probs]
                 yield pd.Series(probs), {
                     "attention_logits": attention_logits,
                     "dataset": dataset,

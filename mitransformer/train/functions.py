@@ -44,7 +44,7 @@ def logits_to_surprisal(logits: torch.Tensor,
                         labels: torch.Tensor,
                         ignore_index: int | None = None,
                         softmax: bool = True) -> torch.Tensor:
-    return -torch.log(logits_to_true_probs(
+    return -torch.log2(logits_to_true_probs(
         logits, labels, ignore_index, softmax))
 
 
