@@ -43,9 +43,16 @@ def logits_to_true_probs(
 def logits_to_surprisal(logits: torch.Tensor,
                         labels: torch.Tensor,
                         ignore_index: int | None = None,
-                        softmax: bool = True) -> torch.Tensor:
-    return -torch.log2(logits_to_true_probs(
-        logits, labels, ignore_index, softmax))
+                        softmax: bool = True,
+                        base: Literal["e", 2] = 2) -> torch.Tensor:
+    if base == 2:
+        return -torch.log2(logits_to_true_probs(
+            logits, labels, ignore_index, softmax))
+    elif base == "e":
+        return -torch.log(logits_to_true_probs(
+            logits, labels, ignore_index, softmax))
+    else:
+        raise Exception(f"Base {base} unknown!")
 
 
 def sum_depadded(
@@ -71,7 +78,8 @@ def logits_to_perplexity(
         ignore_index: int,
         softmax: bool = True) -> torch.Tensor:
     # Should we disregard first node (root from dummy?)
-    surprisal = logits_to_surprisal(logits, labels, softmax)
+    surprisal = logits_to_surprisal(
+        logits, labels, softmax, base="e")
     means = mean_depadded(surprisal, labels, ignore_index)
     return torch.exp(means)
 

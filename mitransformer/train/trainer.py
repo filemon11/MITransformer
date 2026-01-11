@@ -876,7 +876,8 @@ class LMTrainer():
                 functions.logits_to_surprisal(
                     logits, labels,
                     ignore_index,
-                    softmax=not self.config.discriminative),
+                    softmax=not self.config.discriminative,
+                    base="e"),
                 labels, ignore_index).sum().detach().cpu().item()
             del labels
 
