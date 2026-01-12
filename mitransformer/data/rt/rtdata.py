@@ -23,12 +23,16 @@ RTCorpus = Literal[
     "frank_SP", "frank_SP_train", "frank_SP_test",
     "meco1", "meco1_train", "meco1_test",
     "meco2", "meco2_train", "meco2_test",
-    "geco", "geco_train", "geco_test"]
+    "geco", "geco_train", "geco_test",
+    "provo", "provo_train", "provo_test",
+]
 
 RTCorpusTypes = Literal["ET", "SP"]
 
 ET_CORPORA = {
-    "frank_ET", "zuco1_1", "zuco1_2", "zuco2_1", "meco1", "meco2", "geco"}
+    "frank_ET", "zuco1_1", "zuco1_2",
+    "zuco2_1", "meco1", "meco2", "geco",
+    "provo"}
 SP_CORPORA = {
     "naturalstories", "frank_SP"}
 NO_SENTENCE_NUM_CORPORA = {"naturalstories", "geco"}
@@ -43,16 +47,17 @@ for constant in (ET_CORPORA, SP_CORPORA, NO_SENTENCE_NUM_CORPORA):
 RTCORPORA = ET_CORPORA | SP_CORPORA
 
 rt_corpus_to_measurements_file: dict[RTCorpus, str] = {
-        "naturalstories": "RT/data/processed_RTs.tsv",
-        "zuco1_1": "zuco/zuco1/task1.csv",
-        "zuco1_2": "zuco/zuco1/task2.csv",
-        "zuco2_1": "zuco/zuco2/task1.csv",
-        "frank_ET": "frank/eyetracking.RT.txt",
-        "frank_SP": "frank/selfpacedreading.RT.txt",
-        "meco1": "meco/joint_l1_data_trimmed_version2.0.rda",
-        "meco2": "meco/joint_data_trimmed_wave2_version2.0.rda",
-        "geco": "geco/MonolingualReadingData.xlsx"
-    }
+    "naturalstories": "RT/data/processed_RTs.tsv",
+    "zuco1_1": "zuco/zuco1/task1.csv",
+    "zuco1_2": "zuco/zuco1/task2.csv",
+    "zuco2_1": "zuco/zuco2/task1.csv",
+    "frank_ET": "frank/eyetracking.RT.txt",
+    "frank_SP": "frank/selfpacedreading.RT.txt",
+    "meco1": "meco/joint_l1_data_trimmed_version2.0.rda",
+    "meco2": "meco/joint_data_trimmed_wave2_version2.0.rda",
+    "geco": "geco/MonolingualReadingData.xlsx",
+    "provo": "provo/Provo_Corpus-Eyetracking_Data.csv"
+}
 
 
 rt_corpus_to_prepare_measurements_func: dict[
@@ -66,6 +71,7 @@ rt_corpus_to_prepare_measurements_func: dict[
         "meco1": corpora.prepare_RTs_meco1,
         "meco2": corpora.prepare_RTs_meco2,
         "geco": corpora.prepare_RTs_geco,
+        "provo": corpora.prepare_RTs_provo
     }
 
 
@@ -79,6 +85,7 @@ rt_corpus_to_prepare_text_func: dict[RTCorpus, corpora.CorpusLoader] = {
         "meco1": corpora.load_meco1,
         "meco2": corpora.load_meco2,
         "geco": corpora.load_geco,
+        "provo": corpora.load_provo,
     }
 
 
@@ -95,6 +102,7 @@ rt_corpus_to_split_func: dict[RTCorpus, corpora.CorpusSplitter] = {
         "meco1": corpora.split_meco1,
         "meco2": corpora.split_meco2,
         "geco": corpora.split_geco,
+        "provo": corpora.split_provo,
     }
 
 
@@ -117,7 +125,8 @@ rt_corpus_to_text_file: dict[RTCorpus, str] = {
         "frank_SP": "frank/stimuli.txt",
         "meco1": "meco/joint_l1_data_trimmed_version2.0.rda",
         "meco2": "meco/joint_data_trimmed_wave2_version2.0.rda",
-        "geco": "geco/MonolingualReadingData.xlsx"
+        "geco": "geco/MonolingualReadingData.xlsx",
+        "provo": "provo/Provo_Corpus-Eyetracking_Data.csv"
     }
 
 

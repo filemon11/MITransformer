@@ -22,7 +22,7 @@ def line_to_components(line: str) -> Tuple[str, str, str, str]:
     return story_id, word_id, token_num, token
 
 
-def split_meco(
+def split_provo(
         input_file: str,
         proportion: float,
         out_path1: str | None = None,
@@ -63,36 +63,6 @@ def split_meco(
         out_path1)
     df2.to_csv(
         out_path2)
-
-
-def split_meco1(
-        input_file: str,
-        proportion: float,
-        out_path1: str | None = None,
-        out_path2: str | None = None,
-        verbose: bool = False,
-        lang: str = "en"
-        ) -> None:
-    split_meco(
-        input_file, proportion,
-        out_path1, out_path2,
-        verbose, lang
-    )
-
-
-def split_meco2(
-        input_file: str,
-        proportion: float,
-        out_path1: str | None = None,
-        out_path2: str | None = None,
-        verbose: bool = False,
-        lang: str = "en_uk"
-        ) -> None:
-    split_meco(
-        input_file, proportion,
-        out_path1, out_path2,
-        verbose, lang
-    )
 
 
 def load_provo(
@@ -146,9 +116,6 @@ def load_provo(
     df = df[[
         "Word", "Text_ID", "Sentence_Number",
         "Word_In_Sentence_Number"]].drop_duplicates()
-    df["Text_ID"] = df["Text_ID"].astype(int)
-    df["Sentence_Number"] = df["Sentence_Number"].astype(int)
-    df["Word_In_Sentence_Number"] = df["Word_In_Sentence_Number"].astype(int)
 
     # Sort to be sure the order is right
     df.sort_values(by=[
@@ -186,8 +153,12 @@ def load_provo(
         "Text_ID"].astype(str) + "_" + df["Sentence_Number"].astype(str)
 
     # Remove sentences that contain NA values
-    remove_sentence_ids = df[df["Word"].isna]["Sentence_ID"].unique()
+    remove_sentence_ids = df[df["Word"].isna()]["Sentence_ID"].unique()
     df = df[~df["Sentence_ID"].isin(remove_sentence_ids)]
+
+    # Removes 80.42 percent of sentences
+
+    df["Word_In_Sentence_Number"] = df["Word_In_Sentence_Number"].astype(int)
 
     return (
         df["Word"].to_list(),
@@ -227,16 +198,14 @@ def prepare_RTs_provo(
     # sentence boundaries into the language model, we might want to
     # return three columns: story id, sentence num, word num
 
-    df["Text_ID"] = df["Text_ID"].astype(int)
-    df["Sentence_Number"] = df["Sentence_Number"].astype(int)
-    df["Word_In_Sentence_Number"] = df["Word_In_Sentence_Number"].astype(int)
-
     df["Sentence_ID"] = df[
         "Text_ID"].astype(str) + "_" + df["Sentence_Number"].astype(str)
 
     # Remove sentences that contain NA values
-    remove_sentence_ids = df[df["Word"].isna]["Sentence_ID"].unique()
+    remove_sentence_ids = df[df["Word"].isna()]["Sentence_ID"].unique()
     df = df[~df["Sentence_ID"].isin(remove_sentence_ids)]
+
+    df["Word_In_Sentence_Number"] = df["Word_In_Sentence_Number"].astype(int)
 
     df.rename(columns={
         "Sentence_ID": "item",
@@ -244,7 +213,8 @@ def prepare_RTs_provo(
         "Participant_ID": "WorkerId",
         "IA_REGRESSION_PATH_DURATION": "GPT",
         "IA_FIRST_FIXATION_DURATION": "FFD",
-        "IA_FIRST_RUN_DWELL_TIME": "GD"},
+        "IA_FIRST_RUN_DWELL_TIME": "GD",
+        "Word": "word"},
         inplace=True)
 
     df["Corpus"] = "provo"
