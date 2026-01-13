@@ -42,9 +42,6 @@ def split_provo(
 
     df: pd.DataFrame = pd.read_csv(input_file)
 
-    # Filter language
-    df = df[df["lang"] == lang]
-
     # only these are necessary
     df = df[[
         "Word", "Text_ID", "Sentence_Number", "Word_In_Sentence_Number",]]
