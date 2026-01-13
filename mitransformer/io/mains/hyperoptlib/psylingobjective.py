@@ -194,12 +194,13 @@ class PsyLingObjective(objective.Objective):
             joined["item"] = joined["Corpus"] + joined["item"].astype(str)
             joined["WorkerId"] = joined["Corpus"] + joined["WorkerId"]
 
-            relevant = [
+            relevant = {
                 "Corpus",
                 self.arguments.lme_formula["to_predict"],
                 *self.arguments.lme_formula["covariates"],
-                *self.arguments.lme_formula["random_effects"],]
-            joined = joined[relevant]
+                *self.arguments.lme_formula["random_effects"],
+            }
+            joined = joined[list(relevant)]
             joined.dropna(inplace=True)
 
             if self.arguments.average_psyling:

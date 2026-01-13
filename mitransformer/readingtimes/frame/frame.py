@@ -274,19 +274,9 @@ def add_column_(
 
     if row_selection is not None:
         if colname not in list_frame.columns:
-            list_frame[colname] = [
-                np.array([np.nan], dtype=np.float64)]*len(list_frame)
-        series = list_frame[colname].copy()
-        try:
-            if isinstance(content[0][0], numbers.Number):
-                content = [
-                    np.array(li, dtype=np.float64)  # type: ignore
-                    for li in content]  # type: ignore
-            elif isinstance(content[0], np.ndarray):
-                content = [
-                    arr.astype(np.float64) for arr in content]  # type: ignore
-        except KeyError:
-            pass
+            series = np.empty(len(list_frame), dtype=object)
+            list_frame[colname] = series
+        series = list_frame[colname].copy()  # type: ignore
         series.iloc[row_selection] = content  # type: ignore
         list_frame[colname] = series
     else:
