@@ -40,7 +40,7 @@ def split_provo(
     if out_path2 is None:
         out_path2 = utils.create_suffixed_filepath(input_file, "test")
 
-    df: pd.DataFrame = pd.read_csv(input_file)
+    df: pd.DataFrame = pd.read_csv(input_file, encoding="ISO-8859-1")
 
     # only these are necessary
     df = df[[
@@ -57,9 +57,9 @@ def split_provo(
     df2 = df[~mask]
 
     df1.to_csv(
-        out_path1)
+        out_path1, encoding="ISO-8859-1")
     df2.to_csv(
-        out_path2)
+        out_path2, encoding="ISO-8859-1")
 
 
 def load_provo(
@@ -106,13 +106,11 @@ def load_provo(
     if token_mapper_dir is not None:
         token_mapper = tokeniser.TokenMapper.load(token_mapper_dir)
 
-    df: pd.DataFrame = pd.read_csv(input_file)
+    df: pd.DataFrame = pd.read_csv(input_file, encoding="ISO-8859-1")
 
-    # Remove duplicates because we are only interested in
-    # the text here
     df = df[[
         "Word", "Text_ID", "Sentence_Number",
-        "Word_In_Sentence_Number"]].drop_duplicates()
+        "Word_In_Sentence_Number"]]
 
     # Sort to be sure the order is right
     df.sort_values(by=[
@@ -149,12 +147,6 @@ def load_provo(
     df["Sentence_ID"] = df[
         "Text_ID"].astype(str) + "_" + df["Sentence_Number"].astype(str)
 
-    # Remove sentences that contain NA values
-    remove_sentence_ids = df[df["Word"].isna()]["Sentence_ID"].unique()
-    df = df[~df["Sentence_ID"].isin(remove_sentence_ids)]
-
-    # Removes 80.42 percent of sentences
-
     df["Word_In_Sentence_Number"] = df["Word_In_Sentence_Number"].astype(int)
 
     return (
@@ -181,7 +173,7 @@ def prepare_RTs_provo(
         input_file: str, output_file: str | None = None,
         ) -> None | pd.DataFrame:
 
-    df: pd.DataFrame = pd.read_csv(input_file)
+    df: pd.DataFrame = pd.read_csv(input_file, encoding="ISO-8859-1")
 
     # This corpus comes with story ids, sentences numbers (per story)
     # and word numbers (also per story, i.e. zone in story).
@@ -198,9 +190,10 @@ def prepare_RTs_provo(
     df["Sentence_ID"] = df[
         "Text_ID"].astype(str) + "_" + df["Sentence_Number"].astype(str)
 
-    # Remove sentences that contain NA values
-    remove_sentence_ids = df[df["Word"].isna()]["Sentence_ID"].unique()
-    df = df[~df["Sentence_ID"].isin(remove_sentence_ids)]
+    # # Remove sentences that contain NA values
+    # remove_sentence_ids = df[df["Word"].isna()]["Sentence_ID"].unique()
+    # df = df[~df["Sentence_ID"].isin(remove_sentence_ids)]
+    # Removes 80.42 percent of sentences
 
     df["Word_In_Sentence_Number"] = df["Word_In_Sentence_Number"].astype(int)
 
