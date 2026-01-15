@@ -180,7 +180,7 @@ def load_zuco(
     if token_mapper_dir is not None:
         token_mapper = tokeniser.TokenMapper.load(token_mapper_dir)
 
-    df: pd.DataFrame = pd.read_csv(
+    df: pd.DataFrame = pd.read_csv(     # type: ignore
         input_file, keep_default_na=False, na_values=None)
 
     df["Word"] = df["Word"].astype(str)
