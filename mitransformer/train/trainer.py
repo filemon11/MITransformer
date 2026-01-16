@@ -1098,14 +1098,16 @@ class LMTrainer():
                     else:
                         evals_without_improvement += 1
 
-                    info(0, logger, (
-                        f"Rank {self.config.rank}: CUDA percentage: "
-                        + str(
-                            torch.cuda.memory_allocated(self.config.device)
-                            / torch.cuda.max_memory_allocated(
-                                self.config.device))))
-                    free, total = torch.cuda.mem_get_info(self.config.device)
-                    mem_used_MB = (total - free) / 1024 ** 2
+                    if self.config.device != "cpu":
+                        for rank in range(self.config.world_size):
+                            info(self.config.rank, logger, (
+                                f"Rank {rank}: CUDA percentage: "
+                                + str(
+                                    torch.cuda.memory_allocated(rank)
+                                    / torch.cuda.max_memory_allocated(
+                                        rank))))
+                            free, total = torch.cuda.mem_get_info(rank)
+                            mem_used_MB = (total - free) / 1024 ** 2
                     info(
                         0, logger,
                         f"Rank {self.config.rank}: "
