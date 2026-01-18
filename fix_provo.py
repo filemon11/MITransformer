@@ -32,5 +32,38 @@ def gen_wisnum():
         yield new_wisnum
         last_wisnum = new_wisnum
 
+real_word_in_sentence_number = list(gen_wisnum())
 
-pd.DataFrame({"Text_ID": real_textnum, "Word_In_Sentence_Number": gen_wisnum(), "Word": real_sep}).to_csv("Provo_Corpus-Eyetracking_Data_Words.csv", encoding="ISO-8859-1")
+def gen_sentence_num(wisnum, textnum):
+    wis_iter = iter(wisnum)
+    tn_iter = iter(textnum)
+    current_wis = next(wis_iter)
+    current_tn = next(tn_iter)
+
+    current_sentnum = 1
+
+    try:
+        while True:
+            next_wis = next(wis_iter)
+            next_tn = next(tn_iter)
+            yield current_sentnum
+            if next_tn > current_tn:
+                current_sentnum = 1
+            elif next_wis < current_wis:
+                # does not work if sentences with only one word exist
+                current_sentnum += 1
+
+            current_wis = next_wis
+            current_tn = next_tn
+    except StopIteration:
+        yield current_sentnum
+
+real_sentnum = list(gen_sentence_num(
+        real_word_in_sentence_number,
+        real_textnum))
+
+pd.DataFrame({
+    "Text_ID": real_textnum,
+    "Word_In_Sentence_Number": real_word_in_sentence_number,
+    "Word": real_sep,
+    "Sentence_Number": real_sentnum}).to_csv("Provo_Corpus-Eyetracking_Data_Words.csv", encoding="ISO-8859-1")
