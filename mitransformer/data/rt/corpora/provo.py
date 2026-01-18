@@ -145,7 +145,8 @@ def load_provo(
     # return three columns: story id, sentence num, word num
 
     df["Sentence_ID"] = df[
-        "Text_ID"].astype(str) + "_" + df["Sentence_Number"].astype(str)
+        "Text_ID"].astype(str) + "_" + df[
+            "Sentence_Number"].astype(int).astype(str)
 
     df["Word_In_Sentence_Number"] = df["Word_In_Sentence_Number"].astype(int)
 
@@ -187,13 +188,17 @@ def prepare_RTs_provo(
     # sentence boundaries into the language model, we might want to
     # return three columns: story id, sentence num, word num
 
-    df["Sentence_ID"] = df[
-        "Text_ID"].astype(str) + "_" + df["Sentence_Number"].astype(str)
+    # Remove words that contain NA values
+    df = df.dropna(subset=["Word", "Word_In_Sentence_Number"])
 
-    # # Remove sentences that contain NA values
+    df["Sentence_ID"] = df[
+        "Text_ID"].astype(str) + "_" + df[
+            "Sentence_Number"].astype(int).astype(str)
+
     # remove_sentence_ids = df[df["Word"].isna()]["Sentence_ID"].unique()
     # df = df[~df["Sentence_ID"].isin(remove_sentence_ids)]
     # Removes 80.42 percent of sentences
+    # Removes 3.06 percent
 
     df["Word_In_Sentence_Number"] = df["Word_In_Sentence_Number"].astype(int)
 
@@ -208,7 +213,6 @@ def prepare_RTs_provo(
         inplace=True)
 
     df["Corpus"] = "provo"
-
     df = df[[
         "Corpus", "item", "zone", "WorkerId",
         "word", "GPT", "FFD", "GD"]]

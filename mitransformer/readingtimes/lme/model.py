@@ -29,10 +29,14 @@ def fit_gpboost(
         provided as a covariate. You can be explicit and provide '1' but
         '0' overrides '1'.
     """
+    print(df.columns)
+    print(y_col, predictors, random_effects)
     predictors = list(predictors)
     group_vars: list[str] | None = None
     if random_effects is not None and len(random_effects) > 0:
         group_vars = list(random_effects.keys())
+    print(group_vars)
+    print(df[group_vars])
 
     df = df[
         [y_col, *predictors, *(group_vars if group_vars is not None else [])]
@@ -61,6 +65,7 @@ def fit_gpboost(
             Z = df[flat_names].values
 
         group = df[group_vars].values
+    print(group)
 
     X = build_X(df, predictors)
     y = df[y_col].values
