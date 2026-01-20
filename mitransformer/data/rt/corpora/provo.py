@@ -100,8 +100,8 @@ def load_provo(
     # This will result in all sentences of a story belonging to the same split.
 
     pretokeniser = AutoTokenizer.from_pretrained(
-        "./bert-base-uncased",
-        local_files_only=True).backend_tokenizer.pre_tokenizer  # type: ignore
+        "bert-base-uncased", cache_dir="./cache"
+        ).backend_tokenizer.pre_tokenizer  # type: ignore
 
     token_mapper = None
     if token_mapper_dir is not None:
