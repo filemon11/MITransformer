@@ -76,7 +76,8 @@ def load_frank(
     """
 
     pretokeniser = AutoTokenizer.from_pretrained(
-        "bert-base-uncased").backend_tokenizer.pre_tokenizer  # type: ignore
+        "./bert-base-uncased",
+        local_files_only=True).backend_tokenizer.pre_tokenizer  # type: ignore
 
     token_mapper = None
     if token_mapper_dir is not None:
