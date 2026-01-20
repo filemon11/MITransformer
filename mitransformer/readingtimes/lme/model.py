@@ -61,7 +61,6 @@ def fit_gpboost(
             Z = df[flat_names].values
 
         group = df[group_vars].values
-    print(group)
 
     X = build_X(df, predictors)
     y = df[y_col].values
