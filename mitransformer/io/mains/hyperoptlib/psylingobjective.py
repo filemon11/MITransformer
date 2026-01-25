@@ -631,17 +631,12 @@ def remove_predictor(
         predictors: Iterable[str],
         random_effects: Mapping[
             str, Iterable[str | Literal[0] | Literal[1]]] | None
-        ) -> Tuple[
-            list[str], dict[str, list[str | Literal[0] | Literal[1]]]] | Tuple[
-                list[str], None]:
+        ) -> Tuple[list[str], dict[str, list[str | Literal[0] | Literal[1]]]]:
 
-    predictors_ = [pred for pred in predictors if pred != to_remove]
-    if random_effects is None:
-        return predictors_, None
-
-    random_effects_ = {
+    predictors = [pred for pred in predictors if pred != to_remove]
+    random_effects = {
         group: [pred for pred in preds if pred != to_remove]
         for group, preds in random_effects.items()
     }
 
-    return predictors_, random_effects_
+    return predictors, random_effects
