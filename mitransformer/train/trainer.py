@@ -1081,6 +1081,10 @@ class LMTrainer():
                                         rank) + 1e-6))))
                             free, total = torch.cuda.mem_get_info(rank)
                             mem_used_MB = (total - free) / 1024 ** 2
+                            info(
+                                self.config.rank, logger,
+                                f"Rank {self.config.rank}: "
+                                f"Used CUDA MB: {mem_used_MB}")
 
                     self.init_hooks(eval, "eval", epoch, token_mapper)
                     eval_metric = self._eval(eval)
@@ -1108,11 +1112,6 @@ class LMTrainer():
                         evals_without_improvement = 0
                     else:
                         evals_without_improvement += 1
-
-                    info(
-                        0, logger,
-                        f"Rank {self.config.rank}: "
-                        f"Used CUDA MB: {mem_used_MB}")
 
                     yield {
                         "train": train_metric,
