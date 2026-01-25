@@ -393,6 +393,16 @@ def create_parser() -> argparse.ArgumentParser:
             'corpus using the term "Corpus".'),
     )
     hyperopt_parser.add_argument(
+        '--pred_of_interest',
+        type=argtypes.OptNone(str),
+        default=None,
+        help=(
+            'If provided, fit two LMEs, one including'
+            ' the predictor specified with this parameter'
+            ' and one without and report the difference of the'
+            ' resulting logliks instead of a total loglik.'),
+    )
+    hyperopt_parser.add_argument(
         '--load_psyling_mmap',
         type=argtypes.OptNone(str),
         default=None,

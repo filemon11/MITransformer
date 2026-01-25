@@ -13,7 +13,8 @@ import optuna
 import pandas as pd
 import torch.distributed as dist
 
-from typing import Tuple, Iterable, Sequence, Collection
+from typing import (
+    Tuple, Iterable, Sequence, Collection, Mapping, Literal)
 
 from mitransformer.utils.logmaker import (
     getLogger, info)
@@ -204,23 +205,11 @@ class PsyLingObjective(objective.Objective):
             joined.dropna(inplace=True)
 
             if self.arguments.average_psyling:
-                # # Remove outliers
-                # joined = remove_outliers_per_group(
-                #     joined, self.arguments.lme_formula["covariates"],
-                #     "Corpus", rank=self.arguments.rank
-                # )
-                # # Scale predictors
                 z_score_per_group_(
                     joined, self.arguments.lme_formula["covariates"],
                     "Corpus"
                 )
             else:
-                # # Remove outliers
-                # joined = remove_outliers(
-                #     joined, self.arguments.lme_formula["covariates"],
-                #     rank=self.arguments.rank
-                # )
-                # # Scale predictors
                 z_score_(
                     joined, self.arguments.lme_formula["covariates"],
                 )
@@ -228,7 +217,7 @@ class PsyLingObjective(objective.Objective):
             if self.arguments.average_psyling:
                 measures: list[float] = []
                 for corpus in joined["Corpus"].unique():
-                    lme, d0 = readingtimes.fit_gpboost(
+                    lme1, d1 = readingtimes.fit_gpboost(
                         joined[joined["Corpus"] == corpus],
                         y_col=self.arguments.lme_formula["to_predict"],
                         predictors=self.arguments.lme_formula["covariates"],
@@ -236,14 +225,39 @@ class PsyLingObjective(objective.Objective):
                             "random_effects"]
                     )
 
-                    model_props = readingtimes.get_model_props(lme, len(d0))
+                    model_props = readingtimes.get_model_props(lme1, len(d1))
                     info(self.arguments.rank, logger, f"---{corpus}---")
+                    info(self.arguments.rank, logger, "---LME 1---")
                     print_lme_info(
                         model_props, self.arguments.lme_formula,
                         self.arguments.rank
                     )
-                    del lme
+                    del lme1
                     loglik = -model_props["negloglik_per_row"]
+
+                    if self.arguments.pred_of_interest is not None:
+                        preds, randeffs = remove_predictor(
+                            self.arguments.pred_of_interest,
+                            self.arguments.lme_formula["covariates"],
+                            self.arguments.lme_formula["random_effects"]
+                        )
+                        lme0, d0 = readingtimes.fit_gpboost(
+                            joined[joined["Corpus"] == corpus],
+                            y_col=self.arguments.lme_formula["to_predict"],
+                            predictors=preds,
+                            random_effects=randeffs
+                        )
+
+                        model_props = readingtimes.get_model_props(
+                            lme0, len(d0))
+                        info(self.arguments.rank, logger, "---LME 1---")
+                        print_lme_info(
+                            model_props, self.arguments.lme_formula,
+                            self.arguments.rank
+                        )
+                        del lme0
+                        loglik = loglik + model_props["negloglik_per_row"]
+
                     measures.append(loglik)
 
                     trainer.writer.custom_add_scalar(
@@ -260,20 +274,43 @@ class PsyLingObjective(objective.Objective):
                 loglik = sum(measures) / len(measures)
 
             else:
-                lme, d0 = readingtimes.fit_gpboost(
+                lme0, d0 = readingtimes.fit_gpboost(
                     joined,
                     y_col=self.arguments.lme_formula["to_predict"],
                     predictors=self.arguments.lme_formula["covariates"],
                     random_effects=self.arguments.lme_formula["random_effects"]
                 )
 
-                model_props = readingtimes.get_model_props(lme, len(d0))
+                model_props = readingtimes.get_model_props(lme0, len(d0))
                 print_lme_info(
                     model_props, self.arguments.lme_formula,
                     self.arguments.rank
                 )
-                del lme
+                del lme0
                 loglik = -model_props["negloglik_per_row"]
+
+                if self.arguments.pred_of_interest is not None:
+                    preds, randeffs = remove_predictor(
+                        self.arguments.pred_of_interest,
+                        self.arguments.lme_formula["covariates"],
+                        self.arguments.lme_formula["random_effects"]
+                    )
+                    lme0, d0 = readingtimes.fit_gpboost(
+                        joined[joined["Corpus"] == corpus],
+                        y_col=self.arguments.lme_formula["to_predict"],
+                        predictors=preds,
+                        random_effects=randeffs
+                    )
+
+                    model_props = readingtimes.get_model_props(
+                        lme0, len(d0))
+                    info(self.arguments.rank, logger, "---LME 1---")
+                    print_lme_info(
+                        model_props, self.arguments.lme_formula,
+                        self.arguments.rank
+                    )
+                    del lme0
+                    loglik = loglik + model_props["negloglik_per_row"]
 
             del joined
 
@@ -587,3 +624,19 @@ def print_lme_info(
                     "random_effects"].items()
                 for c in coefs if c not in (1, 0)]
         ))
+
+
+def remove_predictor(
+        to_remove: str,
+        predictors: Iterable[str],
+        random_effects: Mapping[
+            str, Iterable[str | Literal[0] | Literal[1]]] | None
+        ) -> Tuple[list[str], dict[str, list[str | Literal[0] | Literal[1]]]]:
+
+    predictors = [pred for pred in predictors if pred != to_remove]
+    random_effects = {
+        group: [pred for pred in preds if pred != to_remove]
+        for group, preds in random_effects.items()
+    }
+
+    return predictors, random_effects
