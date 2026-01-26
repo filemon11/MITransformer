@@ -11,6 +11,7 @@ from torch.optim import Optimizer
 import torch.nn.functional as F
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import shutil
 
 from pathlib import Path
 import os
@@ -257,7 +258,8 @@ class LMTrainer():
             "Initialised trainer with params:\n")
         info(config.rank, logger, config.info)
 
-    def save(self, legacy: bool = False) -> None:
+    def save(
+            self, legacy: bool = False, steps: int | None = None) -> None:
         assert self.train_config is not None
         if self.use_ddp:
             dist.barrier()
@@ -267,7 +269,10 @@ class LMTrainer():
                 assert isinstance(
                     self.transformerlm.module, models.MITransformerLM)
                 model = self.transformerlm.module
-            dir = os.path.join(self.model_dir, self.train_config.model_name)
+            model_name = self.train_config.model_name
+            if steps is not None:
+                model_name += f"_{steps}"
+            dir = os.path.join(self.model_dir, model_name)
             Path(dir).mkdir(parents=True, exist_ok=True)
             if legacy:
                 torch.save(
@@ -285,11 +290,24 @@ class LMTrainer():
             # overwrites config
             self.train_config.save(os.path.join(dir, "config.json"))
 
+    def copy_best(
+            self, steps: int, model_name: str | None = None) -> None:
+        if model_name is None:
+            model_name = self.config.model_name
+        model_name += f"_{steps}"
+        source_directory = os.path.join(
+            self.model_dir, f"{model_name}_{steps}")
+        destination_directory = os.path.join(self.model_dir, model_name)
+        shutil.copytree(source_directory, destination_directory)
+
     def load_state(
             self, model_name: str | None = None,
+            steps: int | None = None,
             legacy_support: bool = True) -> None:
         if model_name is None:
             model_name = self.config.model_name
+        if steps is not None:
+            model_name += f"_{steps}"
         if (legacy_support
                 and "config" in (loaded_dict := torch.load(
                 os.path.join(self.model_dir, model_name, "model"),
@@ -1102,7 +1120,7 @@ class LMTrainer():
                         best = eval_metric.minval()
                     if eval_metric > best:       # greater means better
                         best = eval_metric
-                        self.save()
+                        self.save(steps=total_steps)
 
                         best_epoch = epoch
                         best_step = total_steps
@@ -1169,6 +1187,7 @@ class LMTrainer():
         del gen
 
         # load best (saved) into transformerlm
+        self.copy_best(steps=best[1])
         self.load_state()
 
         info(
