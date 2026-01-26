@@ -1092,19 +1092,18 @@ class LMTrainer():
                         f"train metric:\n{train_metric.info}")
 
                     if self.config.device != "cpu":
-                        for rank in range(self.config.world_size):
-                            info(self.config.rank, logger, (
-                                f"Rank {rank}: CUDA percentage: "
-                                + str(
-                                    torch.cuda.memory_allocated(rank)
-                                    / (torch.cuda.max_memory_allocated(
-                                        rank) + 1e-6))))
-                            free, total = torch.cuda.mem_get_info(rank)
-                            mem_used_MB = (total - free) / 1024 ** 2
-                            info(
-                                self.config.rank, logger,
-                                f"Rank {self.config.rank}: "
-                                f"Used CUDA MB: {mem_used_MB}")
+                        info(self.config.rank, logger, (
+                            f"Rank {self.config.rank}: CUDA percentage: "
+                            + str(
+                                torch.cuda.memory_allocated(self.config.rank)
+                                / (torch.cuda.max_memory_allocated(
+                                    self.config.rank) + 1e-6))))
+                        free, total = torch.cuda.mem_get_info(self.config.rank)
+                        mem_used_MB = (total - free) / 1024 ** 2
+                        info(
+                            self.config.rank, logger,
+                            f"Rank {self.config.rank}: "
+                            f"Used CUDA MB: {mem_used_MB}")
 
                     self.init_hooks(eval, "eval", epoch, token_mapper)
                     eval_metric = self._eval(eval)
