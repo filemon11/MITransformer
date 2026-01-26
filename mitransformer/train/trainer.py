@@ -1033,6 +1033,7 @@ class LMTrainer():
             pbar_steps = None
 
         epoch = 0
+        eval_steps: int = 0
         for epoch in tqdm(range(1, max_epochs+1), desc="Epochs"):
             self.init_hooks(train, "train", epoch, token_mapper)
             if break_training:
@@ -1057,6 +1058,7 @@ class LMTrainer():
                     pbar_steps.update(1)
 
                 if total_steps % eval_interval == 0:
+                    eval_steps += 1
                     info(
                         self.config.rank,
                         logger,
@@ -1066,7 +1068,7 @@ class LMTrainer():
                                 'inf' if train_config.max_steps
                                 is None  # type: ignore
                                 else str(train_config.max_steps))))
-                    self.log_metric(train_metric, total_steps, "train")
+                    self.log_metric(train_metric, eval_steps, "train")
                     info(
                         self.config.rank, logger,
                         f"train metric:\n{train_metric.info}")
@@ -1089,7 +1091,7 @@ class LMTrainer():
                     self.init_hooks(eval, "eval", epoch, token_mapper)
                     eval_metric = self._eval(eval)
 
-                    self.log_metric(eval_metric, total_steps, "eval")
+                    self.log_metric(eval_metric, eval_steps, "eval")
                     info(
                         self.config.rank, logger,
                         f"eval metric:\n{eval_metric.info}")
