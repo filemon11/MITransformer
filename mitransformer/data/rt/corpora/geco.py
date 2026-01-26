@@ -6,7 +6,6 @@ import random
 
 import pandas as pd
 import numpy as np
-from transformers import AutoTokenizer  # type: ignore
 
 from . import utils
 from ... import tokeniser
@@ -99,16 +98,14 @@ def load_geco(
     # create random mask and iterate through corpus to append the stories
     # This will result in all sentences of a story belonging to the same split.
 
-    pretokeniser = AutoTokenizer.from_pretrained(
-        "bert-base-uncased", cache_dir="./cache"
-        ).backend_tokenizer.pre_tokenizer  # type: ignore
+    pretokeniser = utils.load_pretokeniser()
 
     token_mapper = None
     if token_mapper_dir is not None:
         token_mapper = tokeniser.TokenMapper.load(token_mapper_dir)
 
     df: pd.DataFrame = pd.read_excel(
-        input_file, keep_default_na=False, na_values=None)
+        input_file, keep_default_na=False, na_values=None)  # type: ignore
     df = df[~(df["WORD"].isna())]
     df = df[~(df["WORD"] == "")]
     df["WORD"] = df["WORD"].astype(str)
@@ -119,7 +116,8 @@ def load_geco(
 
     # Create new zone entries
     lens_of_parts = df[["PART"]].groupby(by="PART").size()
-    zones = [np.arange(1, length+1) for length in lens_of_parts]
+    zones = [
+        np.arange(1, length+1) for length in lens_of_parts]  # type: ignore
 
     df["zone"] = np.concat(zones)
 
@@ -132,7 +130,7 @@ def load_geco(
         df["WORD"] = df["WORD"].apply(
             lambda t: [
                 tup[0] for tup in
-                pretokeniser.pre_tokenize_str(
+                pretokeniser.pre_tokenize_str(  # type: ignore
                     t)])
         df["WORD"] = df["WORD"].apply(
             lambda t: token_mapper.decode(
@@ -187,7 +185,8 @@ def prepare_RTs_geco(
     df_by_worker_by_item = df.groupby(["PP_NR", "PART"])
 
     lens_of_parts = df_by_worker_by_item.size()
-    zones = np.concat([np.arange(1, length+1) for length in lens_of_parts])
+    zones = np.concat(
+        [np.arange(1, length+1) for length in lens_of_parts])  # type: ignore
 
     df["zone"] = zones
     df["Corpus"] = "geco"

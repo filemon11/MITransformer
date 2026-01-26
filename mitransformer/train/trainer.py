@@ -11,6 +11,7 @@ from torch.optim import Optimizer
 import torch.nn.functional as F
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import shutil
 
 from pathlib import Path
 import os
@@ -257,7 +258,8 @@ class LMTrainer():
             "Initialised trainer with params:\n")
         info(config.rank, logger, config.info)
 
-    def save(self, legacy: bool = False) -> None:
+    def save(
+            self, legacy: bool = False, steps: int | None = None) -> None:
         assert self.train_config is not None
         if self.use_ddp:
             dist.barrier()
@@ -267,7 +269,10 @@ class LMTrainer():
                 assert isinstance(
                     self.transformerlm.module, models.MITransformerLM)
                 model = self.transformerlm.module
-            dir = os.path.join(self.model_dir, self.train_config.model_name)
+            model_name = self.train_config.model_name
+            if steps is not None:
+                model_name += f"_{steps}"
+            dir = os.path.join(self.model_dir, model_name)
             Path(dir).mkdir(parents=True, exist_ok=True)
             if legacy:
                 torch.save(
@@ -285,11 +290,24 @@ class LMTrainer():
             # overwrites config
             self.train_config.save(os.path.join(dir, "config.json"))
 
+    def copy_best(
+            self, steps: int, model_name: str | None = None) -> None:
+        if model_name is None:
+            model_name = self.config.model_name
+        model_name += f"_{steps}"
+        source_directory = os.path.join(
+            self.model_dir, f"{model_name}_{steps}")
+        destination_directory = os.path.join(self.model_dir, model_name)
+        shutil.copytree(source_directory, destination_directory)
+
     def load_state(
             self, model_name: str | None = None,
+            steps: int | None = None,
             legacy_support: bool = True) -> None:
         if model_name is None:
             model_name = self.config.model_name
+        if steps is not None:
+            model_name += f"_{steps}"
         if (legacy_support
                 and "config" in (loaded_dict := torch.load(
                 os.path.join(self.model_dir, model_name, "model"),
@@ -1033,6 +1051,7 @@ class LMTrainer():
             pbar_steps = None
 
         epoch = 0
+        eval_steps: int = 0
         for epoch in tqdm(range(1, max_epochs+1), desc="Epochs"):
             self.init_hooks(train, "train", epoch, token_mapper)
             if break_training:
@@ -1057,6 +1076,7 @@ class LMTrainer():
                     pbar_steps.update(1)
 
                 if total_steps % eval_interval == 0:
+                    eval_steps += 1
                     info(
                         self.config.rank,
                         logger,
@@ -1066,15 +1086,29 @@ class LMTrainer():
                                 'inf' if train_config.max_steps
                                 is None  # type: ignore
                                 else str(train_config.max_steps))))
-                    self.log_metric(train_metric, total_steps, "train")
+                    self.log_metric(train_metric, eval_steps, "train")
                     info(
                         self.config.rank, logger,
                         f"train metric:\n{train_metric.info}")
 
+                    if self.config.device != "cpu":
+                        info(self.config.rank, logger, (
+                            f"Rank {self.config.rank}: CUDA percentage: "
+                            + str(
+                                torch.cuda.memory_allocated(self.config.rank)
+                                / (torch.cuda.max_memory_allocated(
+                                    self.config.rank) + 1e-6))))
+                        free, total = torch.cuda.mem_get_info(self.config.rank)
+                        mem_used_MB = (total - free) / 1024 ** 2
+                        info(
+                            self.config.rank, logger,
+                            f"Rank {self.config.rank}: "
+                            f"Used CUDA MB: {mem_used_MB}")
+
                     self.init_hooks(eval, "eval", epoch, token_mapper)
                     eval_metric = self._eval(eval)
 
-                    self.log_metric(eval_metric, total_steps, "eval")
+                    self.log_metric(eval_metric, eval_steps, "eval")
                     info(
                         self.config.rank, logger,
                         f"eval metric:\n{eval_metric.info}")
@@ -1085,7 +1119,7 @@ class LMTrainer():
                         best = eval_metric.minval()
                     if eval_metric > best:       # greater means better
                         best = eval_metric
-                        self.save()
+                        self.save(steps=total_steps)
 
                         best_epoch = epoch
                         best_step = total_steps
@@ -1097,21 +1131,6 @@ class LMTrainer():
                         evals_without_improvement = 0
                     else:
                         evals_without_improvement += 1
-
-                    if self.config.device != "cpu":
-                        for rank in range(self.config.world_size):
-                            info(self.config.rank, logger, (
-                                f"Rank {rank}: CUDA percentage: "
-                                + str(
-                                    torch.cuda.memory_allocated(rank)
-                                    / torch.cuda.max_memory_allocated(
-                                        rank))))
-                            free, total = torch.cuda.mem_get_info(rank)
-                            mem_used_MB = (total - free) / 1024 ** 2
-                    info(
-                        0, logger,
-                        f"Rank {self.config.rank}: "
-                        f"Used CUDA MB: {mem_used_MB}")
 
                     yield {
                         "train": train_metric,
@@ -1167,6 +1186,7 @@ class LMTrainer():
         del gen
 
         # load best (saved) into transformerlm
+        self.copy_best(steps=best[1])
         self.load_state()
 
         info(

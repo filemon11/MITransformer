@@ -6,7 +6,6 @@ import random
 
 import pandas as pd
 import pyreadr  # type: ignore
-from transformers import AutoTokenizer  # type: ignore
 
 from . import utils
 from ... import tokeniser
@@ -135,9 +134,7 @@ def load_meco(
     # create random mask and iterate through corpus to append the stories
     # This will result in all sentences of a story belonging to the same split.
 
-    pretokeniser = AutoTokenizer.from_pretrained(
-        "bert-base-uncased", cache_dir="./cache"
-        ).backend_tokenizer.pre_tokenizer  # type: ignore
+    pretokeniser = utils.load_pretokeniser()
 
     token_mapper = None
     if token_mapper_dir is not None:

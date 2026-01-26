@@ -381,7 +381,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                     return_label_ids=return_label_ids,
                     to_device="cpu"):
 
-                probs = [(-np.log2(p[1:-1])).tolist() for p in pred_probs]
+                probs = [(-np.log2(p[1:-1]+1e-5)).tolist() for p in pred_probs]
                 probs_global.extend(probs)
                 if use_mmap:
                     if not use_ddp or rank == 0:

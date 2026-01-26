@@ -1,4 +1,7 @@
 import os
+import requests
+from transformers import AutoTokenizer
+from tokenizers import pre_tokenizers  # type: ignore
 
 
 def create_suffixed_filepath(full_path: str, suffix: str) -> str:
@@ -11,3 +14,15 @@ def create_suffixed_filepath(full_path: str, suffix: str) -> str:
         return os.path.join(head, f"{tail_name}_{suffix}.{tail_ending}")
 
     return os.path.join(head, f"{tail}_{suffix}")
+
+
+def load_pretokeniser() -> pre_tokenizers.BertPreTokenizer:
+    try:
+        return AutoTokenizer.from_pretrained(
+            "bert-base-uncased", cache_dir="./cache",
+            ).backend_tokenizer.pre_tokenizer  # type: ignore
+    except requests.exceptions.ConnectionError:
+        return AutoTokenizer.from_pretrained(
+            "bert-base-uncased", cache_dir="./cache",
+            local_files_only=True,
+            ).backend_tokenizer.pre_tokenizer  # type: ignore

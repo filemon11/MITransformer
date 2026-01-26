@@ -1019,16 +1019,16 @@ def create_parser() -> argparse.ArgumentParser:
         choices=data.RTCORPORA,
         default="naturalstories")
     data_group.add_argument(
-        '--max_len_train', type=argtypes.OptNone(int), default=Undefined,
+        '--max_len_train', type=argtypes.OptNone(int), default=None,
         help='Does nothing. TODO')
     data_group.add_argument(
-        '--max_len_eval_test', type=argtypes.OptNone(int), default=Undefined,
+        '--max_len_eval_test', type=argtypes.OptNone(int), default=None,
         help='Does nothing. TODO')
     data_group.add_argument(
-        '--min_len_train', type=argtypes.OptNone(int), default=Undefined,
+        '--min_len_train', type=argtypes.OptNone(int), default=None,
         help='Does nothing. TODO')
     data_group.add_argument(
-        '--min_len_eval_test', type=argtypes.OptNone(int), default=Undefined,
+        '--min_len_eval_test', type=argtypes.OptNone(int), default=None,
         help='Does nothing. TODO')
     data_group.add_argument(
         '--masked', type=argtypes.str_to_bool, default=True,

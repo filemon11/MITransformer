@@ -55,15 +55,16 @@ def get_model_props(
     cov_pars: pd.DataFrame = model.get_cov_pars()  # type: ignore
 
     negloglik = model.get_current_neg_log_likelihood()
+    print("negloglik", negloglik)
     assert negloglik is not None
-    negloglik = -float(negloglik)
+    loglik = -float(negloglik)
 
     k_fixed = int(coef.shape[1])
     k_random = int(cov_pars.shape[1])
     k = k_fixed + k_random
 
-    aic = 2 * k - 2 * negloglik
-    bic = np.log(n_observations) * k - 2 * negloglik
+    aic = 2 * k - 2 * loglik
+    bic = np.log(n_observations) * k - 2 * loglik
 
     cov_pars.loc[1] = np.sqrt(cov_pars.iloc[0])
     cov_pars.index = ["Variance", "Std.Dev."]  # type: ignore
