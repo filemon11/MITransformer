@@ -55,7 +55,6 @@ def get_model_props(
     cov_pars: pd.DataFrame = model.get_cov_pars()  # type: ignore
 
     negloglik = model.get_current_neg_log_likelihood()
-    print("negloglik", negloglik)
     assert negloglik is not None
     loglik = -float(negloglik)
 
