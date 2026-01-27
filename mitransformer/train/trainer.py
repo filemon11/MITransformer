@@ -261,9 +261,10 @@ class LMTrainer():
     def save(
             self, legacy: bool = False, steps: int | None = None) -> None:
         assert self.train_config is not None
-        if self.use_ddp:
-            dist.barrier()
-        if not self.use_ddp or self.config.rank == 0:
+        # if self.use_ddp:
+        #     dist.barrier()
+        if self.config.rank is None or self.config.rank == 0:
+            print(self.config.rank)
             model = self.transformerlm
             if self.use_ddp:
                 assert isinstance(
@@ -1628,7 +1629,7 @@ class LMTrainer():
             self, metric: metrics.LMMetric,
             epoch: int,
             split: Literal["train", "eval", "test"]) -> None:
-        if not self.use_ddp or self.config.rank == 0:
+        if self.config.rank is None or self.config.rank == 0:
             self.writer.add_metric(metric, epoch, split)
 
     # this is not typed in detail like data.data.get_loader
