@@ -84,7 +84,8 @@ def main_rt(
         measurements,
         candidates,
         "ET" if corpus in data.ET_CORPORA else "SP",
-        f"RT/data/{corpus}_{arguments.name}_preprocessed_{model_name}.csv"
+        f"RT/data/{corpus}_{arguments.name}_preprocessed_{model_name}.csv",
+        rank=arguments.rank
     )
 
     if arguments.lme:

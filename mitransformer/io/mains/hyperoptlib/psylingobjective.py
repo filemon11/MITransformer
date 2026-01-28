@@ -185,7 +185,8 @@ class PsyLingObjective(objective.Objective):
             joined = readingtimes.join(
                 frame.df,
                 self.measurements,
-                "ET" if self.is_et_corpus else "SP")
+                "ET" if self.is_et_corpus else "SP",
+                rank=self.arguments.rank)
             del frame
 
             # In concatenated setting, there can be several corpora per
