@@ -27,7 +27,8 @@ def io_join(
 def join(
         candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
         corpus_type: data.RTCorpusTypes, output_file: None = None,
-        how: pdtyping.MergeHow = "inner"
+        how: pdtyping.MergeHow = "inner",
+        rank: int | None = None
         ) -> pd.DataFrame:
     ...
 
@@ -36,7 +37,8 @@ def join(
 def join(
         candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
         corpus_type: data.RTCorpusTypes, output_file: str,
-        how: pdtyping.MergeHow = "inner"
+        how: pdtyping.MergeHow = "inner",
+        rank: int | None = None
         ) -> None:
     ...
 
@@ -44,7 +46,8 @@ def join(
 def join(
         candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
         corpus_type: data.RTCorpusTypes, output_file: str | None = None,
-        how: pdtyping.MergeHow = "inner"
+        how: pdtyping.MergeHow = "inner",
+        rank: int | None = None
         ) -> None | pd.DataFrame:
     # Read input files
     if isinstance(candidates_file, str):
@@ -95,7 +98,7 @@ def join(
         .drop_duplicates()
         .shape[0]
     )
-    info(0, logger, f"Individual token count: {token_count}")
+    info(rank, logger, f"Individual token count: {token_count}")
     if output_file is None:
         return measurement
     # Write output
