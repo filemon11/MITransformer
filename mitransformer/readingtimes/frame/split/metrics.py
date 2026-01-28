@@ -535,36 +535,41 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 dataset.map_to_ids(token_mapper)
 
             provided = 0
-            for (
-                pred_probs, attention_logits,
-                additional) in trainer.predict_batched(
-                    dataset,
-                    make_prob=True,
-                    only_true=True,
-                    return_arc_logits=return_arc_logits,
-                    return_logits=return_logits,
-                    return_label_ids=return_label_ids,
-                    to_device="cpu"):
+            try:
+                for (
+                    pred_probs, attention_logits,
+                    additional) in trainer.predict_batched(
+                        dataset,
+                        make_prob=True,
+                        only_true=True,
+                        return_arc_logits=return_arc_logits,
+                        return_logits=return_logits,
+                        return_label_ids=return_label_ids,
+                        to_device="cpu"):
 
-                provided += len(pred_probs)
+                    provided += len(pred_probs)
 
-                probs = [(-np.log2(p[1:-1]+1e-5)).tolist() for p in pred_probs]
-                yield pd.Series(probs), {
-                    "attention_logits": attention_logits,
-                    "dataset": dataset,
-                    "transform": transform,
-                    "token_mapper_dir": token_mapper_dir,
-                    "trainer": trainer,
-                    "masks_setting": masks_setting,
-                    **additional
-                }
-            assert len(df) == provided, (
-                "trainer.predict_batched did not provide the correct number"
-                f" of sentences. Expected: {len(df)}, got: {provided}.")
+                    probs = [
+                        (-np.log2(p[1:-1]+1e-5)).tolist()
+                        for p in pred_probs]
+                    yield pd.Series(probs), {
+                        "attention_logits": attention_logits,
+                        "dataset": dataset,
+                        "transform": transform,
+                        "token_mapper_dir": token_mapper_dir,
+                        "trainer": trainer,
+                        "masks_setting": masks_setting,
+                        **additional
+                    }
+                assert len(df) == provided, (
+                    "trainer.predict_batched did "
+                    "not provide the correct number"
+                    f" of sentences. Expected: {len(df)}, got: {provided}.")
 
-            trainer.config.use_ddp = trainer_use_ddp
-            trainer.config.rank = trainer_rank
-            trainer.config.batch_size = trainer_batch_size
+            finally:
+                trainer.config.use_ddp = trainer_use_ddp
+                trainer.config.rank = trainer_rank
+                trainer.config.batch_size = trainer_batch_size
 
 
 class SplitTokMetricMakerMask(SplitTokMetricMaker):
