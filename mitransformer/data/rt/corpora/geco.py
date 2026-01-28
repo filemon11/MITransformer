@@ -114,6 +114,10 @@ def load_geco(
     # the text here
     df = df.drop_duplicates(["WORD_ID"])
 
+    # Sort to be sure the order is right
+    df.sort_values(by=[
+        "WORD_ID"], inplace=True)
+
     # Create new zone entries
     lens_of_parts = df[["PART"]].groupby(by="PART").size()
     zones = [
