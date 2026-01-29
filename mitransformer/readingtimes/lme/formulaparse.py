@@ -30,7 +30,7 @@ def parse(formula: str) -> ParseResult:
     random_effects: dict[
         str, tuple[str | Literal[0] | Literal[1], ...]] = {}
     for re in randoms:
-        covs, group = re.split("|")
+        covs, group = re.split("||")
         group = group.strip()
         groups = groups + (group,)
 
