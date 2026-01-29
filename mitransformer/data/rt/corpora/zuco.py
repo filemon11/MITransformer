@@ -26,7 +26,7 @@ def split_zuco(
     if out_path2 is None:
         out_path2 = utils.create_suffixed_filepath(input_file, "test")
 
-    df: pd.DataFrame = pd.read_csv(input_file)
+    df: pd.DataFrame = pd.read_csv(input_file, encoding="ISO-8859-1")
 
     # only these are necessary
     df = df[[
@@ -42,8 +42,8 @@ def split_zuco(
     df1 = df[mask]
     df2 = df[~mask]
 
-    df1.to_csv(out_path1, index=False)
-    df2.to_csv(out_path2, index=False)
+    df1.to_csv(out_path1, index=False, encoding="ISO-8859-1")
+    df2.to_csv(out_path2, index=False, encoding="ISO-8859-1")
 
 
 def split_zuco2_1(
@@ -66,9 +66,9 @@ def split_zuco2_1(
     if out_path2 is None:
         out_path2 = utils.create_suffixed_filepath(input_file, "test")
 
-    df: pd.DataFrame = pd.read_csv(input_file)
-    df_a: pd.DataFrame = pd.read_csv(input_file_zuco1_2_a)
-    df_b: pd.DataFrame = pd.read_csv(input_file_zuco1_2_b)
+    df: pd.DataFrame = pd.read_csv(input_file, encoding="ISO-8859-1")
+    df_a: pd.DataFrame = pd.read_csv(input_file_zuco1_2_a, encoding="ISO-8859-1")
+    df_b: pd.DataFrame = pd.read_csv(input_file_zuco1_2_b, encoding="ISO-8859-1")
 
     def remove_punctuation(s: str) -> str:
         # Necessary due to different formatting in the two
@@ -131,8 +131,8 @@ def split_zuco2_1(
     df1 = df[mask]
     df2 = df[~mask]
 
-    df1.to_csv(out_path1, index=False)
-    df2.to_csv(out_path2, index=False)
+    df1.to_csv(out_path1, index=False, encoding="ISO-8859-1")
+    df2.to_csv(out_path2, index=False, encoding="ISO-8859-1")
 
 
 def load_zuco(
@@ -179,7 +179,8 @@ def load_zuco(
         token_mapper = tokeniser.TokenMapper.load(token_mapper_dir)
 
     df: pd.DataFrame = pd.read_csv(     # type: ignore
-        input_file, keep_default_na=False, na_values=None)
+        input_file, keep_default_na=False, na_values=None,
+        encoding="ISO-8859-1")
 
     df["Word"] = df["Word"].astype(str)
 
@@ -189,6 +190,10 @@ def load_zuco(
     # Remove duplicates because we are only interested in
     # the text here
     df = df.drop_duplicates(["Sent_ID", "Word_ID"])
+
+    # Sort to be sure the order is right
+    df.sort_values(by=[
+        "Sent_ID", "Word_ID"], inplace=True)
 
     # Make words lowercase
     if make_lower:
@@ -235,7 +240,7 @@ def prepare_RTs_zuco(
     if wave == 2:
         assert task != 3, "ZuCo 2.0 has only two tasks."
 
-    df: pd.DataFrame = pd.read_csv(input_file)
+    df: pd.DataFrame = pd.read_csv(input_file, encoding="ISO-8859-1")
 
     df = df[~(df["Word"].isna())]
     df = df[~(df["Word"] == "")]
@@ -258,6 +263,7 @@ def prepare_RTs_zuco(
     df = df[[
         "Corpus", "item", "zone", "WorkerId",
         "word", "GPT", "FFD", "GD"]]
+
     if output_file is None:
         return df
     df.to_csv(output_file)
