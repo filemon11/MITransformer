@@ -57,7 +57,7 @@ def parse(formula: str) -> ParseResult:
 
     # Include formula in standard form
     formula_components = [
-        f"({' + '.join([str(i) for i in s])}|{group})"
+        f"({' + '.join([str(i) for i in s])}||{group})"
         for group, s in random_effects.items()]
     formula = " + ".join((
         f"{to_predict} ~ {' + '.join(covariates)} ",
