@@ -67,8 +67,10 @@ def split_zuco2_1(
         out_path2 = utils.create_suffixed_filepath(input_file, "test")
 
     df: pd.DataFrame = pd.read_csv(input_file, encoding="ISO-8859-1")
-    df_a: pd.DataFrame = pd.read_csv(input_file_zuco1_2_a, encoding="ISO-8859-1")
-    df_b: pd.DataFrame = pd.read_csv(input_file_zuco1_2_b, encoding="ISO-8859-1")
+    df_a: pd.DataFrame = pd.read_csv(
+        input_file_zuco1_2_a, encoding="ISO-8859-1")
+    df_b: pd.DataFrame = pd.read_csv(
+        input_file_zuco1_2_b, encoding="ISO-8859-1")
 
     def remove_punctuation(s: str) -> str:
         # Necessary due to different formatting in the two
