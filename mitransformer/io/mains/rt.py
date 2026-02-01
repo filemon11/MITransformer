@@ -92,5 +92,3 @@ def main_rt(
         readingtimes.lme(
             model_name, corpus,
             arguments.name, 0, arguments.shift)
-    # TODO: return to using R script to make use of better statistical
-    # tools

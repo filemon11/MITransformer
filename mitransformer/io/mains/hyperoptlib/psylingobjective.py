@@ -5,15 +5,10 @@ from ... import parsing
 from .. import train
 from . import objective, sampler
 
-from conllu.models import TokenList
-import pathlib
-import os
-
 import optuna
 import pandas as pd
-import torch.distributed as dist
 
-from typing import Tuple, Iterable, Sequence, Collection
+from typing import Iterable, Sequence, Collection
 
 from mitransformer.utils.logmaker import (
     getLogger, info)
@@ -54,7 +49,7 @@ class PsyLingObjective(objective.Objective):
             for dataset in arguments.psyling_dataset])
         info(self.arguments.rank, logger, "Retreaved psyling corpora.")
 
-        self.tok_frame, self.untok_frame = get_frames(
+        self.tok_frame, self.untok_frame = readingtimes.get_frames(
             psyling_df, rank=self.arguments.rank)
         info(self.arguments.rank, logger, "Generated psyling dataframes.")
 
@@ -72,7 +67,7 @@ class PsyLingObjective(objective.Objective):
         if arguments.load_psyling_mmap is not None:
             load_kwargs["only_load_mmap"] = True
             load_kwargs["temp_mmap_filename"] = arguments.load_psyling_mmap
-        self.dataset = create_dataset(
+        self.dataset = readingtimes.create_dataset(
             self.tok_frame.df["conllu"].tolist(),
             self.arguments.masked, self.arguments.masks_setting,
             transform, self.data_provider.datasets["token_mapper"],
@@ -149,6 +144,7 @@ class PsyLingObjective(objective.Objective):
                 trainer=trainer,
                 arc_distr_mode=self.arguments.distr_mode,
                 include_current=self.arguments.include_current,
+                global_distr=self.arguments.global_distr,
                 length_weighted=self.arguments.length_weighted,
                 return_arc_logits=False,
                 use_ddp=False,
@@ -156,22 +152,11 @@ class PsyLingObjective(objective.Objective):
             # TODO: allow unmasked dataset to be used
 
             # Untokenisation
-            # We cannot omit this because surprisal can be a sum
-            # of token surprisals.
-            frame: readingtimes.SplitFrame | readingtimes.UnsplitFrame
-            untok_frame = self.tok_frame.untokenise()
-            untok_frame.adjust_untokenise_([
-                word for sentence in self.untok_frame.df["word"]
-                for word in sentence])  # type: ignore
-
-            # Do this separately because in untok_frame numbers are replaced
-            # with <num>. Therefore, frequency and length would not be
-            # correct.
-            frame = self.untok_frame | untok_frame
-
-            frame = frame.include_spillover(self.arguments.shift)
-            frame.truncate_(right=1)
-            frame = frame.unsplit()
+            frame: readingtimes.UnsplitFrame
+            frame = readingtimes.combine_frames(
+                self.tok_frame, self.untok_frame,
+                spillover=self.arguments.shift
+            )
 
             if self.arguments.rank is None or self.arguments.rank == 0:
                 print(frame.df.head(n=10))
@@ -344,107 +329,6 @@ class PsyLingObjective(objective.Objective):
             if isinstance(opt_metric, pd.DataFrame):
                 opt_metric = opt_metric.to_numpy().sum()
             return float(opt_metric)
-
-
-def get_frames(
-        psyling_df: pd.DataFrame,
-        rank: int | None = None
-        ) -> Tuple[readingtimes.SplitFrame, readingtimes.SplitFrame]:
-
-    orig_frame = readingtimes.UnsplitFrame(
-        psyling_df, {"word_col": readingtimes.TOKEN_COL}, tokenised=False)
-
-    for metric in readingtimes.BASELINE_METRICS:
-        orig_frame.add_(
-            metric)
-
-    # Create conllu frame
-    info(rank, logger, "Getting conllu frame...")
-    tok_frame = readingtimes.get_conllu_frame(
-        psyling_df)
-
-    info(rank, logger, f"Identified {len(tok_frame.df)} psyling sentences.")
-    # omits undefined args
-
-    info(rank, logger, "Adjusting tokenisation (1/2)...")
-    tok_untok_frame = tok_frame.untokenise()
-    info(rank, logger, "Adjusting tokenisation (2/2)...")
-    tok_untok_frame.adjust_untokenise_(orig_frame.df["word"])  # type: ignore
-    info(rank, logger, "Adjusted tokenisation.")
-
-    assert len(orig_frame.df) == sum(
-        len(sentence) for sentence in tok_untok_frame.df["word"])
-
-    # TODO: is this necessary?
-    # include = [
-    # len(sentence) > 0
-    # for sentence in tok_untok_frame.df[readingtimes.TOKEN_COL]]
-    # tok_untok_frame.df = tok_untok_frame.df[include].reset_index(drop=True)
-
-    untok_frame = orig_frame.split([
-        len(sentence) for sentence in tok_untok_frame.df[
-            readingtimes.TOKEN_COL]])
-
-    return tok_frame, untok_frame
-
-
-def create_dataset(
-        tokenlists: list[TokenList],
-        masked: bool, masks_setting: data.MasksSetting,
-        transform: data.TransformFunc | None,
-        token_mapper: data.TokenMapper,
-        tempdir: str = ".temp",
-        temp_dataset_filename: str = "temp_dataset",
-        temp_mmap_filename: str = "temp_mmap",
-        only_load_mmap: bool = False,
-        use_ddp: bool = False,
-        rank: int | None = None,
-        ) -> data.MemMapDataset | data.MemMapDepDataset:
-
-    if not only_load_mmap:
-        pathlib.Path(tempdir).mkdir(parents=True, exist_ok=True)
-
-        # Prevent memory writes by different processes
-        if not use_ddp or rank == 0:
-            dataset: data.MemMapDataset | data.MemMapDepDataset
-
-            with open(os.path.join(tempdir, "temp_dataset"), "w") as temp:
-                for sentence in tokenlists:
-                    temp.write(sentence.serialize())
-
-            if masked:
-                assert masks_setting is not None
-                assert transform is not None
-                dataset = data.MemMapDepDataset.from_file(
-                    os.path.join(tempdir, temp_dataset_filename),
-                    transform_masks=transform,
-                    masks_setting=masks_setting,
-                    max_len=None,
-                    min_len=None)
-            else:
-                dataset = data.MemMapDataset.from_file(
-                    os.path.join(tempdir, temp_dataset_filename),
-                    max_len=None,
-                    min_len=None)
-            dataset.map_to_ids(
-                token_mapper,
-                os.path.join(tempdir, temp_mmap_filename))
-        if use_ddp:
-            dist.barrier()
-
-    if masked:
-        dataset = data.MemMapDepDataset.from_memmap(
-            os.path.join(tempdir, temp_mmap_filename),
-            transform_masks=transform,
-            masks_setting=masks_setting,
-            max_len=None,
-            min_len=None)
-    else:
-        dataset = data.MemMapDataset.from_memmap(
-            os.path.join(tempdir, temp_mmap_filename),
-            max_len=None,
-            min_len=None)
-    return dataset
 
 
 def get_measurements(

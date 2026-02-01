@@ -911,6 +911,7 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
             df: pd.DataFrame,
             arc_distr: Sequence[torch.Tensor] | None = None,
             arc_distr_mode: Literal["att", "att-n"] | None = None,
+            global_distr: bool = False,
             att: Sequence[torch.Tensor] | None = None,
             proj_states: Sequence[torch.Tensor] | None = None,
             include_current: bool = False,
@@ -954,6 +955,7 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
             losses.attention_entropy_loss(
                 ad, to_ignore_mask="triangular",
                 reduction="none",
+                global_distr=global_distr,
                 include_current=include_current,
                 length_weighted=length_weighted
                 )[2:].numpy() for ad in arc_distr]
@@ -979,6 +981,7 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
             df: pd.DataFrame,
             arc_distr: Sequence[torch.Tensor] | None = None,
             arc_distr_mode: Literal["att", "att-n"] | None = None,
+            global_distr: bool = False,
             att: Sequence[torch.Tensor] | None = None,
             proj_states: Sequence[torch.Tensor] | None = None,
             include_current: bool = False,
@@ -1022,6 +1025,7 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
             losses.attention_distance_loss(
                 ad, to_ignore_mask="triangular",
                 reduction="none",
+                global_distr=global_distr,
                 length_weighted=length_weighted
                 )[2:].numpy() for ad in arc_distr]
 
@@ -1046,6 +1050,7 @@ class SplitTokMetricMakerAttentionDifference(SplitTokMetricMaker):
             df: pd.DataFrame,
             arc_distr: Sequence[torch.Tensor] | None = None,
             arc_distr_mode: Literal["att", "att-n"] | None = None,
+            global_distr: bool = False,
             att: Sequence[torch.Tensor] | None = None,
             proj_states: Sequence[torch.Tensor] | None = None,
             include_current: bool = False,
@@ -1089,6 +1094,7 @@ class SplitTokMetricMakerAttentionDifference(SplitTokMetricMaker):
             losses.attention_difference_loss(
                 ad, to_ignore_mask="triangular",
                 reduction="none",
+                global_distr=global_distr,
                 length_weighted=length_weighted,
                 include_current=include_current
                 )[2:].numpy() for ad in arc_distr]
@@ -1114,6 +1120,7 @@ class SplitTokMetricMakerAttentionActivation(SplitTokMetricMaker):
             df: pd.DataFrame,
             arc_distr: Sequence[torch.Tensor] | None = None,
             arc_distr_mode: Literal["att", "att-n"] | None = None,
+            global_distr: bool = False,
             att: Sequence[torch.Tensor] | None = None,
             proj_states: Sequence[torch.Tensor] | None = None,
             include_current: bool = False,
@@ -1157,6 +1164,7 @@ class SplitTokMetricMakerAttentionActivation(SplitTokMetricMaker):
             losses.attention_activation_loss(
                 ad, to_ignore_mask="triangular",
                 reduction="none",
+                global_distr=global_distr,
                 length_weighted=length_weighted,
                 include_current=include_current
                 )[2:].numpy() for ad in arc_distr]
@@ -1164,6 +1172,7 @@ class SplitTokMetricMakerAttentionActivation(SplitTokMetricMaker):
         return pd.Series(difference), {
             "arc_distr": arc_distr,
             "arc_distr_mode": arc_distr_mode,
+            "global_distr": global_distr,
             "att": att,
             "proj_states": proj_states,
             "include_current": include_current,
