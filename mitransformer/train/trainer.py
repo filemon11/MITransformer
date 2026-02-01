@@ -1053,103 +1053,108 @@ class LMTrainer():
 
         epoch = 0
         eval_steps: int = 0
-        for epoch in tqdm(range(1, max_epochs+1), desc="Epochs"):
-            self.init_hooks(train, "train", epoch, token_mapper)
-            if break_training:
-                epoch -= 1
-                break
-            info(
-                self.config.rank,
-                logger, f"Epoch: {epoch}/{max_epochs}")
-            if self.use_ddp:
-                if train.sampler is not None and hasattr(
-                        train.sampler, "set_epoch"):
-                    train.sampler.set_epoch(epoch)  # type: ignore
-                if train.batch_sampler is not None and hasattr(
-                        train.batch_sampler, "set_epoch"):
-                    train.batch_sampler.set_epoch(epoch)  # type: ignore
+        try:
+            for epoch in tqdm(range(1, max_epochs+1), desc="Epochs"):
+                self.init_hooks(train, "train", epoch, token_mapper)
+                if break_training:
+                    epoch -= 1
+                    break
+                info(
+                    self.config.rank,
+                    logger, f"Epoch: {epoch}/{max_epochs}")
+                if self.use_ddp:
+                    if train.sampler is not None and hasattr(
+                            train.sampler, "set_epoch"):
+                        train.sampler.set_epoch(epoch)  # type: ignore
+                    if train.batch_sampler is not None and hasattr(
+                            train.batch_sampler, "set_epoch"):
+                        train.batch_sampler.set_epoch(epoch)  # type: ignore
 
-            # Steps
-            for train_metric in self._train(train):
-                total_steps += 1  # equal epochs in case of not use_steps
+                # Steps
+                for train_metric in self._train(train):
+                    total_steps += 1  # equal epochs in case of not use_steps
 
-                if pbar_steps is not None:
-                    pbar_steps.update(1)
+                    if pbar_steps is not None:
+                        pbar_steps.update(1)
 
-                if total_steps % eval_interval == 0:
-                    eval_steps += 1
-                    info(
-                        self.config.rank,
-                        logger,
-                        (
-                            f"Step: {total_steps}/" +
+                    if total_steps % eval_interval == 0:
+                        eval_steps += 1
+                        info(
+                            self.config.rank,
+                            logger,
                             (
-                                'inf' if train_config.max_steps
-                                is None  # type: ignore
-                                else str(train_config.max_steps))))
-                    self.log_metric(train_metric, eval_steps, "train")
-                    info(
-                        self.config.rank, logger,
-                        f"train metric:\n{train_metric.info}")
-
-                    if self.config.device != "cpu":
-                        info(self.config.rank, logger, (
-                            f"Rank {self.config.rank}: CUDA percentage: "
-                            + str(
-                                torch.cuda.memory_allocated(self.config.rank)
-                                / (torch.cuda.max_memory_allocated(
-                                    self.config.rank) + 1e-6))))
-                        free, total = torch.cuda.mem_get_info(self.config.rank)
-                        mem_used_MB = (total - free) / 1024 ** 2
+                                f"Step: {total_steps}/" +
+                                (
+                                    'inf' if train_config.max_steps
+                                    is None  # type: ignore
+                                    else str(train_config.max_steps))))
+                        self.log_metric(train_metric, eval_steps, "train")
                         info(
                             self.config.rank, logger,
-                            f"Rank {self.config.rank}: "
-                            f"Used CUDA MB: {mem_used_MB}")
+                            f"train metric:\n{train_metric.info}")
 
-                    self.init_hooks(eval, "eval", epoch, token_mapper)
-                    eval_metric = self._eval(eval)
+                        if self.config.device != "cpu":
+                            info(self.config.rank, logger, (
+                                f"Rank {self.config.rank}: CUDA percentage: "
+                                + str(
+                                    torch.cuda.memory_allocated(
+                                        self.config.rank)
+                                    / (torch.cuda.max_memory_allocated(
+                                        self.config.rank) + 1e-6))))
+                            free, total = torch.cuda.mem_get_info(
+                                self.config.rank)
+                            mem_used_MB = (total - free) / 1024 ** 2
+                            info(
+                                self.config.rank, logger,
+                                f"Rank {self.config.rank}: "
+                                f"Used CUDA MB: {mem_used_MB}")
 
-                    self.log_metric(eval_metric, eval_steps, "eval")
-                    info(
-                        self.config.rank, logger,
-                        f"eval metric:\n{eval_metric.info}")
+                        self.init_hooks(eval, "eval", epoch, token_mapper)
+                        eval_metric = self._eval(eval)
 
-                    # TODO make it possible to save without checking if
-                    # there was an improvement
-                    if best is None:
-                        best = eval_metric.minval()
-                    if eval_metric > best:       # greater means better
-                        best = eval_metric
-                        self.save(steps=total_steps)
-
-                        best_epoch = epoch
-                        best_step = total_steps
-
+                        self.log_metric(eval_metric, eval_steps, "eval")
                         info(
                             self.config.rank, logger,
-                            "Saving model at epoch "
-                            f"{epoch} ({total_steps})...")
-                        evals_without_improvement = 0
-                    else:
-                        evals_without_improvement += 1
+                            f"eval metric:\n{eval_metric.info}")
 
-                    yield {
-                        "train": train_metric,
-                        "eval": eval_metric}
+                        # TODO make it possible to save without checking if
+                        # there was an improvement
+                        if best is None:
+                            best = eval_metric.minval()
+                        if eval_metric > best:       # greater means better
+                            best = eval_metric
+                            self.save(steps=total_steps)
 
-                    if self.check_early_stop(evals_without_improvement):
-                        break_training = True
-                        break
-                    if (self.train_config.max_steps is not None
-                            and total_steps
-                            >= self.train_config.max_steps):
-                        break_training = True
-                        break
+                            best_epoch = epoch
+                            best_step = total_steps
 
-                    # Set this here, so that trainer is in eval
-                    # mode in outside loop (i.e. when using yield)
-                    self.init_hooks(train, "train", epoch, token_mapper)
-                    self.transformerlm.train()
+                            info(
+                                self.config.rank, logger,
+                                "Saving model at epoch "
+                                f"{epoch} ({total_steps})...")
+                            evals_without_improvement = 0
+                        else:
+                            evals_without_improvement += 1
+
+                        yield {
+                            "train": train_metric,
+                            "eval": eval_metric}
+
+                        if self.check_early_stop(evals_without_improvement):
+                            break_training = True
+                            break
+                        if (self.train_config.max_steps is not None
+                                and total_steps
+                                >= self.train_config.max_steps):
+                            break_training = True
+                            break
+
+                        # Set this here, so that trainer is in eval
+                        # mode in outside loop (i.e. when using yield)
+                        self.init_hooks(train, "train", epoch, token_mapper)
+                        self.transformerlm.train()
+        finally:
+            self.copy_best(steps=best_step)
 
         if pbar_steps is not None:
             pbar_steps.close()
@@ -1187,7 +1192,6 @@ class LMTrainer():
         del gen
 
         # load best (saved) into transformerlm
-        self.copy_best(steps=best[1])
         self.load_state()
 
         info(
