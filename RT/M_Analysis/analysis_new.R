@@ -21,112 +21,28 @@ library(dplyr)
 
 rm(list=ls())
 
+source("utils.R")
+
+
 args = commandArgs(trailingOnly=TRUE)
-corpus <- args[3]
-goal <- args[4]
-spillover <- as.numeric(args[5])
-dir <- args[6]
-additionalname <- args[7]
+args = c("../data/provo_train_RT_test_preprocessed_exp1_4_0.csv", "GPT", 2)
+data_dir <- args[1]
+goal <- args[2]
+spillover <- as.numeric(args[3])
 
 candidates <- c("surprisal", "attention_entropy")
 baseline_predictors <- c("frequency", "length", "position", "word")
-
-data_dir <- paste(dir, "/", corpus, "_", additionalname, "_preprocessed_", sep="")
 
 # load data
 
 datasets <- list()
 
-scaling_var <- function(data){
-  # The input data is a vector
-  data <- as.numeric(data)
-  (data - mean(data,na.rm=TRUE))/sd(data,na.rm=TRUE)
-}
+data <- read.csv(data_dir)
 
-remove_outliers <- function(data, cols, id_col = "WorkerId", k = 2.5, by = NULL) {
-  # data: data.frame
-  # cols: numeric columns to trim (e.g., c("FixDur", "RT"))
-  # id_col: participant id column
-  # k: cutoff in SDs (e.g., 2.5 or 3)
-  # by: optional additional grouping columns (e.g., "Condition" or c("Condition","Item"))
-  # According to https://link.springer.com/article/10.3758/s13428-023-02137-x
-  # with 2.5 being mode in https://www.rd-alliance.org/sites/default/files/Marsden%2C_Thompson%2C_Plonsky_2018_App_Psych_SPR_synthesis.pdf
-
-  stopifnot(all(c(id_col, cols) %in% names(data)))
-  if (!is.null(by)) stopifnot(all(by %in% names(data)))
-
-  grp <- c(id_col, by)
-
-  cat("nrows before outlier removal ", nrow(data), "\n")
-
-  # Helper that trims within one group
-  trim_one_group <- function(df) {
-    keep <- rep(TRUE, nrow(df))
-
-    for (col in cols) {
-      x <- df[[col]]
-
-      # Only define bounds using non-missing values
-      mu <- mean(x, na.rm = TRUE)
-      s  <- sd(x, na.rm = TRUE)
-
-      # If sd is 0 or NA (e.g., too few observations), don't trim this column in this group
-      if (is.na(s) || s == 0) next
-
-      lower <- mu - k * s
-      upper <- mu + k * s
-
-      # keep NAs (don’t turn missing into “outlier”)
-      keep <- keep & (is.na(x) | (x >= lower & x <= upper))
-    }
-
-    df[keep, , drop = FALSE]
-  }
-
-  # Split-apply-combine without requiring dplyr
-  out <- if (length(grp) == 1) {
-    do.call(rbind, lapply(split(data, data[[id_col]]), trim_one_group))
-  } else {
-    # build an interaction key across grouping variables
-    key <- interaction(data[grp], drop = TRUE, sep = "___")
-    do.call(rbind, lapply(split(data, key), trim_one_group))
-  }
-
-  rownames(out) <- NULL
-  cat("nrows after outlier removal ", nrow(out), "\n")
-
-  out
-}
-
-apply_cutoff <- function(data, goal) {
-  cat("nrows before cut-off ", nrow(data), "\n")
-  if (goal == "RT") {
-    data <- data %>%
-      filter(RT>200) %>%
-      filter(RT<2000)
-    # following modal cutoffs in https://www.rd-alliance.org/sites/default/files/Marsden%2C_Thompson%2C_Plonsky_2018_App_Psych_SPR_synthesis.pdf
-  } else {
-    data <- data %>%
-      filter(goal<1000) %>%
-      filter(goal>80)
-    # following middle value in https://link.springer.com/article/10.3758/s13428-023-02137-x
-    # and 80 ms minimum visual transduction time (majority) in https://link.springer.com/article/10.3758/s13428-023-02137-x
-  }
-  cat("nrows after cot-off ", nrow(data), "\n")
-  data
-}
-
-
-excluded_vars <- c(goal, "WorkerId", "item")
-if (as.numeric(args[2]) == 0) {
-  data <- read.csv(paste(data_dir, args[1], ".csv", sep=""))
-}
-else {
-  data <- read.csv(paste(data_dir, args[1], "_", x, ".csv", sep=""))
-}
 # Get names of numeric columns
 numeric_cols <- names(data)[sapply(data, is.numeric)]
 # Subset to numeric columns you want to scale
+excluded_vars <- c(goal, "WorkerId", "item", "element", "zone")
 cols_to_scale <- setdiff(numeric_cols, excluded_vars)
 
 # Apply cut-off
