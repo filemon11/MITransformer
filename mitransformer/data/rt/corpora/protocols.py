@@ -10,7 +10,7 @@ class CorpusLoader(Protocol):
         make_lower: bool = True,
         token_mapper_dir: str | None = None,
         verbose: bool = False) -> tuple[
-            list[str], list[str], list[int]]: ...
+            list[str], list[str], list[str]]: ...
 
 
 class CorpusSplitter(Protocol):

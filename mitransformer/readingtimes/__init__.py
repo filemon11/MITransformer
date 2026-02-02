@@ -1,7 +1,7 @@
 from .preparation import (  # noqa: F401
     process, io_corpus_convert, get_conllu_frame,
     TOKEN_COL, BASELINE_METRICS, get_frames,
-    create_dataset, combine_frames)
+    create_dataset, combine_frames, new_process)
 from .lme import (  # noqa: F401
     lme, fit_gpboost, get_model_comparison,
     get_model_props, ModelProps, ComparisonProps,

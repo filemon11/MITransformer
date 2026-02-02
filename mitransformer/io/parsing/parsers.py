@@ -407,7 +407,7 @@ def create_parser() -> argparse.ArgumentParser:
             ' Adds shifted versions up to the shift value provided.'))
     hyperopt_parser.add_argument(
         '--lme_formula', type=lmeparse, default=lmeparse(
-            "RT ~ length + frequency + surprisal + (surprisal|WorkerId)"),
+            "RT ~ length + frequency + surprisal + (surprisal||WorkerId)"),
         help=(
             'Formula for fitting linear mixed effects model for '
             'optimisation for for loglik.'))
@@ -1011,6 +1011,20 @@ def create_parser() -> argparse.ArgumentParser:
         default=1,
         help=(
             "Number of model runs to evaluate."))
+    settings_group.add_argument(
+        '--legacy_process', type=argtypes.str_to_bool,
+        default=False,
+        help=(
+            "Whether to use the old RT processing function "
+            "to replicate results from "
+            "https://aclanthology.org/2025.brigap-1.7/"))
+    settings_group.add_argument(
+        '--to_add', type=argtypes.OptNone(argtypes.StrToTuple(str, ...)),
+        default=("surprisal",),
+        help=(
+            "What predictors to add. Baseline predictors (length, frequency, "
+            "position) are always added. Group columns (Corpus, element, word)"
+            " are also always available."))
 
     # # # Data parser group
     data_group = rt_parser.add_argument_group('data')

@@ -12,7 +12,7 @@ import torch.distributed as dist
 from ..train import LMTrainer
 from .. import data
 from .frame import SplitFrame, UnsplitFrame
-from ..utils.params import Params
+from ..utils.params import Params, TypeUndefined, Undefined, is_undef
 
 from typing import (
     Iterable, overload, Sequence, Tuple, Literal)
@@ -38,7 +38,7 @@ LANG = "en"
 TOKEN_COL = "word"
 TEXT_ID_COL = "item"
 WNUM_COL = "zone"
-BASELINE_METRICS = ("frequency", "length", "position")
+BASELINE_METRICS = ("frequency", "length")
 
 
 @overload
@@ -130,8 +130,7 @@ def get_conllu_frame(
         words=words, sentence_ids=sentence_ids,
         corpus_names=corpus_names)  # dataset attribute missing
     frame.add_(
-        "space_after", "word",
-        "position", "head",
+        "space_after", "word", "head",
         "pos", "deprel")
     # TODO: subsume all above under conllu
 
@@ -150,7 +149,6 @@ def process(
         only_content_words_cost: bool = False,
         masks_setting: data.MasksSetting = "current",
         shift: int = 0,
-        corpus: data.RTCorpus = "naturalstories",
         trainer_args: Params | None = None
         ) -> None:
     ...
@@ -168,7 +166,6 @@ def process(
         only_content_words_cost: bool = False,
         masks_setting: data.MasksSetting = "current",
         shift: int = 0,
-        corpus: data.RTCorpus = "naturalstories",
         trainer_args: Params | None = None
         ) -> pd.DataFrame:
     ...
@@ -185,7 +182,6 @@ def process(
         only_content_words_cost: bool = False,
         masks_setting: data.MasksSetting = "current",
         shift: int = 0,
-        corpus: data.RTCorpus = "naturalstories",
         trainer_args: Params | None = None
         ) -> pd.DataFrame | None:
 
@@ -338,49 +334,7 @@ def new_process(
         model_dir: str,
         token_mapper_dir: str,
         to_add: Sequence[str],
-        world_size: int = 1,
-        use_ddp: bool = False,
-        rank: int | None = None,
-        token_col: str = TOKEN_COL,
-        baseline_metrics: Iterable[str] = BASELINE_METRICS,
-        only_content_words_left: bool = False,
-        only_content_words_cost: bool = False,
-        masks_setting: data.MasksSetting = "current",
-        masked: bool = False,
-        shift: int = 0,
-        trainer_args: Params | None = None
-        ) -> None:
-    ...
-
-
-@overload
-def new_process(
-        input_file: str | pd.DataFrame,
-        output_file: None,
-        model_dir: str,
-        token_mapper_dir: str,
-        to_add: Sequence[str],
-        world_size: int = 1,
-        use_ddp: bool = False,
-        rank: int | None = None,
-        token_col: str = TOKEN_COL,
-        baseline_metrics: Iterable[str] = BASELINE_METRICS,
-        only_content_words_left: bool = False,
-        only_content_words_cost: bool = False,
-        masks_setting: data.MasksSetting = "current",
-        masked: bool = False,
-        shift: int = 0,
-        trainer_args: Params | None = None
-        ) -> pd.DataFrame:
-    ...
-
-
-def new_process(
-        input_file: str | pd.DataFrame,
-        output_file: str | None,
-        model_dir: str,
-        token_mapper_dir: str,
-        to_add: Sequence[str],
+        batch_size: int,
         world_size: int = 1,
         use_ddp: bool = False,
         rank: int | None = None,
@@ -394,10 +348,70 @@ def new_process(
         trainer_args: Params | None = None,
         transform_mask: (
             None | data.TransformFunc) = None,
-        distr_mode: Literal["att", "att-n"] = "att-n",
-        length_weighted: bool = False,
-        include_current: bool = False,
-        global_distr: bool = False,
+        distr_mode: Literal[
+            "att", "att-n"] | TypeUndefined = Undefined,
+        length_weighted: bool | TypeUndefined = Undefined,
+        include_current: bool | TypeUndefined = Undefined,
+        global_distr: bool | TypeUndefined = Undefined,
+        ) -> None:
+    ...
+
+
+@overload
+def new_process(
+        input_file: str | pd.DataFrame,
+        output_file: None,
+        model_dir: str,
+        token_mapper_dir: str,
+        to_add: Sequence[str],
+        batch_size: int,
+        world_size: int = 1,
+        use_ddp: bool = False,
+        rank: int | None = None,
+        token_col: str = TOKEN_COL,
+        baseline_metrics: Iterable[str] = BASELINE_METRICS,
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False,
+        masks_setting: data.MasksSetting = "current",
+        masked: bool = False,
+        shift: int = 0,
+        trainer_args: Params | None = None,
+        transform_mask: (
+            None | data.TransformFunc) = None,
+        distr_mode: Literal[
+            "att", "att-n"] | TypeUndefined = Undefined,
+        length_weighted: bool | TypeUndefined = Undefined,
+        include_current: bool | TypeUndefined = Undefined,
+        global_distr: bool | TypeUndefined = Undefined,
+        ) -> pd.DataFrame:
+    ...
+
+
+def new_process(
+        input_file: str | pd.DataFrame,
+        output_file: str | None,
+        model_dir: str,
+        token_mapper_dir: str,
+        to_add: Sequence[str],
+        batch_size: int | TypeUndefined = Undefined,
+        world_size: int = 1,
+        use_ddp: bool = False,
+        rank: int | None = None,
+        token_col: str = TOKEN_COL,
+        baseline_metrics: Iterable[str] = BASELINE_METRICS,
+        only_content_words_left: bool = False,
+        only_content_words_cost: bool = False,
+        masks_setting: data.MasksSetting = "current",
+        masked: bool = False,
+        shift: int = 0,
+        trainer_args: Params | None = None,
+        transform_mask: (
+            None | data.TransformFunc) = None,
+        distr_mode: Literal[
+            "att", "att-n"] | TypeUndefined = Undefined,
+        length_weighted: bool | TypeUndefined = Undefined,
+        include_current: bool | TypeUndefined = Undefined,
+        global_distr: bool | TypeUndefined = Undefined,
         ) -> pd.DataFrame | None:
 
     # Add baseline predictors
@@ -438,22 +452,25 @@ def new_process(
     # Predictors
     if model_dir[:4] == "hug:":
         model_dir = model_dir[:model_dir.rfind("_")]  # remove model number
-        frame.add_(
-            "surprisal", token_mapper_dir=token_mapper_dir,
-            transform=transform_mask, trainer=model_dir)
-        frame.add_(
-            "mask", masks_setting="both",
-            gov_name="head_current", dep_name="child_current")
-        frame.add_(
-            "head_distance",
-            "first_dependent_distance",
-            "first_dependent_deprel",
-            "left_dependents_distance_sum",
-            "left_dependents_count",
-            "demberg",
+        assert not is_undef(batch_size)
+        frame.add_batched_(
+            batch_size,  # type: ignore
+            *to_add,
+            dataset=dataset,
+            masks_setting="both",
+            trainer=model_dir,
+            gov_name="head_current",
+            dep_name="child_current",
             only_content_words_cost=only_content_words_cost,
             only_content_words_left=only_content_words_left,
-            only_left=True)
+            only_left=True,
+            arc_distr_mode=distr_mode,
+            include_current=include_current,
+            length_weighted=length_weighted,
+            global_distr=global_distr,
+            return_arc_logits=False,
+            use_ddp=False,
+            rank=None)
 
         unsplit_frame = combine_frames(
             frame, untok_frame,
@@ -473,14 +490,29 @@ def new_process(
             **additional)
         # omits undefined args
 
-        frame.add_(
+        if is_undef(distr_mode):
+            distr_mode = trainer.config.distr_mode
+        if is_undef(length_weighted):
+            length_weighted = trainer.config.length_weighted
+        if is_undef(include_current):
+            include_current = trainer.config.include_current
+        if is_undef(global_distr):
+            global_distr = trainer.config.global_distr
+        if is_undef(batch_size):
+            batch_size = trainer.config.batch_size
+
+        frame.add_batched_(
+            batch_size,  # type: ignore
             *to_add,
             dataset=dataset,
-            token_mapper_dir=token_mapper_dir,
             trainer=trainer,
-            gov_name="head_current", dep_name="child_current",
+            masks_setting="both",
+            gov_name="head_current",
+            dep_name="child_current",
             only_content_words_cost=only_content_words_cost,
             only_content_words_left=only_content_words_left,
+            return_att=True,
+            return_proj_states=True,
             only_left=True,
             arc_distr_mode=distr_mode,
             include_current=include_current,
@@ -637,6 +669,7 @@ def combine_frames(
     temp_untok_frame.adjust_untokenise_([
         word for sentence in untok_frame.df["word"]
         for word in sentence])  # type: ignore
+    temp_untok_frame.add_("position")
 
     # Do this separately because in untok_frame numbers are replaced
     # with <num>. Therefore, frequency and length would not be

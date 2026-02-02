@@ -66,7 +66,7 @@ def load_provo(
         make_lower: bool = True,
         token_mapper_dir: str | None = None,
         verbose: bool = False,
-        ) -> tuple[list[str], list[str], list[int]]:
+        ) -> tuple[list[str], list[str], list[str]]:
     """Load meco corpus from .rda file.
 
     Parameters
@@ -89,7 +89,7 @@ def load_provo(
         The list of all tokens.
     list[str]
         For every token the story ID it appears in.
-    list[int]
+    list[str]
         For every token, its word ID.
     """
 
@@ -97,7 +97,6 @@ def load_provo(
     # Then make list from that, make dict from list item to index,
     # create random mask and iterate through corpus to append the stories
     # This will result in all sentences of a story belonging to the same split.
-
     pretokeniser = utils.load_pretokeniser()
 
     token_mapper = None
@@ -146,7 +145,8 @@ def load_provo(
         "Text_ID"].astype(str) + "_" + df[
             "Sentence_Number"].astype(int).astype(str)
 
-    df["Word_In_Sentence_Number"] = df["Word_In_Sentence_Number"].astype(int)
+    df["Word_In_Sentence_Number"] = df[
+        "Word_In_Sentence_Number"].astype(int).astype(str)
 
     return (
         df["Word"].to_list(),
@@ -214,6 +214,8 @@ def prepare_RTs_provo(
     df = df[[
         "Corpus", "item", "zone", "WorkerId",
         "word", "GPT", "FFD", "GD"]]
+
+    df["zone"] = df["zone"].astype(str)
     df["element"] = df["Corpus"] + df["zone"] + df["item"].astype(str)
 
     if output_file is None:

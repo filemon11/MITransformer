@@ -207,6 +207,8 @@ class CompareParserArgs(ParserArgs):
 class RTParserArgs(ParserArgs):
     n_runs: int
     lme: bool
+    to_add: tuple[str, ...] | None
+    legacy_process: bool
 
     model_name: str
     dependency_mode: Literal["supervised", "input", "standard"] | Undefined

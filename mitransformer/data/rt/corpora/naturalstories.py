@@ -74,7 +74,7 @@ def load_natural_stories(
         make_lower: bool = True,
         token_mapper_dir: str | None = None,
         verbose: bool = False
-        ) -> tuple[list[str], list[str], list[int]]:
+        ) -> tuple[list[str], list[str], list[str]]:
     """Load natural stories corpus from tsv file.
 
     Parameters
@@ -96,7 +96,7 @@ def load_natural_stories(
         The list of all tokens.
     list[str]
         For every token the story ID it appears in.
-    list[int]
+    list[str]
         For every token, its word ID.
     """
 
@@ -111,7 +111,7 @@ def load_natural_stories(
 
     words: list[str] = []
     story_ids: list[str] = []
-    word_ids: list[int] = []
+    word_ids: list[str] = []
     with open(input_file, "r") as file:
         for line in tqdm.tqdm(
                 file,
@@ -132,7 +132,7 @@ def load_natural_stories(
 
                 words.append(token.replace(" ", ""))
                 story_ids.append(story_id)
-                word_ids.append(int(word_id))
+                word_ids.append(word_id)
     return words, story_ids, word_ids
 
 
@@ -158,6 +158,8 @@ def prepare_RTs_naturalstories(
     df["Corpus"] = "naturalstories"
     df["item"] = df["item"].astype(str)
     df = df[["Corpus", "item", "zone", "WorkerId", "word", "RT"]]
+
+    df["zone"] = df["zone"].astype(str)
     df["element"] = df["Corpus"] + df["zone"] + df["item"].astype(str)
 
     if output_file is None:

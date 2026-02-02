@@ -49,7 +49,7 @@ def load_frank(
         make_lower: bool = True,
         token_mapper_dir: str | None = None,
         verbose: bool = False
-        ) -> tuple[list[str], list[str], list[int]]:
+        ) -> tuple[list[str], list[str], list[str]]:
     """Load natural stories corpus from tsv file.
 
     Parameters
@@ -71,7 +71,7 @@ def load_frank(
         The list of all tokens.
     list[str]
         For every token the story ID it appears in.
-    list[int]
+    list[str]
         For every token, its word ID.
     """
 
@@ -85,7 +85,7 @@ def load_frank(
 
     words: list[str] = []
     sentence_ids: list[str] = []
-    word_ids: list[int] = []
+    word_ids: list[str] = []
 
     with open(input_file, mode="r", encoding='cp1252') as file:
         file_iter = iter(file)
@@ -111,7 +111,7 @@ def load_frank(
 
                 words.append(word)
                 sentence_ids.append(str(sentence_id))
-                word_ids.append(word_id)
+                word_ids.append(str(word_id))
     return words, sentence_ids, word_ids
 
 
@@ -147,6 +147,7 @@ def prepare_RTs_frank_ET(
         "Corpus", "item", "zone", "WorkerId",
         "word", "GPT", "FFD", "GD"]]
 
+    df["zone"] = df["zone"].astype(str)
     df["element"] = df["Corpus"] + df["zone"] + df["item"].astype(str)
 
     if output_file is None:

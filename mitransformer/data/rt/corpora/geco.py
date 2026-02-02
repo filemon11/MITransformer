@@ -66,7 +66,7 @@ def load_geco(
         make_lower: bool = True,
         token_mapper_dir: str | None = None,
         verbose: bool = False,
-        ) -> tuple[list[str], list[str], list[int]]:
+        ) -> tuple[list[str], list[str], list[str]]:
     """Load geco corpus from .xlsx file.
 
     Parameters
@@ -89,7 +89,7 @@ def load_geco(
         The list of all tokens.
     list[str]
         For every token the part ID it appears in.
-    list[int]
+    list[str]
         For every token, its word ID.
     """
 
@@ -123,7 +123,7 @@ def load_geco(
     zones = [
         np.arange(1, length+1) for length in lens_of_parts]  # type: ignore
 
-    df["zone"] = np.concat(zones)
+    df["zone"] = np.concat(zones).astype(str)
 
     # Make words lowercase
     if make_lower:
@@ -215,6 +215,7 @@ def prepare_RTs_geco(
         "Corpus", "item", "zone", "WorkerId",
         "word", "GPT", "FFD", "GD"]]
 
+    df["zone"] = df["zone"].astype(str)
     df["element"] = df["Corpus"] + df["zone"] + df["item"].astype(str)
 
     if output_file is None:

@@ -102,7 +102,7 @@ def load_meco(
         token_mapper_dir: str | None = None,
         verbose: bool = False,
         lang: str = "en"
-        ) -> tuple[list[str], list[str], list[int]]:
+        ) -> tuple[list[str], list[str], list[str]]:
     """Load meco corpus from .rda file.
 
     Parameters
@@ -125,7 +125,7 @@ def load_meco(
         The list of all tokens.
     list[str]
         For every token the story ID it appears in.
-    list[int]
+    list[str]
         For every token, its word ID.
     """
 
@@ -187,7 +187,7 @@ def load_meco(
     return (
         df["word"].to_list(),
         df["trialid"].to_list(),
-        df["wordnum"].to_list())
+        df["wordnum"].astype(str).to_list())
 
 
 def load_meco1(
@@ -196,7 +196,7 @@ def load_meco1(
         token_mapper_dir: str | None = None,
         verbose: bool = False,
         lang: str = "en"
-        ) -> tuple[list[str], list[str], list[int]]:
+        ) -> tuple[list[str], list[str], list[str]]:
     return load_meco(
         input_file, make_lower, token_mapper_dir,
         verbose, lang=lang)
@@ -208,7 +208,7 @@ def load_meco2(
         token_mapper_dir: str | None = None,
         verbose: bool = False,
         lang: str = "en_uk"
-        ) -> tuple[list[str], list[str], list[int]]:
+        ) -> tuple[list[str], list[str], list[str]]:
     return load_meco(
         input_file, make_lower, token_mapper_dir,
         verbose, lang=lang)
@@ -272,6 +272,7 @@ def prepare_RTs_meco(
         "Corpus", "item", "zone", "WorkerId",
         "word", "GPT", "FFD", "GD"]]
 
+    df["zone"] = df["zone"].astype(str)
     df["element"] = df["Corpus"] + df["zone"] + df["item"].astype(str)
 
     if output_file is None:

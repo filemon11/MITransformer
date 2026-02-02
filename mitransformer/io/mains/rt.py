@@ -46,7 +46,7 @@ def main_rt(
     # Is the mapper not a model property that can be loaded?
 
     try:
-        in_file = data.rt_corpus_to_measurements_file[corpus]  # type: ignore
+        in_file = data.rt_corpus_to_text_file[corpus]  # type: ignore
     except KeyError:
         raise Exception(f"Corpus {corpus} unknown.")
     assert corpus in data.RTCORPORA
@@ -70,19 +70,40 @@ def main_rt(
     # the lme eval and once for collecting the input of the
     # LM. We might want to unify this process
 
-    candidates = readingtimes.process(
-        corpus_df, None, model_name, mapper,
-        corpus=corpus,
-        only_content_words_cost=only_content_words_cost,
-        only_content_words_left=only_content_words_left,
-        world_size=world_size,
-        shift=arguments.shift,
-        trainer_args=arguments
+    if arguments.legacy_process:
+        candidates = readingtimes.process(
+            corpus_df, None, model_name, mapper,
+            only_content_words_cost=only_content_words_cost,
+            only_content_words_left=only_content_words_left,
+            world_size=world_size,
+            shift=arguments.shift,
+            trainer_args=arguments
         )
+    else:
+        assert arguments.to_add is not None
+        candidates = readingtimes.new_process(
+            input_file=corpus_df,
+            output_file=None,
+            model_dir=model_name,
+            token_mapper_dir=mapper,
+            to_add=arguments.to_add,
+            batch_size=arguments.batch_size,
+            world_size=world_size,
+            use_ddp=arguments.use_ddp,
+            rank=arguments.rank,
+            only_content_words_cost=only_content_words_cost,
+            only_content_words_left=only_content_words_left,
+            masked=arguments.masked,
+            shift=arguments.shift,
+            trainer_args=arguments,
+            distr_mode=arguments.distr_mode,
+            length_weighted=arguments.length_weighted,
+            include_current=arguments.include_current,
+            global_distr=arguments.global_distr)
 
     readingtimes.join(
-        measurements,
         candidates,
+        measurements,
         "ET" if corpus in data.ET_CORPORA else "SP",
         f"RT/data/{corpus}_{arguments.name}_preprocessed_{model_name}.csv",
         rank=arguments.rank

@@ -269,6 +269,8 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             return_arc_logits: bool = True,
             return_logits: bool = True,
             return_label_ids: bool = True,
+            return_proj_states: bool | None = None,
+            return_att: bool | None = None,
             use_ddp: bool = False,
             rank: int | None = None,
             tempdir: str = ".temp",
@@ -379,6 +381,8 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                     return_arc_logits=return_arc_logits,
                     return_logits=return_logits,
                     return_label_ids=return_label_ids,
+                    return_att=return_att,
+                    return_proj_states=return_proj_states,
                     to_device="cpu"):
 
                 probs = [(-np.log2(p[1:-1]+1e-5)).tolist() for p in pred_probs]
@@ -491,6 +495,12 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
         return_label_ids: bool = True
         if "return_label_ids" in kwargs:
             return_label_ids = kwargs["return_label_ids"]
+        return_proj_states: bool | None = None
+        if "return_proj_states" in kwargs:
+            return_proj_states = kwargs["return_proj_states"]
+        return_att: bool | None = None
+        if "return_att" in kwargs:
+            return_att = kwargs["return_att"]
         use_ddp: bool = False
         if "use_ddp" in kwargs:
             use_ddp = kwargs["use_ddp"]
@@ -545,6 +555,8 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                         return_arc_logits=return_arc_logits,
                         return_logits=return_logits,
                         return_label_ids=return_label_ids,
+                        return_att=return_att,
+                        return_proj_states=return_proj_states,
                         to_device="cpu"):
 
                     provided += len(pred_probs)
@@ -949,7 +961,7 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
         else:
             assert arc_distr is not None, (
                 "'arc_distr' is not provided. You need to specify 'arc_distr'"
-                "or 'att'/'proj_states' (for reloading)."
+                " or 'att'/'proj_states' (for reloading)."
             )
         entropy: list[np.ndarray] = [
             losses.attention_entropy_loss(

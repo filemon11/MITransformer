@@ -142,7 +142,7 @@ def load_zuco(
         make_lower: bool = True,
         token_mapper_dir: str | None = None,
         verbose: bool = False,
-        ) -> tuple[list[str], list[str], list[int]]:
+        ) -> tuple[list[str], list[str], list[str]]:
     """Load geco corpus from .xlsx file.
 
     Parameters
@@ -165,7 +165,7 @@ def load_zuco(
         The list of all tokens.
     list[str]
         For every token the part ID it appears in.
-    list[int]
+    list[str]
         For every token, its word ID.
     """
 
@@ -216,7 +216,7 @@ def load_zuco(
     return (
         df["Word"].to_list(),
         df["Sent_ID"].to_list(),
-        df["Word_ID"].to_list())
+        df["Word_ID"].astype(str).to_list())
 
 
 @overload
@@ -265,6 +265,8 @@ def prepare_RTs_zuco(
     df = df[[
         "Corpus", "item", "zone", "WorkerId",
         "word", "GPT", "FFD", "GD"]]
+
+    df["zone"] = df["zone"].astype(str)
     df["element"] = df["Corpus"] + df["zone"] + df["item"].astype(str)
 
     if output_file is None:

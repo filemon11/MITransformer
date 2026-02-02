@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from ..utils import pickle
 
-from typing import Any, Self, TYPE_CHECKING
+from typing import Any, Self, TYPE_CHECKING, Type, overload, Literal
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
@@ -19,6 +19,19 @@ class Undefined():
     file and giving the user the option to overwrite
     parts of that configuration."""
     pass
+
+
+TypeUndefined = Undefined | Type[Undefined]
+
+
+@overload
+def is_undef(obj: TypeUndefined) -> Literal[True]:
+    ...
+
+
+@overload
+def is_undef(obj: Any) -> bool:
+    ...
 
 
 def is_undef(obj) -> bool:
