@@ -58,7 +58,7 @@ def join(
         measurements = pd.read_csv(metrics_file)
     else:
         measurements = metrics_file
-    base_columns = ('item', 'zone', 'WorkerId', 'Corpus')
+    base_columns = ('item', 'zone', 'WorkerId', 'Corpus', 'element')
     # Process depending on corpus type
     if corpus_type == "ET":
         measurements = (
