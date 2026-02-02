@@ -265,6 +265,7 @@ def prepare_RTs_zuco(
     df = df[[
         "Corpus", "item", "zone", "WorkerId",
         "word", "GPT", "FFD", "GD"]]
+    df["element"] = df["Corpus"] + df["zone"] + df["item"].astype(str)
 
     if output_file is None:
         return df

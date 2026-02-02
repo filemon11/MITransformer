@@ -339,7 +339,8 @@ def get_measurements(
         ) -> pd.DataFrame:
     measurement_keys = [
         "FFD", "GPT", "GD"] if is_et_corpus else ["RT"]
-    measurement_keys.extend(["word", "item", "zone", "WorkerId", "Corpus"])
+    measurement_keys.extend(
+        ["word", "item", "zone", "element", "WorkerId", "Corpus"])
     measurements = [
         data.prepare_RT_measurements(
             data.rt_corpus_to_measurements_file[dataset],
