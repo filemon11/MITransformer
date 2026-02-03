@@ -148,7 +148,8 @@ def prepare_RTs_frank_ET(
         "word", "GPT", "FFD", "GD"]]
 
     df["zone"] = df["zone"].astype(str)
-    df["element"] = df["Corpus"] + df["zone"] + df["item"].astype(str)
+    df["element"] = df[
+        "Corpus"] + "_" + df["zone"] + "_" + df["item"].astype(str)
 
     if output_file is None:
         return df
@@ -184,7 +185,8 @@ def prepare_RTs_frank_SP(
     df["Corpus"] = "frank_SP"
     df = df[["Corpus", "item", "zone", "WorkerId", "word", "RT"]]
 
-    df["element"] = df["Corpus"] + df["zone"] + df["item"].astype(str)
+    df["element"] = df[
+        "Corpus"] + "_" + df["zone"] + "_" + df["item"].astype(str)
 
     if output_file is None:
         return df
