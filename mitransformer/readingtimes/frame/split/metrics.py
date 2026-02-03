@@ -1,5 +1,6 @@
 import pandas as pd
 import nltk  # type: ignore
+from nltk.stem import WordNetLemmatizer  # type: ignore
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -582,6 +583,34 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 trainer.config.use_ddp = trainer_use_ddp
                 trainer.config.rank = trainer_rank
                 trainer.config.batch_size = trainer_batch_size
+
+
+class SplitTokMetricMakerLemma(SplitTokMetricMaker):
+    def __init__(self, word_col: str, pos_col: str, *args, **kwargs):
+        self.word_col = word_col
+        self.pos_col = pos_col
+
+    def __call__(
+            self, df: pd.DataFrame,
+            *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
+        """Based on:
+        https://www.geeksforgeeks.org/python/python-lemmatization-with-nltk/"""
+        lemmatiser = WordNetLemmatizer()
+
+        sentences: list[list[str]] = []
+        for word_sent, pos_sent in zip(df[self.word_col], df[self.pos_col]):
+            lemmatised_sentence: list[str] = []
+            word: str
+            pos: str
+            for word, pos in zip(word_sent, pos_sent):
+                if word.lower() == 'are' or word.lower() in ['is', 'am']:
+                    lemmatised_sentence.append(word)
+                else:
+                    lemmatised_sentence.append(
+                        lemmatiser.lemmatize(word, get_wordnet_pos(pos)))
+            sentences.append(lemmatised_sentence)
+
+        return pd.Series(sentences), {}
 
 
 class SplitTokMetricMakerMask(SplitTokMetricMaker):
@@ -1307,6 +1336,20 @@ class SplitTokMetricMakerDemberg(SplitTokMetricMaker):
 def get_POS_tags(sentence: list[str]) -> list[str]:
     tagged = nltk.tag.pos_tag(sentence, tagset=TAGSET)
     return [pos_merge(tag) for _, tag in tagged]
+
+
+def get_wordnet_pos(tag):
+    "from https://www.geeksforgeeks.org/python/python-lemmatization-with-nltk/"
+    if tag.startswith('J'):
+        return 'a'
+    elif tag.startswith('V'):
+        return 'v'
+    elif tag.startswith('N'):
+        return 'n'
+    elif tag.startswith('R'):
+        return 'r'
+    else:
+        return 'n'
 
 
 def generate_head_distance(
@@ -2134,6 +2177,9 @@ gen_and_untok: dict[str, tuple[
         "surprox": (
             SplitTokMetricMakerSurprox,
             True, UntokSplitAdd, True),  # TODO: choose correct untok
+        "lemma": (
+            SplitTokMetricMakerLemma,
+            True, UntokSplitHead, True),  # TODO: choose correct untok
     }
 
 
