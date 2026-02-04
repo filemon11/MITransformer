@@ -222,7 +222,8 @@ def load_zuco(
 @overload
 def prepare_RTs_zuco(
         wave: Literal[1, 2], task:  Literal[1, 2],
-        input_file: str, output_file: str
+        input_file: str, output_file: str,
+        only_interest: bool = True,
         ) -> None:
     ...
 
@@ -230,7 +231,8 @@ def prepare_RTs_zuco(
 @overload
 def prepare_RTs_zuco(
         wave: Literal[1, 2], task:  Literal[1, 2, 3],
-        input_file: str, output_file: None = None
+        input_file: str, output_file: None = None,
+        only_interest: bool = True,
         ) -> pd.DataFrame:
     ...
 
@@ -238,6 +240,7 @@ def prepare_RTs_zuco(
 def prepare_RTs_zuco(
         wave: Literal[1, 2], task:  Literal[1, 2, 3],
         input_file: str, output_file: str | None = None,
+        only_interest: bool = True,
         ) -> None | pd.DataFrame:
     if wave == 2:
         assert task != 3, "ZuCo 2.0 has only two tasks."
@@ -262,9 +265,10 @@ def prepare_RTs_zuco(
 
     df["WorkerId"] = df["WorkerId"].astype(str)
 
-    df = df[[
-        "Corpus", "item", "zone", "WorkerId",
-        "word", "GPT", "FFD", "GD"]]
+    if only_interest:
+        df = df[[
+            "Corpus", "item", "zone", "WorkerId",
+            "word", "GPT", "FFD", "GD"]]
 
     df["zone"] = df["zone"].astype(str)
     df["element"] = df[
@@ -278,59 +282,70 @@ def prepare_RTs_zuco(
 
 @overload
 def prepare_RTs_zuco1_1(
-        input_file: str, output_file: str
+        input_file: str, output_file: str,
+        only_interest: bool = True,
         ) -> None:
     ...
 
 
 @overload
 def prepare_RTs_zuco1_1(
-        input_file: str, output_file: None = None
+        input_file: str, output_file: None = None,
+        only_interest: bool = True,
         ) -> pd.DataFrame:
     ...
 
 
 def prepare_RTs_zuco1_1(
         input_file: str, output_file: str | None = None,
+        only_interest: bool = True,
         ) -> None | pd.DataFrame:
     return prepare_RTs_zuco(1, 1, input_file, output_file)
 
 
 @overload
 def prepare_RTs_zuco1_2(
-        input_file: str, output_file: str
+        input_file: str, output_file: str,
+        only_interest: bool = True,
         ) -> None:
     ...
 
 
 @overload
 def prepare_RTs_zuco1_2(
-        input_file: str, output_file: None = None
+        input_file: str, output_file: None = None,
+        only_interest: bool = True,
         ) -> pd.DataFrame:
     ...
 
 
 def prepare_RTs_zuco1_2(
         input_file: str, output_file: str | None = None,
+        only_interest: bool = True,
         ) -> None | pd.DataFrame:
-    return prepare_RTs_zuco(1, 2, input_file, output_file)
+    return prepare_RTs_zuco(
+        1, 2, input_file, output_file, only_interest=only_interest)
 
 
 @overload
 def prepare_RTs_zuco2_1(
-        input_file: str, output_file: str
+        input_file: str, output_file: str,
+        only_interest: bool = True,
         ) -> None:
     ...
 
 
 @overload
 def prepare_RTs_zuco2_1(
-        input_file: str, output_file: None = None
+        input_file: str, output_file: None = None,
+        only_interest: bool = True,
         ) -> pd.DataFrame:
     ...
 
 
 def prepare_RTs_zuco2_1(
         input_file: str, output_file: str | None = None,
+        only_interest: bool = True,
         ) -> None | pd.DataFrame:
-    return prepare_RTs_zuco(2, 1, input_file, output_file)
+    return prepare_RTs_zuco(
+        2, 1, input_file, output_file, only_interest=only_interest)

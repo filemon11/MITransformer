@@ -555,6 +555,8 @@ def get_frames(
         psyling_df: pd.DataFrame | str,
         rank: int | None = None,
         token_col: str = TOKEN_COL,
+        item_col: str = TEXT_ID_COL,
+        zone_col: str = WNUM_COL,
         baseline_metrics: Iterable[str] = BASELINE_METRICS,
         ) -> Tuple[SplitFrame, SplitFrame]:
 
@@ -565,7 +567,12 @@ def get_frames(
         psyling_df.fillna("NaN")
 
     orig_frame = UnsplitFrame(
-            psyling_df, {"word_col": token_col}, tokenised=False)
+            psyling_df, {
+                "word_col": token_col,
+                "item_col": item_col,
+                "zone_col": zone_col,
+                },
+            tokenised=False)
 
     for metric in baseline_metrics:
         orig_frame.add_(
@@ -682,4 +689,7 @@ def combine_frames(
     if truncate_first and spillover == 0:
         frame.truncate_(left=1)
 
-    return frame.unsplit()
+    unsplit = frame.unsplit()
+    unsplit.add_("chunksentence")
+    unsplit.add_("globalsentence")
+    return unsplit

@@ -59,7 +59,7 @@ def main_rt(
     # Load measurements
     measurements = data.prepare_RT_measurements(
         data.rt_corpus_to_measurements_file[corpus],
-        corpus=corpus)
+        corpus=corpus, only_interest=False)
 
     # Load candidates
     corpus_df = readingtimes.io_corpus_convert(
@@ -106,7 +106,8 @@ def main_rt(
         measurements,
         "ET" if corpus in data.ET_CORPORA else "SP",
         f"RT/data/{corpus}_{arguments.name}_preprocessed_{model_name}.csv",
-        rank=arguments.rank
+        rank=arguments.rank,
+        only_interest=False
     )
 
     if arguments.lme:

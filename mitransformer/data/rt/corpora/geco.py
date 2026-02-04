@@ -162,20 +162,23 @@ def load_geco(
 
 @overload
 def prepare_RTs_geco(
-        input_file: str, output_file: str
+        input_file: str, output_file: str,
+        only_interest: bool = True,
         ) -> None:
     ...
 
 
 @overload
 def prepare_RTs_geco(
-        input_file: str, output_file: None = None
+        input_file: str, output_file: None = None,
+        only_interest: bool = True,
         ) -> pd.DataFrame:
     ...
 
 
 def prepare_RTs_geco(
-        input_file: str, output_file: str | None = None
+        input_file: str, output_file: str | None = None,
+        only_interest: bool = True,
         ) -> None | pd.DataFrame:
     # NOTE: Removes all trials containing words containing
     # ...<letter> because these are split by spacy which creates
@@ -211,9 +214,10 @@ def prepare_RTs_geco(
     for col in ("FFD", "GPT", "GD"):
         df[col] = df[col].replace(".", 0)
 
-    df = df[[
-        "Corpus", "item", "zone", "WorkerId",
-        "word", "GPT", "FFD", "GD"]]
+    if only_interest:
+        df = df[[
+            "Corpus", "item", "zone", "WorkerId",
+            "word", "GPT", "FFD", "GD"]]
 
     df["zone"] = df["zone"].astype(str)
     df["element"] = df[

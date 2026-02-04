@@ -218,6 +218,7 @@ def load_meco2(
 def prepare_RTs_meco(
         meco_wave: Literal[1, 2],
         input_file: str, output_file: str,
+        only_interest: bool = True,
         lang: str = "en"
         ) -> None:
     ...
@@ -227,6 +228,7 @@ def prepare_RTs_meco(
 def prepare_RTs_meco(
         meco_wave: Literal[1, 2],
         input_file: str, output_file: None = None,
+        only_interest: bool = True,
         lang: str = "en"
         ) -> pd.DataFrame:
     ...
@@ -235,6 +237,7 @@ def prepare_RTs_meco(
 def prepare_RTs_meco(
         meco_wave: Literal[1, 2],
         input_file: str, output_file: str | None = None,
+        only_interest: bool = True,
         lang: str = "en"
         ) -> None | pd.DataFrame:
 
@@ -268,9 +271,10 @@ def prepare_RTs_meco(
         inplace=True)
     df["Corpus"] = f"meco{meco_wave}"
 
-    df = df[[
-        "Corpus", "item", "zone", "WorkerId",
-        "word", "GPT", "FFD", "GD"]]
+    if only_interest:
+        df = df[[
+            "Corpus", "item", "zone", "WorkerId",
+            "word", "GPT", "FFD", "GD"]]
 
     df["zone"] = df["zone"].astype(str)
     df["element"] = df[
@@ -285,6 +289,7 @@ def prepare_RTs_meco(
 @overload
 def prepare_RTs_meco1(
         input_file: str, output_file: str,
+        only_interest: bool = True,
         lang: str = "en"
         ) -> None:
     ...
@@ -293,6 +298,7 @@ def prepare_RTs_meco1(
 @overload
 def prepare_RTs_meco1(
         input_file: str, output_file: None = None,
+        only_interest: bool = True,
         lang: str = "en"
         ) -> pd.DataFrame:
     ...
@@ -300,15 +306,17 @@ def prepare_RTs_meco1(
 
 def prepare_RTs_meco1(
         input_file: str, output_file: str | None = None,
+        only_interest: bool = True,
         lang: str = "en"
         ) -> None | pd.DataFrame:
     return prepare_RTs_meco(
-        1, input_file, output_file, lang)
+        1, input_file, output_file, only_interest, lang)
 
 
 @overload
 def prepare_RTs_meco2(
         input_file: str, output_file: str,
+        only_interest: bool = True,
         lang: str = "en_uk"
         ) -> None:
     ...
@@ -317,6 +325,7 @@ def prepare_RTs_meco2(
 @overload
 def prepare_RTs_meco2(
         input_file: str, output_file: None = None,
+        only_interest: bool = True,
         lang: str = "en_uk"
         ) -> pd.DataFrame:
     ...
@@ -324,7 +333,8 @@ def prepare_RTs_meco2(
 
 def prepare_RTs_meco2(
         input_file: str, output_file: str | None = None,
+        only_interest: bool = True,
         lang: str = "en_uk"
         ) -> None | pd.DataFrame:
     return prepare_RTs_meco(
-        2, input_file, output_file, lang)
+        2, input_file, output_file, only_interest, lang)

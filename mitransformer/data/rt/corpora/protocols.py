@@ -26,18 +26,21 @@ class CorpusSplitter(Protocol):
 class CorpusPreparer(Protocol):
     @overload
     def __call__(
-            self, input_file: str, output_file: str
+            self, input_file: str, output_file: str,
+            only_interest: bool = True,
             ) -> None:
         ...
 
     @overload
     def __call__(
-            self, input_file: str, output_file: None = None
+            self, input_file: str, output_file: None = None,
+            only_interest: bool = True,
             ) -> pd.DataFrame:
         ...
 
     def __call__(
             self,
             input_file: str,
-            output_file: str | None = None) -> None | pd.DataFrame:
+            output_file: str | None = None,
+            only_interest: bool = True) -> None | pd.DataFrame:
         ...

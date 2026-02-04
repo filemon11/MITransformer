@@ -117,20 +117,23 @@ def load_frank(
 
 @overload
 def prepare_RTs_frank_ET(
-        input_file: str, output_file: str
+        input_file: str, output_file: str,
+        only_interest: bool = True,
         ) -> None:
     ...
 
 
 @overload
 def prepare_RTs_frank_ET(
-        input_file: str, output_file: None = None
+        input_file: str, output_file: None = None,
+        only_interest: bool = True,
         ) -> pd.DataFrame:
     ...
 
 
 def prepare_RTs_frank_ET(
-        input_file: str, output_file: str | None = None
+        input_file: str, output_file: str | None = None,
+        only_interest: bool = True,
         ) -> None | pd.DataFrame:
     df = pd.read_csv(input_file, sep='\t', header=0)
     df = df.rename(columns={
@@ -143,9 +146,10 @@ def prepare_RTs_frank_ET(
     df["WorkerId"] = df["WorkerId"].astype(str)
     df["item"] = df["item"].astype(str)
     df["Corpus"] = "frank_ET"
-    df = df[[
-        "Corpus", "item", "zone", "WorkerId",
-        "word", "GPT", "FFD", "GD"]]
+    if only_interest:
+        df = df[[
+            "Corpus", "item", "zone", "WorkerId",
+            "word", "GPT", "FFD", "GD"]]
 
     df["zone"] = df["zone"].astype(str)
     df["element"] = df[
@@ -159,20 +163,23 @@ def prepare_RTs_frank_ET(
 
 @overload
 def prepare_RTs_frank_SP(
-        input_file: str, output_file: str
+        input_file: str, output_file: str,
+        only_interest: bool = True,
         ) -> None:
     ...
 
 
 @overload
 def prepare_RTs_frank_SP(
-        input_file: str, output_file: None = None
+        input_file: str, output_file: None = None,
+        only_interest: bool = True,
         ) -> pd.DataFrame:
     ...
 
 
 def prepare_RTs_frank_SP(
-        input_file: str, output_file: str | None = None
+        input_file: str, output_file: str | None = None,
+        only_interest: bool = True,
         ) -> None | pd.DataFrame:
     df = pd.read_csv(input_file, sep='\t', header=0)
     df.rename(columns={
@@ -183,7 +190,8 @@ def prepare_RTs_frank_SP(
     df["WorkerId"] = df["WorkerId"].astype(str)
     df["item"] = df["item"].astype(str)
     df["Corpus"] = "frank_SP"
-    df = df[["Corpus", "item", "zone", "WorkerId", "word", "RT"]]
+    if only_interest:
+        df = df[["Corpus", "item", "zone", "WorkerId", "word", "RT"]]
 
     df["element"] = df[
         "Corpus"] + "_" + df["zone"] + "_" + df["item"].astype(str)

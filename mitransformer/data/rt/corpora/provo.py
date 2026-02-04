@@ -157,6 +157,7 @@ def load_provo(
 @overload
 def prepare_RTs_provo(
         input_file: str, output_file: str,
+        only_interest: bool = True,
         ) -> None:
     ...
 
@@ -164,12 +165,14 @@ def prepare_RTs_provo(
 @overload
 def prepare_RTs_provo(
         input_file: str, output_file: None = None,
+        only_interest: bool = True,
         ) -> pd.DataFrame:
     ...
 
 
 def prepare_RTs_provo(
         input_file: str, output_file: str | None = None,
+        only_interest: bool = True,
         ) -> None | pd.DataFrame:
 
     df: pd.DataFrame = pd.read_csv(input_file, encoding="ISO-8859-1")
@@ -211,9 +214,11 @@ def prepare_RTs_provo(
         inplace=True)
 
     df["Corpus"] = "provo"
-    df = df[[
-        "Corpus", "item", "zone", "WorkerId",
-        "word", "GPT", "FFD", "GD"]]
+
+    if only_interest:
+        df = df[[
+            "Corpus", "item", "zone", "WorkerId",
+            "word", "GPT", "FFD", "GD"]]
 
     df["zone"] = df["zone"].astype(str)
     df["element"] = df[

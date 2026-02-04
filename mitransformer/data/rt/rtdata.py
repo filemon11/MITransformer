@@ -141,7 +141,8 @@ for corpus, path in rt_corpus_to_text_file.copy().items():
 @overload
 def prepare_RT_measurements(
         input_file: str, output_file: str,
-        corpus: RTCorpus = "naturalstories"
+        corpus: RTCorpus = "naturalstories",
+        only_interest: bool = True,
         ) -> None:
     ...
 
@@ -149,17 +150,21 @@ def prepare_RT_measurements(
 @overload
 def prepare_RT_measurements(
         input_file: str, output_file: None = None,
-        corpus: RTCorpus = "naturalstories"
+        corpus: RTCorpus = "naturalstories",
+        only_interest: bool = True,
         ) -> pd.DataFrame:
     ...
 
 
 def prepare_RT_measurements(
         input_file: str, output_file: str | None = None,
-        corpus: RTCorpus = "naturalstories"
+        corpus: RTCorpus = "naturalstories",
+        only_interest: bool = True,
         ) -> None | pd.DataFrame:
     return rt_corpus_to_prepare_measurements_func[
-        corpus](input_file, output_file)
+        corpus](
+            input_file, output_file,
+            only_interest=only_interest)
 
 
 TOKEN_COL = "word"

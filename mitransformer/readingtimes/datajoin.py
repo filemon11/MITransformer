@@ -28,7 +28,8 @@ def join(
         candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
         corpus_type: data.RTCorpusTypes, output_file: None = None,
         how: pdtyping.MergeHow = "inner",
-        rank: int | None = None
+        rank: int | None = None,
+        only_interest: bool = True,
         ) -> pd.DataFrame:
     ...
 
@@ -38,7 +39,8 @@ def join(
         candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
         corpus_type: data.RTCorpusTypes, output_file: str,
         how: pdtyping.MergeHow = "inner",
-        rank: int | None = None
+        rank: int | None = None,
+        only_interest: bool = True,
         ) -> None:
     ...
 
@@ -47,7 +49,8 @@ def join(
         candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
         corpus_type: data.RTCorpusTypes, output_file: str | None = None,
         how: pdtyping.MergeHow = "inner",
-        rank: int | None = None
+        rank: int | None = None,
+        only_interest: bool = True,
         ) -> None | pd.DataFrame:
     # Read input files
     if isinstance(candidates_file, str):
@@ -58,49 +61,43 @@ def join(
         measurements = pd.read_csv(metrics_file)
     else:
         measurements = metrics_file
-    base_columns = ('item', 'zone', 'WorkerId', 'Corpus', 'element')
-    # Process depending on corpus type
-    if corpus_type == "ET":
-        measurements = (
-            measurements
-            .groupby(list(base_columns), as_index=False)
-            .agg({
-                'FFD': 'sum',
-                'GPT': 'sum',
-                'GD':  'sum',
-                'word': 'first'
-            })
-            .drop_duplicates()
-        )
-
-        interest = list(base_columns) + ['FFD', 'GPT', 'GD']
-
-    else:
-        measurements = (
-            measurements
-            .groupby(list(base_columns), as_index=False)
-            .agg({
-                'RT': 'sum',
-                'word': 'first'
-            })
-            .drop_duplicates()
-        )
-
-        interest = list(base_columns) + ['RT']
+    # # Process depending on corpus type
 
     # Select relevant columns and inner join with meta
-    measurement = candidates.merge(
-        measurements[interest], how=how, on=['item', 'zone', 'Corpus'])
+    print(measurements)
+    base_columns = ('item', 'zone', 'WorkerId', 'Corpus', 'element')
+    if corpus_type == "ET":
+        interest = list(base_columns) + ['FFD', 'GPT', 'GD']
+    else:
+        interest = list(base_columns) + ['RT']
+    if not only_interest:
+        interest.extend([
+            colname for colname in (
+                "Text_ID", "Word_Number", "Sentence_Number")
+            if colname in measurements.columns
+        ])
+    measurements = measurements[interest]
+    print(measurements)
+
+    on = ['item', 'zone', 'Corpus']
+    for colname in candidates.columns:
+        if colname in measurements.columns and colname not in on:
+            measurements = measurements.drop(colname, axis=1)
+    print(measurements)
+
+    measurements = candidates.merge(
+        measurements, how=how, on=on)
+    print(measurements)
 
     # Get token count (equivalent to the R token check)
     token_count = (
-        measurement[['item', 'zone', 'Corpus', 'word']]
+        measurements[['item', 'zone', 'Corpus', 'word']]
         .drop_duplicates()
         .shape[0]
     )
     info(rank, logger, f"Individual token count: {token_count}")
     if output_file is None:
-        return measurement
+        return measurements
     # Write output
-    measurement.to_csv(output_file, index=False)
+    measurements.to_csv(output_file, index=False)
     return None
