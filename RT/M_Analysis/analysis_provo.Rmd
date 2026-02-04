@@ -1,0 +1,335 @@
+#### Imports
+
+```{r}
+library(Rmisc)
+library(tidyverse)
+library(stringr)
+library(scales)
+library(grid)
+library(ggpubr)
+library(MASS)
+library(lme4)
+library(stats)
+library(modelr)
+library(plotrix)
+library(mgcv)
+library(hexbin)
+library(formattable)
+library(MuMIn)
+library(ggrepel)
+library(data.table)
+library(comprehenr)
+library(ggplot2)
+library(dplyr)
+library(car)
+
+source("utils.R")
+```
+
+#### Definitions
+
+```{r}
+data_dir <- "../data/provo_RT_test_preprocessed_exp1_4_0.csv"
+goal <- "GPT"
+
+candidates <- c("surprisal", "attention_entropy")
+baseline_predictors <- c("frequency", "length", "position", "lemma", "element")
+```
+
+#### Data Preparation
+
+```{r}
+
+data <- read.csv(data_dir)
+
+# Get names of numeric columns
+numeric_cols <- names(data)[sapply(data, is.numeric)]
+# Subset to numeric columns you want to scale
+excluded_vars <- c(goal, "WorkerId", "item", "element", "zone", "chunksentence")
+
+cols_to_scale <- setdiff(numeric_cols, excluded_vars)
+
+# Apply cut-off
+# Provo already comes with a minimal value of 81 for GPT
+data <- apply_cutoff(data, goal)
+
+# Remove outliers
+data <- remove_outliers(data, c(goal), id_col="WorkerId")
+
+# Apply scaling
+data <- data %>%
+  mutate(across(all_of(cols_to_scale), scaling_var))
+```
+
+For eye-tracking, we remove skipped-over words as they do not inform us about comprehension process durations.
+
+#### Simple check of aggregated correlation
+
+```{r}
+compute_mean <- function(datasets, factor1, factor2) {
+  formula_str <- paste("cbind(", factor1, ",", factor2, ") ~ item + zone")
+  means <- aggregate(as.formula(formula_str), data=data, FUN = mean, na.rm = TRUE)
+  corr <- cor.test(means[[factor1]], means[[factor2]], method="pearson")
+  corr
+}
+
+compute_mean(data, "GPT", "surprisal")
+compute_mean(data, "GPT", "attention_entropy")
+```
+
+#### First check of assumptions
+
+We check for collinearity and multicollinearity (?) of the variables:
+
+##### Pairwise collinearity:
+
+We check this via a correlation matrix:
+
+```{r}
+
+preds <- data %>%
+  dplyr::select(frequency, length, position, Text_ID, Sentence_Number, Word_Number)
+cor_mat <- cor(preds)
+round(cor_mat, 2)
+```
+
+We may have a problem for frequency-length.
+
+##### Multicollinearity:
+
+We detect multicollinearity using VIF. Thresholds are motivated by: <https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/j.2041-210X.2009.00001.x>
+
+TODO
+
+```{r}
+m <- lm(GPT ~ frequency + length + position + Text_ID + Sentence_Number + Word_Number, data)
+vif(m)
+```
+
+There is cause to worry about Sentence_Number and Word_Number. Word_Number is almost 5; we will leave it out.
+
+#### Baseline model
+
+We should include predictors frequency and length. But what about position, text number and sentence number (nested inside text numer)? We perform a first preliminary test without random effects:
+
+```{r}
+#| cache = TRUE
+
+m <- lm(GPT ~ frequency + length + position + Text_ID + Sentence_Number,
+  data=na.omit(data))
+m
+```
+
+The coefficient for Text_ID is very small. Let's check for significance:
+
+```{r}
+m0 <- lm(GPT ~ frequency + length + position + Sentence_Number,
+  data=na.omit(data))
+anova(m0, m)
+```
+
+We definitely cannot refute the null hypothesis. Thus, we will not include it.
+
+Now, let's include random effects. We will use some tricks to speed up the fitting. First, for the invidual items:
+
+```{r}
+#| cache = TRUE
+
+lmer(GPT ~ frequency + length + position + Sentence_Number + (frequency + length + position + Sentence_Number | element),
+  data=na.omit(data),
+  REML=FALSE,
+  lmerControl(optimizer = "optimx", calc.derivs = FALSE, optCtrl = list(method = "nlminb", starttests = FALSE, kkt = FALSE)))
+```
+
+```{r}
+#| cache = TRUE
+
+lmer(GPT ~ frequency + length + position + Sentence_Number + (frequency + length + position + Sentence_Number | WorkerId) + (frequency + length + position + Sentence_Number | lemma) + (frequency + length + position + Sentence_Number | element),
+  data=na.omit(data),
+  REML=FALSE,
+  lmerControl(optimizer = "optimx", calc.derivs = FALSE, optCtrl = list(method = "nlminb", starttests = FALSE, kkt = FALSE)))
+```
+
+The effect for position seems pretty small. For now, we leave it out and check if it is significant later.
+
+We note a standard deviation for the random intercept in the lemma group and consequently NaN values in the lemma correlation matrix. Additionally, there is a correlation of -1 between the length and frequency random slopes in the lemma group. Next, we try the same model but without correlations for the lemma group.
+
+```{r}
+#| cache = TRUE
+
+m <- lmer(GPT ~ frequency + length + (frequency + length | WorkerId + element) + (frequency + length || lemma),
+  data=na.omit(data),
+  REML=FALSE)
+m
+```
+
+Now, let's remove the random intercept for lemma since it appears to be very close to aor at zero:
+
+```{r}
+#| cache = TRUE
+
+m <- lmer(GPT ~ frequency + length + (frequency + length | WorkerId + element) + (0 + frequency + length || lemma),
+  data=na.omit(data),
+  REML=FALSE)
+m
+```
+
+Great. Now, let's check if adding position back in provides a significant effect:
+
+```{r}
+#| cache = TRUE
+
+m0 <- lmer(GPT ~ frequency + length + (position + frequency + length | WorkerId + element) + (0 + position + frequency + length || lemma),
+  data=na.omit(data),
+  REML=FALSE)
+m0
+```
+
+The model cannot converge. We leave out the random coefficient for position in the WorkerId group.
+
+```{r}
+#| cache = TRUE
+
+m0 <- lmer(GPT ~ frequency + length + (frequency + length | WorkerId + element) + (0 + position + frequency + length || lemma),
+  data=na.omit(data),
+  REML=FALSE)
+m0
+
+```
+
+```{r}
+m1 <- lmer(GPT ~ position + frequency + length + (frequency + length | WorkerId + element) + (0 + position + frequency + length || lemma),
+  data=na.omit(data),
+  REML=FALSE)
+
+m1
+```
+
+```{r}
+anova(m0, m1)
+```
+
+Based on this result, we do not include position.
+
+#### Second check of assumptions
+
+##### Linearity of predictors
+
+We perform a quick visual inspection:
+
+```{r}
+plot(fitted(m), resid(m),
+     xlab = "Fitted values", ylab = "Residuals")
+abline(h = 0, lty = 2)
+```
+
+The cloud seems random with the exception of the lower left where we have a hard cut-off caused by the data removal that comes with Provo (\>80 ms).
+
+Let's investigate this further:
+
+```{r}
+plot(data$length, resid(m0_log), xlab="length", ylab="Residuals"); abline(h=0,lty=2)
+plot(data$frequency, resid(m0_log), xlab="frequency", ylab="Residuals"); abline(h=0,lty=2)
+```
+
+We can mitigate this problem by log-transforming the dependent variable. However, this would contradict the supposed linear effect of surprisal.
+
+log(RT) \~ b0 + b1\*frequency + b2\*length + b3\*log(p) \<=\> RT \~ exp(b0 + b1\*frequency + b2\*length + b3\*log(p)) \<=\> exp(b0 + b1\*frequency + b2\*length)\*exp(b3\*log(p)) \<=\> b2\*length + b3\*log(p)) \<=\> exp(b0 + b1\*frequency + b2\*length)\*p\^b3
+
+Let's try fitting log RTs.
+
+```{r}
+# Subtract by the cut-off point
+data$logGPT <- log(data$GPT-80)
+
+m0_log <- lmer(logGPT ~ frequency + length + (frequency + length | WorkerId + element) + (frequency + length || lemma),
+  data=na.omit(data),
+  REML=FALSE,
+  control = lmerControl(calc.derivs = FALSE))
+
+m0_log
+```
+
+```{r}
+plot(fitted(m0_log), resid(m0_log),
+     xlab = "Fitted values", ylab = "Residuals")
+abline(h = 0, lty = 2)
+```
+
+This looks a bit better but it introduced a long tail and some artifacts.
+
+```{r}
+plot(data$length, resid(m0_log), xlab="length", ylab="Residuals"); abline(h=0,lty=2)
+plot(data$frequency, resid(m0_log), xlab="frequency", ylab="Residuals"); abline(h=0,lty=2)
+```
+
+We see artifacts that are caused by frequency, probably by some very infrequent words where the wordfreq library couldn't generate a reliable measure. Therefore, we remove values smaller than 2 (TODO: zipf scale; check if this is even the proper way to generate word frequencies).
+
+```{r}
+data <- read.csv(data_dir)
+
+# Get names of numeric columns
+numeric_cols <- names(data)[sapply(data, is.numeric)]
+# Subset to numeric columns you want to scale
+excluded_vars <- c(goal, "WorkerId", "item", "element", "zone")
+cols_to_scale <- setdiff(numeric_cols, excluded_vars)
+
+# Apply cut-off
+# Provo already comes with a minimal value of 81 for GPT
+data <- apply_cutoff(data, goal)
+data <- apply_cutoff(data, "frequency", lowerOther=2)
+
+# Remove outliers
+data <- remove_outliers(data, c(goal), id_col="WorkerId")
+
+# Apply scaling
+data <- data %>%
+  mutate(across(all_of(cols_to_scale), scaling_var))
+```
+
+```{r}
+# Subtract by the cut-off point
+data$logGPT <- log(data$GPT-80)
+
+m0_log <- lmer(logGPT ~ frequency + length + (frequency + length | WorkerId),
+  data=na.omit(data),
+  REML=FALSE,
+  control = lmerControl(calc.derivs = FALSE))
+
+m0_log
+```
+
+```{r}
+plot(fitted(m0_log), resid(m0_log),
+     xlab = "Fitted values", ylab = "Residuals")
+abline(h = 0, lty = 2)
+```
+
+```{r}
+plot(data$length, resid(m0_log), xlab="length", ylab="Residuals"); abline(h=0,lty=2)
+plot(data$frequency, resid(m0_log), xlab="frequency", ylab="Residuals"); abline(h=0,lty=2)
+```
+
+#### Inclusion of spillover
+
+Now, we want to determine the correct amount of spillover. We check this via a likelihood ratio test about the inclusion of spillover covariates:
+
+```{r}
+data_spill1 <- add_lags_scaled(
+  lag_cols = c(frequency, length, candidates),
+  group_cols = c(WorkerId, item),
+  n_lags = 1
+)
+
+m0_spill1 <- lmer(GPT ~ frequency + frequency + length + position + (position + frequency + length | WorkerId+ element) + (position + frequency + length || lemma),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+
+m1_spill1 <- lmer(GPT ~ frequency + frequency1 + length + length1 + position + (position + frequency + frequency1 + length + length1 | WorkerId+ element) + (position + frequency + frequency1 + length + length1 || lemma),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+
+anova(m0, m1)
+```
+
+A final test of assumptions:
