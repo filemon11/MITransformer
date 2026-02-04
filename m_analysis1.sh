@@ -30,7 +30,7 @@ prefix="--standalone --nnodes=1 --nproc-per-node=${N_GPUS} -m mitransformer.__ma
 
 general_params="--n_workers ${THREADS_PER_GPU} --device ${DEVICE} --use_ddp False"
 
-core="${general_params} rt --lme False --model_name exp1_4 --batch_size 2 --to_add surprisal,attention_entropy --dataset_name provo_train"
+core="${general_params} rt --lme False --model_name exp1_4 --batch_size 2 --to_add surprisal,attention_entropy,lemma --dataset_name provo --shift 0"
 
 # geco_train,zuco2_1_train,zuco1_1_train,zuco1_2_train,meco1_train,meco2_train,frank_ET_train
 # naturalstories_train,frank_SP_train
