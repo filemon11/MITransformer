@@ -40,8 +40,14 @@ baseline_predictors <- c("frequency", "length", "position", "lemma", "element")
 #### Data Preparationscaling_var
 
 ```{r}
-
 data <- read.csv(data_dir)
+
+# Apply cut-off
+# Provo already comes with a minimal value of 81 for GPT
+data <- apply_cutoff_na(data, goal)
+
+# Remove outliers
+data <- remove_outliers_na(data, c(goal), id_col="WorkerId")
 
 # Get names of numeric columns
 numeric_cols <- names(data)[sapply(data, is.numeric)]
@@ -50,22 +56,10 @@ excluded_vars <- c(goal, "WorkerId", "item", "element", "zone", "chunksentence")
 
 cols_to_scale <- setdiff(numeric_cols, excluded_vars)
 
-# Apply cut-off
-# Provo already comes with a minimal value of 81 for GPT
-data <- apply_cutoff(data, goal)
-
-# Remove outliers
-data <- remove_outliers(data, c(goal), id_col="WorkerId")
-
 # Apply scaling
-data <- data %>%
-  dplyr::mutate(
-    dplyr::across(
-      dplyr::all_of(cols_to_scale),
-      scaling_var,
-      .names = "{.col}.s"
-    )
-  )
+data <- apply_scaling(data, cols_to_scale)
+
+cat(paste("final nrows:", nrow(na.omit(data)), "\n"))
 ```
 
 For eye-tracking, we remove skipped-over words as they do not inform us about comprehension process durations.
@@ -73,7 +67,7 @@ For eye-tracking, we remove skipped-over words as they do not inform us about co
 #### Simple check of aggregated correlation
 
 ```{r}
-compute_mean <- function(datasets, factor1, factor2) {
+compute_mean <- function(data, factor1, factor2) {
   formula_str <- paste("cbind(", factor1, ",", factor2, ") ~ item + zone")
   means <- aggregate(as.formula(formula_str), data=data, FUN = mean, na.rm = TRUE)
   corr <- cor.test(means[[factor1]], means[[factor2]], method="pearson")
@@ -144,19 +138,10 @@ Now, let's include random effects. We will use some tricks to speed up the fitti
 Let's start with random effects based on subjects since these are well motivated:
 
 ```{r}
-lmer(GPT ~ frequency.s + length.s + position.s + Sentence_Number.s + (frequency.s + length.s + position.s + Sentence_Number.s | WorkerId),
+m <- lmer(GPT ~ frequency.s + length.s + position.s + Sentence_Number.s + (frequency.s + length.s + position.s + Sentence_Number.s | WorkerId),
   data=na.omit(data),
-  REML=FALSE,
-  lmerControl(optimizer = "optimx", calc.derivs = FALSE, optCtrl = list(method = "nlminb", starttests = FALSE, kkt = FALSE)))
-```
-
-We have convergence issues likely connected to the Sentence_Number random slope. Let's try refitting without it:
-
-```{r}
-lmer(GPT ~ frequency.s + length.s + position.s + Sentence_Number.s + (frequency.s + length.s + position.s | WorkerId),
-  data=na.omit(data),
-  REML=FALSE,
-  lmerControl(optimizer = "optimx", calc.derivs = FALSE, optCtrl = list(method = "nlminb", starttests = FALSE, kkt = FALSE)))
+  REML=FALSE)
+summary(m)
 ```
 
 That worked. Now, we will not add random effects for each item since we do not have any predictors that vary by item. But we can generalise items by word forms.
@@ -168,21 +153,10 @@ This results in crossed effects:
 ```{r}
 #| cache = TRUE
 
-lmer(GPT ~ frequency.s + length.s + position.s + Sentence_Number.s + (frequency.s + length.s + position.s | WorkerId) + (position.s + Sentence_Number.s | lemma),
+m <- lmer(GPT ~ frequency.s + length.s + position.s + Sentence_Number.s + (frequency.s + length.s + position.s + Sentence_Number.s | WorkerId) + (position.s + Sentence_Number.s | lemma),
   data=na.omit(data),
-  REML=FALSE,
-  lmerControl(optimizer = "optimx", calc.derivs = FALSE, optCtrl = list(method = "nlminb", starttests = FALSE, kkt = FALSE)))
-```
-
-Again, there are convergence issues. We remove the correlation matrix for lemmata.
-
-```{r}
-#| cache = TRUE
-
-lmer(GPT ~ frequency.s + length.s + position.s + Sentence_Number.s + (frequency.s + length.s + position.s | WorkerId) + (position.s + Sentence_Number.s || lemma),
-  data=na.omit(data),
-  REML=FALSE,
-  lmerControl(optimizer = "optimx", calc.derivs = FALSE, optCtrl = list(method = "nlminb", starttests = FALSE, kkt = FALSE)))
+  REML=FALSE)
+summary(m)
 ```
 
 This seems to work well. Finally, let's check if we can fit the model with random effects based on Text_Id:
@@ -190,68 +164,370 @@ This seems to work well. Finally, let's check if we can fit the model with rando
 ```{r}
 #| cache = TRUE
 
-lmer(GPT ~ frequency.s + length.s + position.s + Sentence_Number.s + (frequency.s + length.s + position.s | WorkerId) + (position.s + Sentence_Number.s || lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
-  data=na.omit(data),
-  REML=FALSE,
-  lmerControl(optimizer = "optimx", calc.derivs = FALSE, optCtrl = list(method = "nlminb", starttests = FALSE, kkt = FALSE)))
-```
-
-We need to simplify the structure again:
-
-```{r}
-#| cache = TRUE
-
-m <- lmer(GPT ~ frequency.s + length.s + position.s + Sentence_Number.s + (frequency.s + length.s + position.s | WorkerId) + (position.s + Sentence_Number.s || lemma) + (frequency.s + length.s + position.s + Sentence_Number.s || Text_ID),
-  data=na.omit(data),
-  REML=FALSE,
-  lmerControl(optimizer = "optimx", calc.derivs = FALSE, optCtrl = list(method = "nlminb", starttests = FALSE, kkt = FALSE)))
-m
-```
-
-The estimated fixed effect for position is really small. Let's check whether it is significant.
-
-```{r}
-m0 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (frequency.s + length.s + position.s | WorkerId) + (position.s + Sentence_Number.s || lemma) + (frequency.s + length.s + position.s + Sentence_Number.s || Text_ID),
-  data=na.omit(data),
-  REML=FALSE)
-
-m0
-```
-
-```{r}
-anova(m0, m)
-```
-
-Based on this result, we do not include position. What about sentence number?
-
-```{r}
-m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (Sentence_Number.s || lemma) + (frequency.s + length.s + Sentence_Number.s || Text_ID),
-  data=na.omit(data),
-  REML=FALSE)
-m0
-```
-
-```{r}
-m1 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (frequency.s + length.s | WorkerId) + (Sentence_Number.s || lemma) + (frequency.s + length.s + Sentence_Number.s || Text_ID),
-  data=na.omit(data),
-  REML=FALSE)
-m1
-```
-
-```{r}
-anova(m0, m1)
-```
-
-Good. Therefore, we also leave out Sentence_Number as a covariate. How about reintroducing the correlations between random coefficients in the Text_ID group?
-
-```{r}
-m <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID),
+m <- lmer(GPT ~ frequency.s + length.s + position.s + Sentence_Number.s + (frequency.s + length.s + position.s + Sentence_Number.s | WorkerId) + (position.s + Sentence_Number.s | lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
   data=na.omit(data),
   REML=FALSE)
 summary(m)
 ```
 
-We fix this model for now.
+The estimated fixed effect for position is really small. Let's check whether it is significant.
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (frequency.s + length.s + position.s + Sentence_Number.s | WorkerId) + (position.s + Sentence_Number.s | lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+
+summary(m0)
+```
+
+We need to simplify models due to singularity issues.
+
+Our procedure (according to <https://arxiv.org/pdf/1506.04967>):
+
+1.  Analyse PCA
+
+2.  Switch to zero correlation zero-correlation-parameter.
+
+3.  Refit
+
+4.  If not beneficial, drop slopes not supported by likelihood ratio test.
+
+5.  Reintroduce correlations for all or some components if likelihood ratio test is significant.
+
+```{r}
+summary(rePCA(m0))
+summary(rePCA(m))
+
+```
+
+Remove correlations for WorkerId:
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (frequency.s + length.s + position.s + Sentence_Number.s || WorkerId) + (position.s + Sentence_Number.s | lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+
+summary(m0)
+```
+
+Is position.s siginificant in WorkerId group?
+
+```{r}
+m0_0 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (frequency.s + length.s + Sentence_Number.s || WorkerId) + (position.s + Sentence_Number.s | lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+
+anova(m0, m0_0)
+```
+
+Yes it is. Is Sentence_Number.s significant in WorkerId group?
+
+```{r}
+m0_0 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (frequency.s + length.s + position.s || WorkerId) + (position.s + Sentence_Number.s | lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+
+anova(m0, m0_0)
+```
+
+Yes. Significance of per-pariticipant variation of frequency.s and length.s is known to be the case. Thus, try to reintroduce correlations first only for frequency.s and length.s:
+
+```{r}
+m0_1 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (position.s + Sentence_Number.s || WorkerId) + (frequency.s + length.s | WorkerId) + (position.s + Sentence_Number.s | lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0_1)
+
+anova(m0, m0_1)
+```
+
+This is significant. What about Sentence_Number?
+
+```{r}
+m0_0 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (position.s + Sentence_Number.s || WorkerId) + (frequency.s + length.s | WorkerId) + (position.s + Sentence_Number.s | lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0_0)
+
+m0_1 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (position.s + 0 || WorkerId) + (frequency.s + length.s + Sentence_Number.s | WorkerId) + (position.s + Sentence_Number.s | lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0_1)
+
+anova(m0_0, m0_1)
+```
+
+That's not significant. What about position.s?
+
+```{r}
+m0_0 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (position.s + Sentence_Number.s || WorkerId) + (frequency.s + length.s | WorkerId) + (position.s + Sentence_Number.s | lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0_0)
+
+m0_1 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (Sentence_Number.s + 0 || WorkerId) + (position.s + frequency.s + length.s | WorkerId) + (position.s + Sentence_Number.s | lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0_1)
+
+anova(m0_0, m0_1)
+```
+
+That's also not significant. Okay, now we can estimate whether position.s should be a fixed predictor:
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (position.s + Sentence_Number.s + 0 || WorkerId) + (frequency.s + length.s | WorkerId) + (position.s + Sentence_Number.s | lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0)
+
+m1 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + position.s + (position.s + Sentence_Number.s + 0 || WorkerId) + (frequency.s + length.s | WorkerId) + (position.s + Sentence_Number.s | lemma) + (frequency.s + length.s + position.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+
+anova(m0, m1)
+```
+
+Based on this result, we do not include position. What about sentence number?
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + (Sentence_Number.s + 0 || WorkerId) + (frequency.s + length.s | WorkerId) + (Sentence_Number.s | lemma) + (frequency.s + length.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0)
+
+m1 <- lmer(GPT ~ frequency.s + length.s + Sentence_Number.s + (Sentence_Number.s + 0 || WorkerId) + (frequency.s + length.s | WorkerId) + (Sentence_Number.s | lemma) + (frequency.s + length.s + Sentence_Number.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+
+anova(m0, m1)
+```
+
+Based on this result, we also do not include Sentence_Number. Is the random intercept for lemma relevant?
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0)
+
+m1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID) + (1 | lemma),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+
+anova(m0, m1)
+```
+
+Yes it is.
+
+What about per-Sentence random effects? Let's try that:
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID) + (1 | lemma),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0)
+
+m1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID) + (1 | lemma) + (1 | Sentence_Number),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+
+anova(m0, m1)
+```
+
+Okay, it is not. We refrain from trying out random slopes for Sentence_Number.
+
+Just to make sure: What about sentence position?
+
+```{r}
+m1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID) + (1 | lemma) + (1 | position),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+
+anova(m0, m1)
+```
+
+Okay, that is clear. We should include position as a grouping level. Should we also include random slopes? Let's try length:
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID) + (1 | lemma) + (1 | position),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0)
+
+m1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID) + (1 | lemma) + (1 + length.s || position),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+
+anova(m0, m1)
+```
+
+What about frequency?
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID) + (1 | lemma) + (1 + length.s || position),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0)
+
+m1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID) + (1 | lemma) + (1 + length.s + frequency.s || position),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+
+anova(m0, m1)
+```
+
+What about correlations?
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID) + (1 | lemma) + (length.s + frequency.s || position),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0)
+
+m1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID) + (1 | lemma) + (length.s + frequency.s | position),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+
+anova(m0, m1)
+```
+
+Finally, we check sentence IDs (here: item), nested inside Text_ID.
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID) + (1 | lemma) + (length.s + frequency.s | position),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0)
+
+m1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s | Text_ID) + (1 | lemma) + (length.s + frequency.s | position) + (1 | item),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+
+anova(m0, m1)
+```
+
+This leads to singularity issues. Apparently, components in Text_ID should be reworked now.
+
+```{r}
+summary(rePCA(m1))
+```
+
+```{r}
+m1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s || Text_ID) + (1 | lemma) + (length.s + frequency.s | position) + (1 | item),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+```
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s || Text_ID) + (1 | lemma) + (length.s + frequency.s | position),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0)
+
+anova(m0, m1)
+```
+
+That is significant. One could suspect that the random intercept for Text_ID is not significant and caused the singularity issues. Let's first check whether there should be random slopes:
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s || Text_ID) + (1 | lemma) + (length.s + frequency.s | position) + (1 | item),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0)
+
+m1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s || Text_ID) + (1 | lemma) + (length.s + frequency.s | position) + (1 + length.s || item),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+
+anova(m0, m1)
+```
+
+Now, we check for frequency:
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s || Text_ID) + (1 | lemma) + (length.s + frequency.s | position) + (1 + length.s || item),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0)
+
+m1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s || Text_ID) + (1 | lemma) + (length.s + frequency.s | position) + (1 + length.s + frequency.s || item),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+```
+
+Okay, we don't include a random slope for frequency. What about the correlation between intercept and length?
+
+```{r}
+m0_1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s + length.s || Text_ID) + (1 | lemma) + (length.s + frequency.s | position) + (1 + length.s | item),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0_1)
+
+anova(m0, m0_1)
+```
+
+That did not work. Is the intercept for Text_ID significant?
+
+```{r}
+m0_0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (0 + frequency.s + length.s || Text_ID) + (1 | lemma) + (length.s + frequency.s | position) + (1 + length.s || item),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0)
+
+anova(m0_0, m0)
+```
+
+We got a singularity (which is unexpected since the random structure was simplified). Thus, we do not remove the random intercept. Is length significant for Text_ID? Its variance seems very small.
+
+```{r}
+m0_0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s || Text_ID) + (1 | lemma) + (length.s + frequency.s | position) + (1 + length.s || item),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m0_0)
+
+anova(m0_0, m0)
+```
+
+That's conclusive. We remove it and check whether we can reintroduce correlations again.
+
+```{r}
+m1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s | Text_ID) + (1 | lemma) + (length.s + frequency.s | position) + (1 + length.s || item),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+
+anova(m0_0, m1)
+```
+
+This didn't work.
+
+```{r}
+m1 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s || Text_ID) + (1 | lemma) + (length.s + frequency.s | position) + (length.s | item),
+  data=na.omit(data),
+  REML=FALSE)
+summary(m1)
+
+anova(m0_0, m1)
+```
+
+This also didn't work. Thus, we fix the model now.
+
+```{r}
+m <- m0_0
+```
 
 #### Second check of assumptions
 
@@ -280,18 +556,19 @@ The shape in the lower left suggests that another kind of modelling might be sen
 Let's plot fitted values (keeping in mind that their interpretation may be problematic since they keep all predictors constant except for one predictor of interest.
 
 ```{r}
-plot_bins(m, "frequency.s", bins=25, data=data)
-plot_bins(m, "length.s", bins=25, data=data)
+source("utils.R")
+plot_bins(m, "frequency.s", bins=25, data=na.omit(data))
+plot_bins(m, "length.s", bins=25, data=na.omit(data))
 ```
 
-Length seems alright. Frequency appears to be influenced by some extremely low frequency items. TODO
+Length seems alright. Frequency appears to be influenced by some extremely low frequency items.
 
 ##### Normality of residuals
 
 ```{r}
 qqnorm(resid(m))
 qqline(resid(m))
-hist(resid(m))
+hist(resid(m), n=30)
 ```
 
 Most residuals are negative and we have a right tail. The Q-Q plot exhibits a dent. Possibly log transformation can help.
@@ -299,8 +576,8 @@ Most residuals are negative and we have a right tail. The Q-Q plot exhibits a de
 ##### Homogeneity of variances
 
 ```{r}
-plot(data$frequency.s, resid(m)); abline(h=0,lty=2)
-plot(data$length.s, resid(m)); abline(h=0,lty=2)
+plot(na.omit(data)$frequency.s, resid(m)); abline(h=0,lty=2)
+plot(na.omit(data)$length.s, resid(m)); abline(h=0,lty=2)
 ```
 
 We can see the right tail manifested at high frequency and at low length words, i.e. those are predicted too low.
@@ -311,142 +588,63 @@ Furthermore, we see artifacts that are caused by frequency, probably by some ver
 
 ```{r}
 re <- ranef(m)
+qqnorm(re$lemma[,1]); qqline(re$lemma[,1])
+qqnorm(re$item[,1]); qqline(re$item[,1])
+qqnorm(re$item[,2]); qqline(re$item[,2])
 qqnorm(re$WorkerId[,1]); qqline(re$WorkerId[,1])
 qqnorm(re$WorkerId[,2]); qqline(re$WorkerId[,2])
 qqnorm(re$WorkerId[,3]); qqline(re$WorkerId[,3])
 qqnorm(re$Text_ID[,1]); qqline(re$Text_ID[,1])
 qqnorm(re$Text_ID[,2]); qqline(re$Text_ID[,2])
-qqnorm(re$Text_ID[,3]); qqline(re$Text_ID[,3])
+qqnorm(re$position[,1]); qqline(re$position[,1])
+qqnorm(re$position[,2]); qqline(re$position[,2])
+qqnorm(re$position[,3]); qqline(re$position[,3])
 ```
 
-The Text_Id effects are normal. WorkerId effects show signs of nonlinearity.
+position has systematic variations in the upper right.
 
-##### Removing problematic frequencies and introducing interactions
+Removing problematic frequencies and refitting:
 
 ```{r}
 data <- read.csv(data_dir)
+
+# Apply cut-off
+# Provo already comes with a minimal value of 81 for GPT
+data <- apply_cutoff_na(data, goal)
+data <- apply_cutoff_na(data, "frequency", lowerOther=2)
+
+# Remove outliers
+data <- remove_outliers_na(data, c(goal), id_col="WorkerId")
 
 # Get names of numeric columns
 numeric_cols <- names(data)[sapply(data, is.numeric)]
 # Subset to numeric columns you want to scale
 excluded_vars <- c(goal, "WorkerId", "item", "element", "zone", "chunksentence")
+
 cols_to_scale <- setdiff(numeric_cols, excluded_vars)
 
-# Apply cut-off
-# Provo already comes with a minimal value of 81 for GPT
-data <- apply_cutoff(data, goal)
-data <- apply_cutoff(data, "frequency", lowerOther=2)
-
-# Remove outliers
-data <- remove_outliers(data, c(goal), id_col="WorkerId")
-
 # Apply scaling
-data <- data %>%
-  dplyr::mutate(
-    dplyr::across(
-      dplyr::all_of(cols_to_scale),
-      scaling_var,
-      .names = "{.col}.s"
-    )
-  )
-```
+data <- apply_scaling(data, cols_to_scale)
 
-An now, let's check if an interaction term between length and frequency can help us. Here, we perform a quick test to check whether this might provide significant improvement of fit (assuming that our model adheres to the necessary assumptions...):
-
-First a check for collinearity and multicollinearity:
-
-```{r}
-data$freqtimeslen.s <- data$frequency.s * data$length.s
-preds <- data %>%
-  dplyr::select(frequency.s, length.s, freqtimeslen.s)
-cor_mat <- cor(preds)
-round(cor_mat, 2)
-
-m <- lm(GPT ~ frequency.s + length.s + freqtimeslen.s, data)
-vif(m)
+cat(paste("final nrows:", nrow(na.omit(data)), "\n"))
 ```
 
 ```{r}
-m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s + length.s*frequency.s | WorkerId) + (frequency.s + length.s + length.s*frequency.s | Text_ID),
+m <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s | WorkerId) + (frequency.s || Text_ID) + (1 | lemma) + (length.s + frequency.s | position) + (1 + length.s || item),
   data=na.omit(data),
   REML=FALSE)
-summary(m0)
-
-m1 <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + (frequency.s + length.s + length.s*frequency.s | WorkerId) + (frequency.s + length.s + length.s*frequency.s | Text_ID),
-  data=na.omit(data),
-  REML=FALSE)
-summary(m1)
-
-anova(m0, m1)
-```
-
-There is indication that we may want to reject the null hypothesis. Let's redraw the relevant plots.
-
-```{r}
-plot(fitted(m1), resid(m1))
-abline(h = 0)
-
-plot_bins(m1, "frequency.s", bins=25, data=data)
-plot_bins(m1, "length.s", bins=25, data=data)
-
-qqnorm(resid(m1))
-qqline(resid(m1))
-hist(resid(m1))
-
-plot(data$frequency.s, resid(m1)); abline(h=0,lty=2)
-plot(data$length.s, resid(m1)); abline(h=0,lty=2)
-plot(data$freqtimeslen.s, resid(m1)); abline(h=0,lty=2)
-
-re <- ranef(m1)
-qqnorm(re$WorkerId[,1]); qqline(re$WorkerId[,1])
-qqnorm(re$WorkerId[,2]); qqline(re$WorkerId[,2])
-qqnorm(re$WorkerId[,3]); qqline(re$WorkerId[,3])
-qqnorm(re$WorkerId[,4]); qqline(re$WorkerId[,4])
-qqnorm(re$Text_ID[,1]); qqline(re$Text_ID[,1])
-qqnorm(re$Text_ID[,2]); qqline(re$Text_ID[,2])
-qqnorm(re$Text_ID[,3]); qqline(re$Text_ID[,3])
-qqnorm(re$Text_ID[,4]); qqline(re$Text_ID[,4])
-```
-
-We do see an improvement for frequency where more bins land within the CI. Furthermore, the artifacts are gone.
-
-```{r}
-m <- lmer(log(GPT) ~ frequency.s + length.s + frequency.s*length.s + (frequency.s + length.s + length.s*frequency.s | WorkerId) + (frequency.s + length.s + length.s*frequency.s | Text_ID),
-  data=na.omit(data),
-  REML=FALSE)
-summary(m1)
+summary(m)
 ```
 
 ```{r}
-plot(fitted(m), resid(m))
-abline(h = 0)
-
-plot_bins(m, "frequency.s", bins=50, data=data, response_transform="exp")
-plot_bins(m, "length.s", bins=50, data=data, response_transform="exp")
+plot_bins(m, "frequency.s", bins=25, data=na.omit(data))
+plot_bins(m, "length.s", bins=25, data=na.omit(data))
 
 qqnorm(resid(m))
 qqline(resid(m))
-hist(resid(m))
-
-plot(data$frequency.s, resid(m1)); abline(h=0,lty=2)
-plot(data$length.s, resid(m1)); abline(h=0,lty=2)
-
-re <- ranef(m)
-qqnorm(re$WorkerId[,1]); qqline(re$WorkerId[,1])
-qqnorm(re$WorkerId[,2]); qqline(re$WorkerId[,2])
-qqnorm(re$WorkerId[,3]); qqline(re$WorkerId[,3])
-qqnorm(re$WorkerId[,4]); qqline(re$WorkerId[,4])
-qqnorm(re$Text_ID[,1]); qqline(re$Text_ID[,1])
-qqnorm(re$Text_ID[,2]); qqline(re$Text_ID[,2])
-qqnorm(re$Text_ID[,3]); qqline(re$Text_ID[,3])
-qqnorm(re$Text_ID[,4]); qqline(re$Text_ID[,4])
 ```
 
-The Q-Q plot looks better. However, the relationship between frequency and GPT does not seem to have improved.
-
-Any other transformation has severe implications for interpretability. Even the log-model is problematic since it contradicts prior knowledge about the linearity of these effects, especially of surprisal that we add later.
-
-Maybe the normality of residuals can be improved by including spillover?
+The previously observed trends still exist. We could try to improve assumptions by transforming the dependent. However, any transformation (log, reciprocal, ...) would have severe implications for interpretability. Even a log-model is problematic since it contradicts prior knowledge about the linearity of these effects, especially of surprisal that we add later. Therefore, we do not transform the dependent.
 
 #### Inclusion of spillover
 
@@ -462,35 +660,26 @@ data_spill1 <- add_lags_scaled(
   n_lags = 1
 )
 
-data_spill1 <- data_spill1 %>%
-  dplyr::mutate(
-    dplyr::across(
-      dplyr::all_of(c("surprisal1", "length1", "frequency1")),
-      scaling_var,
-      .names = "{.col}.s"
-    )
-  )
+data_spill1 <- apply_scaling(data_spill1, c("surprisal1", "length1", "frequency1"))
 
-data_spill1$freqlen.s <- data_spill1$frequency.s * data_spill1$length.s
-data_spill1$freqlen1.s <- data_spill1$frequency1.s * data_spill1$length1.s
 preds <- na.omit(data_spill1) %>%
-  dplyr::select(frequency.s, length.s, frequency1.s, length1.s, freqlen.s, freqlen1.s)
+  dplyr::select(frequency.s, length.s, frequency1.s, length1.s)
 cor_mat <- cor(preds)
 round(cor_mat, 2)
 
-m <- lm(GPT ~ frequency.s + frequency1.s + length.s + length1.s + freqlen.s + freqlen1.s, data_spill1)
+m <- lm(GPT ~ frequency.s + frequency1.s + length.s + length1.s, data_spill1)
 vif(m)
 ```
 
 Good.
 
 ```{r}
-m0 <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s + length1.s*frequency1.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s + length1.s*frequency1.s | Text_ID),
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s + frequency1.s + length1.s | WorkerId) + (frequency.s + frequency1.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + frequency1.s + length1.s | position) + (1 + length.s + length1.s || item),
   data=na.omit(data_spill1),
   REML=FALSE)
 summary(m0)
 
-m1 <- lmer(GPT ~ frequency.s + frequency1.s + length.s + length1.s + frequency.s*length.s + frequency1.s*length1.s + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s + length1.s*frequency1.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s + length1.s*frequency1.s | Text_ID),
+m1 <- lmer(GPT ~ frequency.s + length.s + frequency1.s + length1.s + (frequency.s + length.s + frequency1.s + length1.s | WorkerId) + (frequency.s + frequency1.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + frequency1.s + length1.s | position) + (1 + length.s + length1.s || item),
   data=na.omit(data_spill1),
   REML=FALSE)
 summary(m1)
@@ -498,52 +687,21 @@ summary(m1)
 anova(m0, m1)
 ```
 
+We need to simplify the structure. The random intercept for Text_ID can be removed. Furthermore, let's check the PCA:
+
 ```{r}
-rr <- rePCA(m0)
-cc <- getME(m0, "cnms")
-nm <- unlist(cc)
-dimnames(rr$WorkerId[[2]]) <- list(nm[1:7], nm[1:7])
-dimnames(rr$Text_ID[[2]]) <- list(nm[8:14], nm[8:14])
-summary(rr)
+summary(rePCA(m1))
 ```
 
-Let's remove the random slopes for frequency1.s:length1.s because it does not explain any variance.
+Okay, perhaps the removal of the intercept is already enough.
 
 ```{r}
-m0 <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s | Text_ID),
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s + frequency1.s + length1.s | WorkerId) + (0 + frequency.s + frequency1.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + frequency1.s + length1.s | position) + (1 + length.s + length1.s || item),
   data=na.omit(data_spill1),
   REML=FALSE)
 summary(m0)
 
-m1 <- lmer(GPT ~ frequency.s + frequency1.s + length.s + length1.s + frequency.s*length.s + frequency1.s*length1.s + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s | Text_ID),
-  data=na.omit(data_spill1),
-  REML=FALSE)
-summary(m1)
-
-anova(m0, m1)
-
-```
-
-Still singular...
-
-```{r}
-rr <- rePCA(m0)
-cc <- getME(m0, "cnms")
-nm <- unlist(cc)
-dimnames(rr$WorkerId[[2]]) <- list(nm[1:6], nm[1:6])
-dimnames(rr$Text_ID[[2]]) <- list(nm[7:12], nm[7:12])
-summary(rr)
-```
-
-Okay, let's remove frequency.s:length.s from the WorkerId group:
-
-```{r}
-m0 <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + (frequency.s + frequency1.s + length.s + length1.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s | Text_ID),
-  data=na.omit(data_spill1),
-  REML=FALSE)
-summary(m0)
-
-m1 <- lmer(GPT ~ frequency.s + frequency1.s + length.s + length1.s + frequency.s*length.s + frequency1.s*length1.s + (frequency.s + frequency1.s + length.s + length1.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s | Text_ID),
+m1 <- lmer(GPT ~ frequency.s + length.s + frequency1.s + length1.s + (frequency.s + length.s + frequency1.s + length1.s | WorkerId) + (0 + frequency.s + frequency1.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + frequency1.s + length1.s | position) + (1 + length.s + length1.s || item),
   data=na.omit(data_spill1),
   REML=FALSE)
 summary(m1)
@@ -551,72 +709,226 @@ summary(m1)
 anova(m0, m1)
 ```
 
-We can reject the null hypothesis.
-
-Let's check the plots:
+Again, a singular fit. Apparently, the random slope for length.s and the random intercept in position have a correlation of 1 now. Interestingly, the spilled-over versions of the predictors seem to be more dependent on position than the regular ones. We remove correlations for now.
 
 ```{r}
-plot(fitted(m1), resid(m1))
-abline(h = 0)
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s + frequency1.s + length1.s | WorkerId) + (0 + frequency.s + frequency1.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + frequency1.s + length1.s || position) + (1 + length.s + length1.s || item),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+summary(m0)
 
-plot_bins(m1, "frequency.s", bins=25, data=data_spill1)
-plot_bins(m1, "frequency1.s", bins=25, data=data_spill1)
-plot_bins(m1, "length.s", bins=25, data=data_spill1)
-plot_bins(m1, "length1.s", bins=25, data=data_spill1)
+m1 <- lmer(GPT ~ frequency.s + length.s + frequency1.s + length1.s + (frequency.s + length.s + frequency1.s + length1.s | WorkerId) + (0 + frequency.s + frequency1.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + frequency1.s + length1.s || position) + (1 + length.s + length1.s || item),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+summary(m1)
 
-qqnorm(resid(m1))
-qqline(resid(m1))
-hist(resid(m1))
-
-plot(na.omit(data_spill1)$frequency.s, resid(m1)); abline(h=0,lty=2)
-plot(na.omit(data_spill1)$length.s, resid(m1)); abline(h=0,lty=2)
-plot(na.omit(data_spill1)$frequency1.s, resid(m1)); abline(h=0,lty=2)
-plot(na.omit(data_spill1)$length1.s, resid(m1)); abline(h=0,lty=2)
-
-re <- ranef(m1)
-qqnorm(re$WorkerId[,1]); qqline(re$WorkerId[,1])
-qqnorm(re$WorkerId[,2]); qqline(re$WorkerId[,2])
-qqnorm(re$WorkerId[,3]); qqline(re$WorkerId[,3])
-qqnorm(re$WorkerId[,4]); qqline(re$WorkerId[,4])
-qqnorm(re$WorkerId[,5]); qqline(re$WorkerId[,5])
-qqnorm(re$Text_ID[,1]); qqline(re$Text_ID[,1])
-qqnorm(re$Text_ID[,2]); qqline(re$Text_ID[,2])
-qqnorm(re$Text_ID[,3]); qqline(re$Text_ID[,3])
-qqnorm(re$Text_ID[,4]); qqline(re$Text_ID[,4])
-qqnorm(re$Text_ID[,5]); qqline(re$Text_ID[,5])
-qqnorm(re$Text_ID[,6]); qqline(re$Text_ID[,6])
+anova(m0, m1)
 ```
 
-Nothing drastically changed with respect to our assumptions except for the normality of the random frequency residuals in the Text_ID group which exhibits a marked S-shape.
+-\> Also remove correlations for WorkerId
+
+```{r}
+m0 <- lmer(GPT ~ frequency.s + length.s + (frequency.s + length.s + frequency1.s + length1.s || WorkerId) + (0 + frequency.s + frequency1.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + frequency1.s + length1.s || position) + (1 + length.s + length1.s || item),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+summary(m0)
+
+m1 <- lmer(GPT ~ frequency.s + length.s + frequency1.s + length1.s + (frequency.s + length.s + frequency1.s + length1.s || WorkerId) + (0 + frequency.s + frequency1.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + frequency1.s + length1.s || position) + (1 + length.s + length1.s || item),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+summary(m1)
+```
+
+Is the frequency1.s slope for WorkerId significant?
+
+```{r}
+m1_0 <- lmer(GPT ~ frequency.s + length.s + frequency1.s + length1.s + (frequency.s + length.s + length1.s || WorkerId) + (0 + frequency.s + frequency1.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + frequency1.s + length1.s || position) + (1 + length.s + length1.s || item),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+summary(m1_0)
+
+anova(m1_0, m1)
+```
+
+Yes, it is. Due to the other variances being larger, we suspect that they are also significant. Therefore, we can test spillover significance:
+
+```{r}
+summary(m0)
+summary(m1)
+anova(m0, m1)
+```
+
+```{r}
+summary(rePCA(m0))
+```
+
+Yes, we do have significance. However, the estimate for the fixed effect of the spillover version of length is quite small. Let's check it separately for significance:
+
+```{r}
+m1_0 <- lmer(GPT ~ frequency.s + length.s + frequency1.s + (frequency.s + length.s + frequency1.s + length1.s || WorkerId) + (0 + frequency.s + frequency1.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + frequency1.s + length1.s || position) + (1 + length.s + length1.s || item),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+summary(m1_0)
+
+anova(m1_0, m1)
+```
+
+It is significant. What about frequency?
+
+```{r}
+m1_0 <- lmer(GPT ~ frequency.s + length.s + length1.s + (frequency.s + length.s + frequency1.s + length1.s || WorkerId) + (0 + frequency.s + frequency1.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + frequency1.s + length1.s || position) + (1 + length.s + length1.s || item),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+summary(m1_0)
+
+anova(m1_0, m1)
+```
+
+We cannot reject the null-hypothesis. Thus, we choose the null-model. Can we reintroduce correlations? Maybe first for subjects?
+
+```{r}
+m1 <- lmer(GPT ~ frequency.s + length.s + length1.s + (frequency.s + length.s + length1.s | WorkerId) + (0 + frequency.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + length1.s || position) + (1 + length.s + length1.s || item),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+summary(m1)
+```
+
+That worked. What about position?
+
+```{r}
+m1_1 <- lmer(GPT ~ frequency.s + length.s + length1.s + (frequency.s + length.s + length1.s | WorkerId) + (0 + frequency.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + length1.s | position) + (1 + length.s + length1.s || item),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+summary(m1_1)
+```
+
+And for item?
+
+```{r}
+m1_1 <- lmer(GPT ~ frequency.s + length.s + length1.s + (frequency.s + length.s + length1.s | WorkerId) + (0 + frequency.s | Text_ID) + (1 | lemma) + (length.s + frequency.s + length1.s | position) + (1 + length.s + length1.s | item),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+summary(m1_1)
+```
+
+Yes, we got no singularity issues. Should the intercept for Text_ID return?
+
+```{r}
+m1_1_1 <- lmer(GPT ~ frequency.s + length.s + length1.s + (frequency.s + length.s + length1.s | WorkerId) + (1 + frequency.s || Text_ID) + (1 | lemma) + (length.s + frequency.s + length1.s | position) + (1 + length.s + length1.s | item),
+  data=na.omit(data_spill1),
+  REML=FALSE)
+summary(m1_1_1)
+
+anova(m1_1, m1_1_1)
+```
+
+No, it should not.
+
+Let's look at diagnostics:
+
+```{r}
+lmer_diagnostics <- function(model,
+                             data = NULL,
+                             predictors = attr(terms(model), "term.labels"),
+                             bins = 25,
+                             plot_bins_fun = plot_bins,
+                             pdf_file = NULL) {
+
+  if (!is.null(pdf_file)) pdf(pdf_file, onefile = TRUE)
+
+  on.exit({
+    if (!is.null(pdf_file)) dev.off()
+  }, add = TRUE)
+
+  # Helper: safe residuals & fitted
+  r <- resid(model)
+  f <- fitted(model)
+
+  op <- par(no.readonly = TRUE)
+  on.exit(par(op), add = TRUE)
+
+  ## 1) Residuals vs fitted
+  plot(f, r, xlab = "Fitted values", ylab = "Residuals",
+       main = "Residuals vs Fitted")
+  abline(h = 0, lty = 2)
+
+  ## 2) QQ + hist of residuals
+  par(mfrow = c(1,2))
+  qqnorm(r, main = "Residual QQ-plot"); qqline(r)
+  hist(r, main = "Residuals", xlab = "Residual", breaks = "FD")
+  par(mfrow = c(1,1))
+
+  ## 3) Residuals vs predictors + binned plots
+  if (!is.null(predictors)) {
+    if (is.null(data)) stop("If you supply predictors, you must supply `data` as well.")
+
+    # keep complete cases for the predictors you want plotted + residuals length alignment
+    # (resid(model) matches rows used in model frame)
+    mf <- model.frame(model)  # data actually used in the fit (handles NA omission)
+    # join predictors from mf if they exist there, else from `data`
+    get_x <- function(v) {
+      if (v %in% names(mf)) return(mf[[v]])
+      if (v %in% names(data)) return(data[[v]][rownames(mf)])
+      stop(sprintf("Predictor '%s' not found in model.frame(model) or data.", v))
+    }
+
+    for (v in predictors) {
+      x <- get_x(v)
+
+      plot(x, r,
+           xlab = v, ylab = "Residuals",
+           main = paste("Residuals vs", v))
+      abline(h = 0, lty = 2)
+
+      if (!is.null(plot_bins_fun)) {
+        # your plot_bins(model, varname, bins=..., data=...)
+        plot(plot_bins_fun(model, v, bins = bins, data = data))
+      }
+    }
+  }
+
+  ## 4) QQ plots of random effects (BLUPs)
+  re <- lme4::ranef(model)
+
+  for (grp in names(re)) {
+    mat <- re[[grp]]
+    for (j in seq_len(ncol(mat))) {
+      nm <- colnames(mat)[j]
+      qqnorm(mat[, j], main = paste("RE QQ:", grp, nm))
+      qqline(mat[, j])
+    }
+  }
+
+  invisible(TRUE)
+}
+
+
+lmer_diagnostics(m1_1, data_spill1)
+```
+
+Nothing drastically changed with respect to our assumptions except for the normality of the random frequency residuals.
 
 ##### Spillover 2
+
+Is spillover 2 relevant? We only check this for length since we have disregarded spillover 1 for frequency already.
 
 ```{r}
 data_spill2 <- add_lags_scaled(
   data,
-  lag_cols = c("frequency", "length", "surprisal"),
+  lag_cols = c("length", "surprisal"),
   group_cols = c("WorkerId", "Text_ID"),
   n_lags = 2
 )
 
-data_spill2 <- data_spill2 %>%
-  dplyr::mutate(
-    dplyr::across(
-      dplyr::all_of(c("surprisal1", "length1", "frequency1", "surprisal2", "length2", "frequency2")),
-      scaling_var,
-      .names = "{.col}.s"
-    )
-  )
+# TODO: important na.omit so that values are not taken into account that are removed in model fitting.
+data_spill2 <- apply_scaling(na.omit(data_spill2), c("surprisal", "length", "frequency", "surprisal1", "length1", "surprisal2", "length2"))
 
-data_spill2$freqlen.s <- data_spill2$frequency.s * data_spill2$length.s
-data_spill2$freqlen1.s <- data_spill2$frequency1.s * data_spill2$length1.s
-data_spill2$freqlen2.s <- data_spill2$frequency2.s * data_spill2$length2.s
 preds <- na.omit(data_spill2) %>%
-  dplyr::select(frequency.s, frequency1.s, frequency2.s, length.s, length1.s, length2.s, freqlen.s, freqlen1.s, freqlen2.s)
+  dplyr::select(frequency.s, length.s, length1.s, length2.s)
 cor_mat <- cor(preds)
 round(cor_mat, 2)
 
-m <- lm(GPT ~ frequency.s + frequency1.s + frequency2.s + length.s + length1.s + length2.s + freqlen.s + freqlen1.s + freqlen2.s, data_spill2)
+m <- lm(GPT ~ frequency.s + length.s + length1.s + length2.s, data_spill2)
 vif(m)
 ```
 
@@ -625,12 +937,12 @@ Unproblematic.
 Now we only add spillover 2 variables where we added spillover 1 to prevent singularity issues:
 
 ```{r}
-m0 <- lmer(GPT ~ frequency.s + frequency1.s + length.s + length1.s + frequency.s*length.s + frequency1.s*length1.s + (frequency.s + frequency1.s + frequency2.s + length.s + length1.s + length2.s | WorkerId) + (frequency.s + frequency1.s + frequency2.s + length.s + length1.s + length2.s + length.s*frequency.s | Text_ID),
+m0 <- lmer(GPT ~ frequency.s + length.s + length1.s + (frequency.s + length.s + length1.s + length2.s | WorkerId) + (0 + frequency.s | Text_ID) + (1 | lemma) + (length.s + frequency.s + length1.s + length2.s | position) + (1 + length.s + length1.s + length2.s | item),
   data=na.omit(data_spill2),
   REML=FALSE)
 summary(m0)
 
-m1 <- lmer(GPT ~ frequency.s + frequency1.s + frequency2.s + length.s + length1.s + length2.s + frequency.s*length.s + frequency1.s*length1.s + frequency2.s*length2.s + (frequency.s + frequency1.s + frequency2.s + length.s + length1.s + length2.s | WorkerId) + (frequency.s + frequency1.s + frequency2.s + length.s + length1.s + length2.s + length.s*frequency.s | Text_ID),
+m1 <- lmer(GPT ~ frequency.s + length.s + length1.s + length2.s + (frequency.s + length.s + length1.s + length2.s | WorkerId) + (0 + frequency.s | Text_ID) + (1 | lemma) + (length.s + frequency.s + length1.s + length2.s | position) + (1 + length.s + length1.s + length2.s | item),
   data=na.omit(data_spill2),
   REML=FALSE)
 summary(m1)
@@ -638,14 +950,13 @@ summary(m1)
 anova(m0, m1)
 ```
 
+This yielded singularity issues. Let's investigate the PCA.
+
 ```{r}
-rr <- rePCA(m1)
-cc <- getME(m1, "cnms")
-nm <- unlist(cc)
-dimnames(rr$WorkerId[[2]]) <- list(nm[1:7], nm[1:7])
-dimnames(rr$Text_ID[[2]]) <- list(nm[8:15], nm[8:15])
-summary(rr)
+summary(rePCA(m1))
 ```
+
+TODO
 
 We need to remove length2.s random coefficient from WorkerId.
 
@@ -958,6 +1269,10 @@ Now that we have decided on a model, we start testing the candidates. In each ca
 
 TODO: recompute all of these.
 
+TODO: do not cutoff but replace with nans, apply spillover and scaling aftewards, meaning that na.omit(data) will also omit the following token if spillover of 1 is included.
+
+TODO: remove sentences that include unknown token.
+
 ```{r}
 load_data <- function(data_dir, spill=0){
   data <- read.csv(data_dir)
@@ -985,24 +1300,11 @@ load_data <- function(data_dir, spill=0){
   )
   
   # Apply scaling
-  data <- data %>% dplyr::mutate(
-    dplyr::across(
-      dplyr::all_of(cols_to_scale),
-      scaling_var,
-      .names = "{.col}.s"
-    )
-  )
+  data <- apply_scaling(data, cols_to_scale)
   
   # Apply scaling for spillover columns
   if (spill > 0) {
-    data <- data %>%
-    dplyr::mutate(
-      dplyr::across(
-        dplyr::all_of(unlist(lapply(seq_len(spill), function(i) paste0(cols_to_scale, i)))),
-        scaling_var,
-        .names = "{.col}.s"
-      )
-    )
+    data <- apply_scaling(data, unlist(lapply(seq_len(spill), function(i) paste0(cols_to_scale, i))))
   }
   data
 }
@@ -1020,7 +1322,13 @@ hist(data_spill1$attention_entropy)
 This is problematic. The first word in each sentence receives attention entropy of 0 (pathological case; nothing in the memory to attend to). The second word also receives 0 since it attennds 100 % to the only word in memory. We remove these two cases of a proper analysis of the cases where we have a proper theoretical motivation.
 
 ```{r}
+source("utils.R")
 data_spill1 <- apply_cutoff(data_spill1, "attention_entropy", lowerOther=0)
+
+numeric_cols <- names(data_spill1)[sapply(data_spill1, is.numeric)]
+excluded_vars <- c(goal, "WorkerId", "item", "element", "zone", "Text_ID", "chunksentence")
+cols_to_scale <- setdiff(numeric_cols, excluded_vars)
+data_spill1 <- spillover_and_scale(data_spill1, cols_to_scale)
 
 hist(data_spill1$attention_entropy)
 ```
@@ -1236,6 +1544,7 @@ We have a lot of 0 values. Let's discard the very first word since it is a speci
 
 ```{r}
 data_spill1 <- apply_cutoff(data_spill1, "position", lowerOther=1)
+data_spill1 <- spillover_and_scale(data_spill1, cols_to_scale)
 hist(data_spill1$attention_activation)
 ```
 
@@ -1317,7 +1626,9 @@ data_ug_spill1$freqlen1.s <- data_ug_spill1$frequency1.s*data_ug_spill1$length1.
 
 hist(data_ug_spill1$attention_entropy, n=20)
 data_ug_spill1 <- apply_cutoff(data_ug_spill1, "attention_entropy", lowerOther=0)
-hist(data_ug_spill1$attention_entropy, n=20)
+data_ug_spill1 <- spillover_and_scale(data_ug_spill1, cols_to_scale)
+
+hist(data_ug_spill1$attention_entropy, n=20)s
 ```
 
 The are some peculiarities in the left area of the histogram that we cannot explain.
@@ -1385,25 +1696,22 @@ anova_bonf(m0_dist_ug, m1_dist_ug)
 ```
 
 ```{r}
-rr <- rePCA(m0_dist_ug)
-cc <- getME(m0_dist_ug, "cnms")
-nm <- unlist(cc)
+get_PCA <- function(model) {
+  rr <- rePCA(model)
+  cc <- getME(model, "cnms")
+  nm <- unlist(cc)
+  
+  l1 <- nrow(rr$WorkerId[[2]])
+  l2 <- nrow(rr$Text_ID[[2]])
+  dimnames(rr$WorkerId[[2]]) <- list(nm[1:l1], nm[1:l1])
+  dimnames(rr$Text_ID[[2]]) <- list(nm[(l1+1):(l1+l2)], nm[(l1+1):(l1+l2)])
+  summary(rr)
+}
+```
 
-l1 <- nrow(rr$WorkerId[[2]])
-l2 <- nrow(rr$Text_ID[[2]])
-dimnames(rr$WorkerId[[2]]) <- list(nm[1:l1], nm[1:l1])
-dimnames(rr$Text_ID[[2]]) <- list(nm[(l1+1):(l1+l2)], nm[(l1+1):(l1+l2)])
-summary(rr)
-
-rr <- rePCA(m1_dist_ug)
-cc <- getME(m1_dist_ug, "cnms")
-nm <- unlist(cc)
-
-l1 <- nrow(rr$WorkerId[[2]])
-l2 <- nrow(rr$Text_ID[[2]])
-dimnames(rr$WorkerId[[2]]) <- list(nm[1:l1], nm[1:l1])
-dimnames(rr$Text_ID[[2]]) <- list(nm[(l1+1):(l1+l2)], nm[(l1+1):(l1+l2)])
-summary(rr)
+```{r}
+get_PCA(m0_dist_ug)
+get_PCA(m1_dist_ug)
 ```
 
 Remove correlations for frequency.s:length.s in TextID:
@@ -1435,6 +1743,7 @@ data_ug_spill1$freqlen1.s <- data_ug_spill1$frequency1.s*data_ug_spill1$length1.
 
 hist(data_ug_spill1$attention_activation)
 data_ug_spill1 <- apply_cutoff(data_ug_spill1, "position", lowerOther=1)
+data_ug_spill1 <- spillover_and_scale(data_ug_spill1, cols_to_scale)
 hist(data_ug_spill1$attention_activation)
 ```
 
@@ -1508,6 +1817,13 @@ hist(data_wl_spill1$attention_entropy, n=20)
 ```
 
 ```{r}
+data_wl_spill1 <- apply_cutoff(data_wl_spill1, "attention_entropy", lowerOther=0, upperOther=1)
+data_wl_spill1 <- spillover_and_scale(data_wl_spill1, cols_to_scale)
+
+hist(data_wl_spill1$attention_entropy, n=20)
+```
+
+```{r}
 preds <- na.omit(data_wl_spill1) %>%
   dplyr::select(frequency.s, frequency1.s, length.s, length1.s, freqlen.s, freqlen1.s, attention_entropy.s)
 cor_mat <- cor(preds)
@@ -1519,16 +1835,204 @@ vif(m)
 
 ```{r}
 m0_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s + attention_entropy.s | WorkerId) + (0 + length1.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s + surprisal.s + surprisal1.s + attention_entropy.s | Text_ID),
-  data=na.omit(data_ug_spill1),
+  data=na.omit(data_wl_spill1),
   REML=FALSE)
 summary(m0_entr_wl)
 
 m1_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + attention_entropy.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s + attention_entropy.s | WorkerId) + (0 + length1.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s + surprisal.s + surprisal1.s + attention_entropy.s | Text_ID),
-  data=na.omit(data_ug_spill1),
+  data=na.omit(data_wl_spill1),
   REML=FALSE)
-summary(m1_entr_ug)
+summary(m1_entr_wl)
 
-anova_bonf(m0_entr_ug, m1_entr_wl)
+anova_bonf(m0_entr_wl, m1_entr_wl)
+```
+
+```{r}
+get_PCA(m0_entr_wl)
+get_PCA(m1_entr_wl)
+```
+
+```{r}
+m0_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s + attention_entropy.s | WorkerId) + (0 + length1.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s +  + surprisal1.s + attention_entropy.s | Text_ID) + (length.s:frequency.s + 0 || Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m0_entr_wl)
+
+m1_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + attention_entropy.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s + attention_entropy.s | WorkerId) + (0 + length1.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s + surprisal1.s + attention_entropy.s | Text_ID) + (length.s:frequency.s + 0 || Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m1_entr_wl)
+
+anova_bonf(m0_entr_wl, m1_entr_wl)
+```
+
+```{r}
+get_PCA(m0_entr_wl)
+get_PCA(m1_entr_wl)
+```
+
+```{r}
+m0_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s + attention_entropy.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s +  + surprisal1.s + attention_entropy.s | Text_ID) + (length.s:frequency.s + 0 || Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m0_entr_wl)
+
+m1_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + attention_entropy.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s + attention_entropy.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s + surprisal1.s + attention_entropy.s | Text_ID) + (length.s:frequency.s + 0 || Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m1_entr_wl)
+
+anova_bonf(m0_entr_wl, m1_entr_wl)
+```
+
+```{r}
+get_PCA(m0_entr_wl)
+get_PCA(m1_entr_wl)
+```
+
+```{r}
+m0_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s | WorkerId) + (0 + attention_entropy.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s +  + surprisal1.s + attention_entropy.s | Text_ID) + (length.s:frequency.s + 0 || Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m0_entr_wl)
+
+m1_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + attention_entropy.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s | WorkerId) + (0 + attention_entropy.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s +  + surprisal1.s + attention_entropy.s | Text_ID) + (length.s:frequency.s + 0 || Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m1_entr_wl)
+
+anova_bonf(m0_entr_wl, m1_entr_wl)
+```
+
+```{r}
+get_PCA(m0_entr_wl)
+get_PCA(m1_entr_wl)
+```
+
+```{r}
+m0_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s +  + surprisal1.s + attention_entropy.s | Text_ID) + (length.s:frequency.s + 0 || Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m0_entr_wl)
+
+m1_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + attention_entropy.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s +  + surprisal1.s + attention_entropy.s | Text_ID) + (length.s:frequency.s + 0 || Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m1_entr_wl)
+
+anova_bonf(m0_entr_wl, m1_entr_wl)
+```
+
+```{r}
+get_PCA(m0_entr_wl)
+get_PCA(m1_entr_wl)
+```
+
+```{r}
+m0_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s +  + surprisal1.s + attention_entropy.s | Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m0_entr_wl)
+
+m1_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + attention_entropy.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s +  + surprisal1.s + attention_entropy.s | Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m1_entr_wl)
+
+anova_bonf(m0_entr_wl, m1_entr_wl)
+```
+
+```{r}
+get_PCA(m0_entr_wl)
+get_PCA(m1_entr_wl)
+```
+
+```{r}
+m0_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s | WorkerId) + (0 + length.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s +  + surprisal1.s + attention_entropy.s | Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m0_entr_wl)
+
+m1_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + attention_entropy.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s | WorkerId) + (0 + length.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s +  + surprisal1.s + attention_entropy.s | Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m1_entr_wl)
+
+anova_bonf(m0_entr_wl, m1_entr_wl)
+
+```
+
+```{r}
+get_PCA(m0_entr_wl)
+get_PCA(m1_entr_wl)
+```
+
+```{r}
+m0_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s | WorkerId) + (0 + length.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s +  + surprisal1.s | Text_ID) + (0 + attention_entropy.s | Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m0_entr_wl)
+
+m1_entr_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + attention_entropy.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s | WorkerId) + (0 + length.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + surprisal.s +  + surprisal1.s | Text_ID) + (0 + attention_entropy.s | Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m1_entr_wl)
+
+anova_bonf(m0_entr_wl, m1_entr_wl)
+```
+
+```{r}
+sjPlot::plot_model(
+    m1_entr_wl,
+    type  = "pred",
+    terms = "attention_entropy.s",
+    show.data = TRUE)
+make_plots(m1_entr_wl, "attention_entropy.s", data_wl_spill1)
+```
+
+###### Attention distance
+
+```{r}
+data_wl_spill1 <- load_data(data_dir_wl, spill=1)
+data_wl_spill1$freqlen.s <- data_wl_spill1$frequency.s*data_wl_spill1$length.s
+data_wl_spill1$freqlen1.s <- data_wl_spill1$frequency1.s*data_wl_spill1$length1.s
+
+hist(data_wl_spill1$attention_distance, n=20)
+```
+
+```{r}
+data_wl_spill1 <- apply_cutoff(data_wl_spill1, "attention_distance", lowerOther=0, upperOther=1)
+data_wl_spill1 <- spillover_and_scale(data_wl_spill1, cols_to_scale)
+
+hist(data_wl_spill1$attention_distance, n=20)
+```
+
+```{r}
+preds <- na.omit(data_wl_spill1) %>%
+  dplyr::select(frequency.s, frequency1.s, length.s, length1.s, freqlen.s, freqlen1.s, attention_distance.s)
+cor_mat <- cor(preds)
+round(cor_mat, 2)
+
+m <- lm(GPT ~ frequency.s + frequency1.s + length.s + length1.s + freqlen.s + freqlen1.s + attention_distance.s, na.omit(data_wl_spill1))
+vif(m)
+```
+
+```{r}
+m0_dist_wl<- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s + attention_distance.s | WorkerId) + (0 + length1.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s + surprisal.s + surprisal1.s + attention_distance.s | Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m0_dist_wl)
+
+m1_dist_wl <- lmer(GPT ~ frequency.s + length.s + frequency.s*length.s + surprisal.s + attention_distance.s + length1.s + frequency1.s + frequency1.s*length1.s + surprisal1.s + (frequency.s + frequency1.s + length.s + attention_distance.s | WorkerId) + (0 + length1.s | WorkerId) + (frequency.s + frequency1.s + length.s + length1.s + length.s*frequency.s + surprisal.s + surprisal1.s + attention_distance.s | Text_ID),
+  data=na.omit(data_wl_spill1),
+  REML=FALSE)
+summary(m1_dist_wl)
+
+anova_bonf(m0_dist_wl, m1_dist_wl)
+```
+
+```{r}
+make_plots(m1_dist_wl, "attention_distance.s", data_wl_spill1)
 ```
 
 #### Power simulation for other corpora

@@ -66,6 +66,71 @@ remove_outliers <- function(data, cols, id_col = "WorkerId", k = 2.5, by = NULL)
   out
 }
 
+remove_outliers_na <- function(data, cols, id_col = "WorkerId", k = 2.5, by = NULL) {
+  # data: data.frame
+  # cols: numeric columns to trim (e.g., c("FixDur", "RT"))
+  # id_col: participant id column
+  # k: cutoff in SDs (e.g., 2.5 or 3)
+  # by: optional additional grouping columns (e.g., "Condition" or c("Condition","Item"))
+  # According to https://link.springer.com/article/10.3758/s13428-023-02137-x
+  # with 2.5 being mode in https://www.rd-alliance.org/sites/default/files/Marsden%2C_Thompson%2C_Plonsky_2018_App_Psych_SPR_synthesis.pdf
+  
+  stopifnot(all(c(id_col, cols) %in% names(data)))
+  if (!is.null(by)) stopifnot(all(by %in% names(data)))
+  
+  grp <- c(id_col, by)
+  
+  cat("non-na nrows before outlier removal:", nrow(na.omit(data)), "\n")
+  
+  # Count NAs before (only for cols we might modify)
+  na_before <- sum(vapply(cols, function(col) sum(is.na(data[[col]])), numeric(1)))
+  
+  # Helper that sets outliers to NA within one group
+  trim_one_group_to_na <- function(df) {
+    for (col in cols) {
+      x <- df[[col]]
+      
+      # bounds from non-missing
+      mu <- mean(x, na.rm = TRUE)
+      s  <- sd(x, na.rm = TRUE)
+      
+      # If sd is 0 or NA (too few obs), skip trimming this column in this group
+      if (is.na(s) || s == 0) next
+      
+      lower <- mu - k * s
+      upper <- mu + k * s
+      
+      # mark outliers (but don't treat NA as outlier)
+      is_outlier <- !is.na(x) & (x < lower | x > upper)
+      x[is_outlier] <- NA_real_
+      
+      df[[col]] <- x
+    }
+    df
+  }
+  
+  # Split-apply-combine without requiring dplyr
+  out <- if (length(grp) == 1) {
+    pieces <- lapply(split(data, data[[id_col]]), trim_one_group_to_na)
+    do.call(rbind, pieces)
+  } else {
+    key <- interaction(data[grp], drop = TRUE, sep = "___")
+    pieces <- lapply(split(data, key), trim_one_group_to_na)
+    do.call(rbind, pieces)
+  }
+  
+  rownames(out) <- NULL
+  
+  na_after <- sum(vapply(cols, function(col) sum(is.na(out[[col]])), numeric(1)))
+  cat("values set to NA (across cols):", na_after - na_before, "\n")
+  
+  # Row count unchanged by design
+  cat("non-na nrows after outlier replacement:", nrow(na.omit(out)), "\n")
+  
+  out
+}
+
+
 apply_cutoff <- function(data, goal, lowerRT = 200, upperRT = 2000, lowerGPT = 80, upperGPT = 3000, lowerOther = 80, upperOther = 1000) {
   cat("nrows before cut-off ", nrow(data), "\n")
   if (goal == "RT") {
@@ -90,6 +155,36 @@ apply_cutoff <- function(data, goal, lowerRT = 200, upperRT = 2000, lowerGPT = 8
   cat("nrows after cut-off ", nrow(data), "\n")
   data
 }
+
+apply_cutoff_na <- function(data, goal,
+                         lowerRT = 200, upperRT = 2000,
+                         lowerGPT = 80, upperGPT = 3000,
+                         lowerOther = 80, upperOther = 1000) {
+  
+  cat("non-na nrows before cut-off:", nrow(na.omit(data)), "\n")
+  
+  data <- data %>%
+    dplyr::mutate(
+      !!goal := dplyr::case_when(
+        goal == "RT" &
+          (.data[[goal]] <= lowerRT | .data[[goal]] >= upperRT) ~ NA_real_,
+        
+        goal == "GPT" &
+          (.data[[goal]] <= lowerGPT | .data[[goal]] >= upperGPT) ~ NA_real_,
+        
+        goal != "RT" & goal != "GPT" &
+          (.data[[goal]] <= lowerOther | .data[[goal]] >= upperOther) ~ NA_real_,
+        
+        TRUE ~ .data[[goal]]
+      )
+    )
+  
+  cat("values set to NA:", sum(is.na(data[[goal]])), "\n")
+  cat("non-na nrows after cut-off:", nrow(na.omit(data)), "\n")
+  
+  data
+}
+
 
 add_lags_scaled <- function(data,
                             lag_cols,
@@ -271,7 +366,6 @@ plot_bins <- function(model,
       inherit.aes = FALSE,
       size = 2
     )
-  plot(p)
   p
 }
 
@@ -321,6 +415,70 @@ spillover_and_scale <- function(data, cols_to_scale, spill=1, group_cols=c("Work
     data,
     lag_cols = cols_to_scale,
     group_cols = group_cols,
+    n_lags = spill
+  )
+  
+  # Apply scaling
+  data <- apply_scaling(data, cols_to_scale)
+  
+  # Apply scaling for spillover columns
+  if (spill > 0) {
+    data <- apply_scaling(data, unlist(lapply(seq_len(spill), function(i) paste0(cols_to_scale, i))))
+  }
+  data
+}
+
+
+remove_na_sentences <- function(data, goal="unknown", sent_col="item") {
+  
+  cat("non-na nrows before na sentence removal:", nrow(na.omit(data)), "\n")
+  
+  data <- data %>%
+    dplyr::group_by(.data[[sent_col]]) %>%
+    dplyr::mutate(
+      .flag_true_in_group = any(as.character(.data[[goal]]) == "True", na.rm = TRUE),
+      !!goal := dplyr::if_else(.flag_true_in_group, NA, .data[[goal]])
+    ) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(-.flag_true_in_group)
+  
+  cat("values set to NA:", sum(is.na(data[[goal]])), "\n")
+  cat("non-na nrows after cut-off:", nrow(na.omit(data)), "\n")
+  
+  data
+}
+
+
+load_data2 <- function(
+    data_dir, goal="GPT", spill=0,
+    scale_to_exclude=c("WorkerId", "item", "element", "Text_ID", "zone", "chunksentence"),
+    id_col="WorkerId",
+    lag_group_cols=c("WorkerId", "Text_ID")
+    ){
+  # Does not remove rows but replaces outliers with na so that
+  # spillover is aligned.
+  
+  data <- read.csv(data_dir)
+  
+  # Get names of numeric columns
+  numeric_cols <- names(data)[sapply(data, is.numeric)]
+  # Subset to numeric columns you want to scale
+  excluded_vars <- c(goal, scale_to_exclude)
+  cols_to_scale <- setdiff(numeric_cols, excluded_vars)
+  
+  # Apply cut-off
+  # Provo already comes with a minimal value of 81 for GPT
+  data <- apply_cutoff_na(data, goal)
+  data <- apply_cutoff_na(data, "frequency", lowerOther=2)
+  
+  # Remove outliers
+  data <- remove_outliers_na(data, c(goal), id_col=id_col)
+  
+  # Add spillover
+  data <- add_lags_scaled(
+    data,
+    lag_cols = cols_to_scale,
+    group_cols = lag_group_cols,
     n_lags = spill
   )
   
