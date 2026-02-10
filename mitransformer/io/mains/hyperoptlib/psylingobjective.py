@@ -7,6 +7,7 @@ from . import objective, sampler
 
 import optuna
 import pandas as pd
+import numpy as np
 
 from typing import Iterable, Sequence, Collection
 
@@ -27,10 +28,11 @@ class PsyLingObjective(objective.Objective):
         super().__init__(n_devices, arguments, writer, pg)
         # TODO: load and join psycholinguistic data
         # Question: save and load later or keep in memory?
+        formulas = [f["formula"] for f in arguments.lme_formula]
         info(
             arguments.rank, logger,
-            "Initialised objective with lme formula "
-            f"{arguments.lme_formula['formula']}")
+            "Initialised objective with lme formulas "
+            f"{' '.join(formulas)}")
 
         # Load candidates
         # TODO: check whether tokenisation at surprisal step is correct
@@ -127,11 +129,18 @@ class PsyLingObjective(objective.Objective):
 
         add_method = self.tok_frame.add_batched_
         loglik: None | float = None
+        best_loglik: float = -np.inf
+
+        best_eval_metric: train.LMMetric | float | None = None
         for step, metrics in enumerate(train_iterator, start=1):
+            if best_eval_metric is None:
+                best_eval_metric = metrics["eval"].minval()
+            if metrics["eval"] > best_eval_metric:
+                best_eval_metric = metrics["eval"]
 
             # Handle pruning based on the intermediate value.
 
-            to_add = ["surprisal", *set(self.arguments.lme_formula[
+            to_add = ["surprisal", *set(self.arguments.lme_formula[0][
                 "covariates"]) - set(
                     ["surprisal", *readingtimes.BASELINE_METRICS])]
             to_add = [ta for ta in to_add if "." not in ta]
@@ -182,9 +191,9 @@ class PsyLingObjective(objective.Objective):
 
             relevant = {
                 "Corpus",
-                self.arguments.lme_formula["to_predict"],
-                *self.arguments.lme_formula["covariates"],
-                *self.arguments.lme_formula["random_effects"],
+                self.arguments.lme_formula[0]["to_predict"],
+                *self.arguments.lme_formula[0]["covariates"],
+                *self.arguments.lme_formula[0]["random_effects"],
             }
             joined = joined[list(relevant)]
             joined.dropna(inplace=True)
@@ -197,7 +206,7 @@ class PsyLingObjective(objective.Objective):
                 # )
                 # # Scale predictors
                 z_score_per_group_(
-                    joined, self.arguments.lme_formula["covariates"],
+                    joined, self.arguments.lme_formula[0]["covariates"],
                     "Corpus"
                 )
             else:
@@ -208,7 +217,7 @@ class PsyLingObjective(objective.Objective):
                 # )
                 # # Scale predictors
                 z_score_(
-                    joined, self.arguments.lme_formula["covariates"],
+                    joined, self.arguments.lme_formula[0]["covariates"],
                 )
             # Fit lme
             if self.arguments.average_psyling:
@@ -216,16 +225,16 @@ class PsyLingObjective(objective.Objective):
                 for corpus in joined["Corpus"].unique():
                     lme, d0 = readingtimes.fit_gpboost(
                         joined[joined["Corpus"] == corpus],
-                        y_col=self.arguments.lme_formula["to_predict"],
-                        predictors=self.arguments.lme_formula["covariates"],
-                        random_effects=self.arguments.lme_formula[
+                        y_col=self.arguments.lme_formula[0]["to_predict"],
+                        predictors=self.arguments.lme_formula[0]["covariates"],
+                        random_effects=self.arguments.lme_formula[0][
                             "random_effects"]
                     )
 
                     model_props = readingtimes.get_model_props(lme, len(d0))
                     info(self.arguments.rank, logger, f"---{corpus}---")
                     print_lme_info(
-                        model_props, self.arguments.lme_formula,
+                        model_props, self.arguments.lme_formula[0],
                         self.arguments.rank
                     )
                     del lme
@@ -248,19 +257,22 @@ class PsyLingObjective(objective.Objective):
             else:
                 lme, d0 = readingtimes.fit_gpboost(
                     joined,
-                    y_col=self.arguments.lme_formula["to_predict"],
-                    predictors=self.arguments.lme_formula["covariates"],
-                    random_effects=self.arguments.lme_formula["random_effects"]
+                    y_col=self.arguments.lme_formula[0]["to_predict"],
+                    predictors=self.arguments.lme_formula[0]["covariates"],
+                    random_effects=self.arguments.lme_formula[
+                        0]["random_effects"]
                 )
 
                 model_props = readingtimes.get_model_props(lme, len(d0))
                 print_lme_info(
-                    model_props, self.arguments.lme_formula,
+                    model_props, self.arguments.lme_formula[0],
                     self.arguments.rank
                 )
                 del lme
                 loglik = -model_props["negloglik_per_row"]
 
+            if loglik > best_loglik:
+                best_loglik = loglik
             del joined
 
             # Add to metric writer
@@ -277,7 +289,7 @@ class PsyLingObjective(objective.Objective):
                     step)
             else:
                 opt_metric = getattr(
-                    metrics["eval"], self.arguments.optimise.lower())
+                    best_eval_metric, self.arguments.optimise.lower())
                 if isinstance(opt_metric, pd.DataFrame):
                     opt_metric = float(opt_metric.to_numpy().sum())
                 trial.report(
@@ -321,11 +333,11 @@ class PsyLingObjective(objective.Objective):
             raise optuna.exceptions.TrialPruned()
 
         if self.arguments.optimise == "loglik":
-            return loglik
+            return best_loglik
 
         else:
             opt_metric = getattr(
-                metrics["eval"], self.arguments.optimise.lower())
+                best_eval_metric, self.arguments.optimise.lower())
             if isinstance(opt_metric, pd.DataFrame):
                 opt_metric = opt_metric.to_numpy().sum()
             return float(opt_metric)

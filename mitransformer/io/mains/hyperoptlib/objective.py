@@ -1,5 +1,6 @@
 from ....train.metrics import (
     MetricWriter)
+from ....train import LMMetric
 from ....data import get_loader, DataProvider
 from ... import parsing
 from .. import functions, train
@@ -83,8 +84,14 @@ class Objective:
         should_prune = False
         metrics = None
         step = 0
+        best_eval_metric: LMMetric | float | None = None
         for step, metrics in enumerate(train_iterator, start=1):
             # Handle pruning based on the intermediate value.
+            if best_eval_metric is None:
+                best_eval_metric = metrics["eval"].minval()
+            if metrics["eval"] > best_eval_metric:
+                best_eval_metric = metrics["eval"]
+
             opt_metric = getattr(
                 metrics["eval"], self.arguments.optimise.lower())
             if isinstance(opt_metric, pd.DataFrame):
@@ -109,7 +116,7 @@ class Objective:
         if should_prune:
             raise optuna.exceptions.TrialPruned()
 
-        opt_metric = getattr(metrics["eval"], self.arguments.optimise.lower())
+        opt_metric = getattr(best_eval_metric, self.arguments.optimise.lower())
         if isinstance(opt_metric, pd.DataFrame):
             opt_metric = opt_metric.to_numpy().sum()
         loss: float = float(opt_metric)
