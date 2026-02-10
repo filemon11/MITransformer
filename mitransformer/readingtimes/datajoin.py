@@ -64,12 +64,13 @@ def join(
     # # Process depending on corpus type
 
     # Select relevant columns and inner join with meta
-    print(measurements)
     base_columns = ('item', 'zone', 'WorkerId', 'Corpus', 'element')
     if corpus_type == "ET":
         interest = list(base_columns) + ['FFD', 'GPT', 'GD']
+        measurements[interest] = measurements[interest].fillna(0)
     else:
         interest = list(base_columns) + ['RT']
+
     if not only_interest:
         interest.extend([
             colname for colname in (
@@ -77,24 +78,21 @@ def join(
             if colname in measurements.columns
         ])
     measurements = measurements[interest]
-    print(measurements)
 
     on = ['item', 'zone', 'Corpus']
     for colname in candidates.columns:
         if colname in measurements.columns and colname not in on:
             measurements = measurements.drop(colname, axis=1)
-    print(measurements)
 
     measurements = candidates.merge(
         measurements, how=how, on=on)
-    print(measurements)
 
     # Get token count (equivalent to the R token check)
     token_count = (
         measurements[['item', 'zone', 'Corpus', 'word']]
         .drop_duplicates()
-        .shape[0]
-    )
+        .shape[0])
+
     info(rank, logger, f"Individual token count: {token_count}")
     if output_file is None:
         return measurements
