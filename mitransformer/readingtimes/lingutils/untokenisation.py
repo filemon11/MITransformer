@@ -157,12 +157,22 @@ def untokenise(
 ) -> Iterable[T]: ...
 
 
+@overload
+def untokenise(
+    space_after: Iterable[bool],
+    items: Iterable[bool],
+    mode: Literal["or"],
+    additional: None = None,
+    punctuation: set[str] = ...,
+) -> Iterable[bool]: ...
+
+
 def untokenise(
     space_after: Iterable[bool],
     items: Iterable[T],
     mode: Literal[
         "mult", "add", "last", "first", "pos", "head", "mean",
-        "recsumrec"] = "mult",
+        "recsumrec", "or"] = "mult",
     additional: Optional[Iterable[Any]] = None,
     punctuation: set[str] = set(),
 ) -> Iterable[T]:
@@ -180,6 +190,9 @@ def untokenise(
 
     def last_simple(x: T, y: T) -> T:
         return y
+
+    def or_simple(x: bool, y: bool) -> bool:
+        return x or y
 
     # -- Complex (x, extra, short, long) -> merged
 
@@ -298,6 +311,8 @@ def untokenise(
             func = promote_func(first_simple)
         case "pos":
             func = pos_full  # type: ignore
+        case "or":
+            func = promote_func(or_simple)  # type: ignore[arg-type]
         case "head":
             func = head_full  # type: ignore
         case "mean":
@@ -459,6 +474,21 @@ class UntokSplitFirst(UntokSplitFunc):
     def __call__(self, untok_df: pd.DataFrame) -> Sequence:
         it = [list(untokenise(  # type: ignore
             sa, measures[0], "first")) for sa, measures in
+            build_sentences(
+                untok_df[self.space_after_col],  # type: ignore
+                (untok_df[self.col],))]  # type: ignore
+        return it
+
+
+class UntokSplitOr(UntokSplitFunc):
+    def __init__(
+            self, col: str, space_after_col: str,
+            *args, **kwargs):
+        super().__init__(col, space_after_col)
+
+    def __call__(self, untok_df: pd.DataFrame) -> Sequence:
+        it = [list(untokenise(  # type: ignore
+            sa, measures[0], "or")) for sa, measures in
             build_sentences(
                 untok_df[self.space_after_col],  # type: ignore
                 (untok_df[self.col],))]  # type: ignore

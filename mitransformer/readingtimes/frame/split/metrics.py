@@ -14,6 +14,7 @@ from ... import lingutils
 from ...lingutils import (
     UntokSplitFunc, UntokSplitAdd, UntokSplitLast,
     UntokSplitHead, UntokSplitFirst, UntokSplitRecSumRec,
+    UntokSplitMean, UntokSplitOr,
     untokenise,
     pos_merge, TAGSET, CONTENT_POS)
 from ....data import (
@@ -583,6 +584,137 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 trainer.config.use_ddp = trainer_use_ddp
                 trainer.config.rank = trainer_rank
                 trainer.config.batch_size = trainer_batch_size
+
+
+class SplitTokMetricMakerUnknown(SplitTokMetricMaker):
+    def __init__(self, conllu_col: str | None = None, *args, **kwargs):
+        self.conllu_col = conllu_col
+
+    def __call__(
+            self, df: pd.DataFrame,
+            unk_id: int,
+            token_mapper_dir: str | TokenMapper | None = None,
+            dataset: CoNLLUDataset | SentenceDataset | None = None,
+            masked: bool = True,
+            transform: TransformMaskHeadChild | None = None,
+            masks_setting: Literal[
+            "current", "next"] | None = "current",
+            *args, **kwargs
+            ) -> tuple[pd.Series, dict[str, Any]]:
+
+        # NOTE: This is a real burden on memory since the attention matrices
+        # are loaded into memory for the whole dataset and remain in the frame.
+        # TODO: Write them to disk in batches
+        if dataset is None:
+            assert self.conllu_col is not None
+
+            tokenlists: Sequence[TokenList] = df[self.conllu_col].tolist()
+            if masked:
+                assert masks_setting is not None
+                assert transform is not None
+                dataset = CoNLLUDataset.from_conllu(
+                    tokenlists, transform, masks_setting=masks_setting)
+            else:
+                dataset = SentenceDataset.from_conllu(
+                    tokenlists)
+        else:
+            if token_mapper_dir is not None:
+                if isinstance(token_mapper_dir, str):
+                    token_mapper: TokenMapper = TokenMapper.load(
+                        token_mapper_dir)
+                else:
+                    token_mapper = token_mapper_dir
+
+                dataset.map_to_ids(token_mapper)
+
+        loader: data.DataLoader[data.SentenceIds, data.IdBatch]
+        loader = data.get_loader(    # type: ignore
+            dataset, batch_size=1,                  # type: ignore
+            bucket=False, min_size=0, max_size=np.inf,
+            shuffle=False, droplast=False)
+
+        sentences: list[list[bool]] = []
+        for batch in loader:
+            ids = batch["input_ids"][0, 2:].tolist()
+            sentences.append(
+                [i == unk_id for i in ids]
+            )
+
+        return pd.Series(sentences), {
+            "unk_id": unk_id,
+            "dataset": dataset,
+            "transform": transform,
+            "masked": masked,
+            "masks_setting": masks_setting,
+        }
+
+    def batched_call(
+            self, df: pd.DataFrame,
+            batch_size: int,
+            args: list[Any],
+            kwargs: dict[str, Any]
+            ) -> Iterable[tuple[pd.Series, dict[str, Any]]]:
+
+        unk_id: int = kwargs["unk_id"]
+        token_mapper_dir: TokenMapper | str | None = None
+        if "token_mapper_dir" in kwargs:
+            token_mapper_dir = kwargs["token_mapper_dir"]
+        dataset: CoNLLUDataset | SentenceDataset | None = None
+        if "dataset" in kwargs:
+            dataset = kwargs["dataset"]
+        masked: bool = True
+        if "masked" in kwargs:
+            masked = kwargs["masked"]
+        transform: TransformMaskHeadChild | None = None
+        if "transform" in kwargs:
+            transform = kwargs["transform"]
+        masks_setting: Literal[
+            "current", "next"] | None = "current"
+        if "masks_setting" in kwargs:
+            masks_setting = kwargs["masks_setting"]
+
+        if dataset is None:
+            assert self.conllu_col is not None
+
+            tokenlists: Sequence[TokenList] = df[self.conllu_col].tolist()
+            if masked:
+                assert masks_setting is not None
+                assert transform is not None
+                dataset = CoNLLUDataset.from_conllu(
+                    tokenlists, transform, masks_setting=masks_setting)
+            else:
+                dataset = SentenceDataset.from_conllu(
+                    tokenlists)
+
+        assert dataset is not None
+        if token_mapper_dir is not None:
+            if isinstance(token_mapper_dir, str):
+                token_mapper: TokenMapper = TokenMapper.load(
+                    token_mapper_dir)
+            else:
+                token_mapper = token_mapper_dir
+
+            dataset.map_to_ids(token_mapper)
+
+        loader: data.DataLoader[data.SentenceIds, data.IdBatch]
+        loader = data.get_loader(    # type: ignore
+            dataset, batch_size=batch_size,                  # type: ignore
+            bucket=False, min_size=0, max_size=np.inf,
+            shuffle=False, droplast=False)
+
+        for batch in loader:
+            is_unk = batch["input_ids"][:, 2:] == unk_id
+
+            unk_list = [
+                sentence.tolist()
+                for sentence in is_unk]
+            yield pd.Series(unk_list), {
+                "unk_id": unk_id,
+                "dataset": dataset,
+                "transform": transform,
+                "token_mapper_dir": token_mapper_dir,
+                "masks_setting": masks_setting,
+            }
 
 
 class SplitTokMetricMakerLemma(SplitTokMetricMaker):
@@ -2106,6 +2238,8 @@ gen_and_untok: dict[str, tuple[
             SplitTokMetricMakerSpaceAfter, False, UntokSplitLast, True),
         "position": (
             SplitTokMetricMakerPosition, False, UntokSplitFirst, True),
+        "unknown": (
+            SplitTokMetricMakerUnknown, False, UntokSplitOr, True),
         "length": (
             SplitTokMetricMakerLength, False, UntokSplitAdd, True),
         "frequency": (
@@ -2161,16 +2295,16 @@ gen_and_untok: dict[str, tuple[
             True, UntokSplitHead, True),
         "attention_entropy": (
             SplitTokMetricMakerAttentionEntropy,
-            True, UntokSplitAdd, True),  # TODO: choose correct untok
+            True, UntokSplitMean, True),  # TODO: choose correct untok
         "attention_distance": (
             SplitTokMetricMakerAttentionDistance,
-            True, UntokSplitAdd, True),  # TODO: choose correct untok
+            True, UntokSplitMean, True),  # TODO: choose correct untok
         "attention_difference": (
             SplitTokMetricMakerAttentionDifference,
-            True, UntokSplitAdd, True),  # TODO: choose correct untok
+            True, UntokSplitMean, True),  # TODO: choose correct untok
         "attention_activation": (
             SplitTokMetricMakerAttentionActivation,
-            True, UntokSplitAdd, True),  # TODO: choose correct untok
+            True, UntokSplitMean, True),  # TODO: choose correct untok
         "cosine": (
             SplitTokMetricMakerCosine,
             True, UntokSplitAdd, True),  # TODO: choose correct untok

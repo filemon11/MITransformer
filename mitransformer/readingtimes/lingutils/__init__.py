@@ -2,7 +2,8 @@ from .untokenisation import (  # noqa: F401
     UntokSplitFunc, untokenise, untokenise_split_df,
     UntokSplitAdd, UntokSplitFirst,
     UntokSplitLast, UntokSplitHead,
-    UntokSplitMean, UntokSplitRecSumRec)  # type: ignore
+    UntokSplitMean, UntokSplitRecSumRec,
+    UntokSplitOr)  # type: ignore
 from .linguistics import (  # noqa: F401
     pos_merge, TAGSET, CONTENT_POS, get_frequency  # type: ignore
 )

@@ -441,10 +441,12 @@ def new_process(
         predictor for predictor in to_add if predictor not in legacy_candidates
     ]
 
+    token_mapper = data.TokenMapper.load(token_mapper_dir)
     dataset = create_dataset(
             frame.df["conllu"].tolist(),
             masked, masks_setting,
-            transform_mask, data.TokenMapper.load(token_mapper_dir),
+            transform_mask,
+            token_mapper,
             use_ddp=use_ddp,
             rank=rank
         )
@@ -456,6 +458,7 @@ def new_process(
         frame.add_batched_(
             batch_size,  # type: ignore
             *to_add,
+            unk_id=token_mapper.unk_id,
             dataset=dataset,
             masks_setting="both",
             trainer=model_dir,
@@ -504,6 +507,7 @@ def new_process(
         frame.add_batched_(
             batch_size,  # type: ignore
             *to_add,
+            unk_id=token_mapper.unk_id,
             dataset=dataset,
             trainer=trainer,
             masks_setting="both",
