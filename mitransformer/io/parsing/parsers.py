@@ -138,7 +138,7 @@ def create_parser() -> argparse.ArgumentParser:
             "unsupervised memory cost learning"))
     trainer_group.add_argument(
         '--distr_mode', type=str,
-        default="att", choices=("att", "att-n"),
+        default="att-n", choices=("att", "att-n"),
         help="mode for calculation attention distribution for combined loss")
     trainer_group.add_argument(
         '--global_distr', type=argtypes.str_to_bool,
@@ -406,8 +406,10 @@ def create_parser() -> argparse.ArgumentParser:
             'Argument for adding spillover versions of the metrics.'
             ' Adds shifted versions up to the shift value provided.'))
     hyperopt_parser.add_argument(
-        '--lme_formula', type=lmeparse, default=lmeparse(
-            "RT ~ length + frequency + surprisal + (surprisal||WorkerId)"),
+        '--lme_formula', type=argtypes.StrToTuple(lmeparse, ...), default=(
+            lmeparse(
+                "RT ~ length + frequency + surprisal + (surprisal||WorkerId)"),
+            ),
         help=(
             'Formula for fitting linear mixed effects model for '
             'optimisation for for loglik.'))

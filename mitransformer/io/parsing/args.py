@@ -105,7 +105,7 @@ class HyperoptParserArgs(ParserArgs):
     psyling_dataset: Tuple[RTCorpus, ...]
     average_psyling: bool
     load_psyling_mmap: str | None
-    lme_formula: LMEParseResults
+    lme_formula: tuple[LMEParseResults, ...]
     shift: int
     sampler: Literal["tpe", "random"]
     pruner: Literal["hyperband", "median"]
