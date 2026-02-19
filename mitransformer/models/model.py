@@ -729,6 +729,8 @@ class MITransformer(nn.Module):
         if self.pos_enc_type == "embedding":
             pos_emb = self.wpe(torch.arange(0, S, device=tok_emb.device))
         else:
+            tok_emb *= tok_emb.shape[-1]**0.5
+            # scale to make larger than encodings
             pos_emb = self.wpe(S)
 
         x = self.embd_dropout(tok_emb + pos_emb)
