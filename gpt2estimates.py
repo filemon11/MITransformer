@@ -1,6 +1,6 @@
 import numpy as np
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from mitransformer.train.trainer import select_true, unpad
+from mitransformer.train.functions import select_true, unpad
 from mitransformer.data.parse import remove_at_symbols, remove_lines, remove_newlines
 from mitransformer.train.losses import entropy
 from datasets import load_dataset
