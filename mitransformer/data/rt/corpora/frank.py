@@ -75,9 +75,7 @@ def load_frank(
         For every token, its word ID.
     """
 
-    pretokeniser = AutoTokenizer.from_pretrained(
-        "bert-base-uncased", cache_dir="./cache"
-        ).backend_tokenizer.pre_tokenizer  # type: ignore
+    pretokeniser = utils.load_pretokeniser()
 
     token_mapper = None
     if token_mapper_dir is not None:
