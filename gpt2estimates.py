@@ -21,7 +21,8 @@ spacy.prefer_gpu()
 nlp = en_core_web_trf.load()
 nlp.tokenizer.add_special_case("<unk>", [{ORTH: "<unk>"}])  # type: ignore
 
-max_len_train = 40
+max_len = 60
+min_len = 3
 
 @Language.component("prevent-sbd")
 def prevent_sentence_boundary_detection(doc):
@@ -38,7 +39,7 @@ def split_line(entries: dict[str, list[str]]) -> dict[str, list[str]]:
         line = remove_at_symbols(line)
         line = remove_newlines(line)
         doc = nlp(line)
-        sents.extend([sent.text for sent in doc.sents if len(sent) > 4 and len(sent) <= max_len_train])
+        sents.extend([sent.text for sent in doc.sents if len(sent) >= min_len and len(sent) <= max_len])
     return {"text": sents}
 
 
@@ -67,7 +68,10 @@ def load_causalLM(name: str = "gpt2"):
 
 
 dataset = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1", cache_dir="./cache")  # wikitext-103-raw-v1
-dataset.save_to_disk("./cache/Wikitext")
+# dataset.save_to_disk("./cache/Wikitext")
+
+# dataset = load_from_disk("./cache/Wikitext")
+
 
 tokeniser = load_tokeniser("gpt2-medium")
 model = load_causalLM("gpt2-medium")
