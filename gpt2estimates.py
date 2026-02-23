@@ -3,6 +3,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from mitransformer.train.functions import select_true, unpad
 from mitransformer.data.parse import remove_at_symbols, remove_lines, remove_newlines
 from mitransformer.train.losses import entropy
+import requests
 from datasets import load_dataset
 import torch
 import spacy
@@ -29,6 +30,7 @@ def prevent_sentence_boundary_detection(doc):
         token.is_sent_start = False
     return doc
 
+
 def split_line(entries: dict[str, list[str]]) -> dict[str, list[str]]:
     sents = []
     lines = remove_lines(entries["text"])
@@ -40,10 +42,35 @@ def split_line(entries: dict[str, list[str]]) -> dict[str, list[str]]:
     return {"text": sents}
 
 
-dataset = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1")
+def load_tokeniser(name: str = "gpt2"):
+    try:
+        return AutoTokenizer.from_pretrained(
+            name, cache_dir="./cache",
+            )
+    except requests.exceptions.ConnectionError:
+        return AutoTokenizer.from_pretrained(
+            name, cache_dir="./cache",
+            local_files_only=True,
+            )
 
-tokeniser = AutoTokenizer.from_pretrained("gpt2")
-model = AutoModelForCausalLM.from_pretrained("gpt2")
+
+def load_causalLM(name: str = "gpt2"):
+    try:
+        return AutoModelForCausalLM.from_pretrained(
+            name, cache_dir="./cache",
+            )
+    except requests.exceptions.ConnectionError:
+        return AutoModelForCausalLM.from_pretrained(
+            name, cache_dir="./cache",
+            local_files_only=True,
+            )
+
+
+dataset = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1", cache_dir="./cache")  # wikitext-103-raw-v1
+dataset.save_to_disk("./cache/Wikitext")
+
+tokeniser = load_tokeniser("gpt2-medium")
+model = load_causalLM("gpt2-medium")
 model.to("cuda")
 tokeniser.pad_token_id = tokeniser.eos_token_id
 
@@ -85,16 +112,15 @@ for j, batch in enumerate(tqdm(dataloader)):
         surprisals.append(out_sen.detach().cpu().numpy())    # first token probability?
 
         sen_att = torch.stack([att[i, :, :num_toks, :num_toks] for att in attentions])  # [layer, head, seq, seq]
-        entr = entropy(sen_att).detach().cpu().numpy().mean(0).mean(0)
-        # [layer, head, seq]
+        entr = entropy(sen_att, reduction="none").sum(-1).detach().cpu().numpy().mean(0).mean(0) # [layer, head, seq]
         entropies.append(entr)
 
     if total_toks > 0:
         losses.append((model_outputs.loss * total_toks).detach().cpu().numpy())
         total_total_toks += total_toks
 
-#     if j+1 == iterations:
-#         break
+#    if j+1 == iterations:
+#        break
 
 c = np.concat(surprisals)
 print(c.mean())
