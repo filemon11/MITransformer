@@ -214,6 +214,8 @@ add_lags_scaled <- function(data,
   out
 }
 
+
+
 plot_bins <- function(model,
                       xname,
                       bins = 25,
@@ -338,7 +340,7 @@ plot_bins <- function(model,
     
     # original (unscaled) predictor values
     x_orig <- data[[x_unscaled]]
-  
+    
     br <- make_nice_breaks_scaled(x_center, x_scale, x_orig, n = 7)
     
     p <- p + ggplot2::scale_x_continuous(
@@ -399,6 +401,7 @@ make_nice_breaks_scaled <- function(x_center, x_scale, x_orig, n = 6) {
   list(breaks_scaled = br_scaled, labels_orig = br_orig, step = step)
 }
 
+
 apply_scaling <- function(data, cols_to_scale) {
   data %>% dplyr::mutate(
     dplyr::across(
@@ -443,7 +446,7 @@ remove_na_sentences <- function(data, goal="unknown", sent_col="item") {
     dplyr::select(-.flag_true_in_group)
   
   cat("values set to NA:", sum(is.na(data[[goal]])), "\n")
-  cat("non-na nrows after cut-off:", nrow(na.omit(data)), "\n")
+  cat("non-na nrows after na sentence removal:", nrow(na.omit(data)), "\n")
   
   data
 }
@@ -490,4 +493,42 @@ load_data2 <- function(
     data <- apply_scaling(data, unlist(lapply(seq_len(spill), function(i) paste0(cols_to_scale, i))))
   }
   data
+}
+
+## re = object of class ranef.mer
+ggCaterpillar <- function(re, QQ=TRUE, likeDotplot=TRUE) {
+  # from https://stackoverflow.com/a/16511206
+  require(ggplot2)
+  f <- function(x) {
+    pv   <- attr(x, "postVar")
+    cols <- 1:(dim(pv)[1])
+    se   <- unlist(lapply(cols, function(i) sqrt(pv[i, i, ])))
+    ord  <- unlist(lapply(x, order)) + rep((0:(ncol(x) - 1)) * nrow(x), each=nrow(x))
+    pDf  <- data.frame(y=unlist(x)[ord],
+                       ci=1.96*se[ord],
+                       nQQ=rep(qnorm(ppoints(nrow(x))), ncol(x)),
+                       ID=factor(rep(rownames(x), ncol(x))[ord], levels=rownames(x)[ord]),
+                       ind=gl(ncol(x), nrow(x), labels=names(x)))
+    
+    if(QQ) {  ## normal QQ-plot
+      p <- ggplot(pDf, aes(nQQ, y))
+      p <- p + facet_wrap(~ ind, scales="free")
+      p <- p + xlab("Standard normal quantiles") + ylab("Random effect quantiles")
+    } else {  ## caterpillar dotplot
+      p <- ggplot(pDf, aes(ID, y)) + coord_flip()
+      if(likeDotplot) {  ## imitate dotplot() -> same scales for random effects
+        p <- p + facet_wrap(~ ind)
+      } else {           ## different scales for random effects
+        p <- p + facet_grid(ind ~ ., scales="free_y")
+      }
+      p <- p + xlab("Levels") + ylab("Random effects")
+    }
+    
+    p <- p + theme(legend.position="none")
+    p <- p + geom_hline(yintercept=0)
+    p <- p + geom_errorbar(aes(ymin=y-ci, ymax=y+ci), width=0, colour="black")
+    p <- p + geom_point(aes(size=1.2), colour="blue") 
+    return(p)
+  }
+  lapply(re, f)
 }
