@@ -264,7 +264,6 @@ class LMTrainer():
         # if self.use_ddp:
         #     dist.barrier()
         if self.config.rank is None or self.config.rank == 0:
-            print(self.config.rank)
             model = self.transformerlm
             if self.use_ddp:
                 assert isinstance(

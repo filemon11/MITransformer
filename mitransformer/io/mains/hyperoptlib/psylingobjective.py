@@ -5,11 +5,12 @@ from ... import parsing
 from .. import train
 from . import objective, sampler
 
-import optuna
-import pandas as pd
-import numpy as np
+import optuna  # type: ignore
+import pandas as pd  # type: ignore
+import numpy as np  # type: ignore
 
-from typing import Iterable, Sequence, Collection
+from collections import abc
+from typing import Iterable, Sequence, Collection, Any, Literal
 
 from mitransformer.utils.logmaker import (
     getLogger, info)
@@ -91,6 +92,25 @@ class PsyLingObjective(objective.Objective):
         self.measurements = get_measurements(
             self.is_et_corpus, arguments.psyling_dataset, psyling_df
         )
+        tracker = LengthTracker(self.measurements, rank=arguments.rank)
+
+        # remove nans
+        self.measurements = self.measurements[
+            ~self.measurements[
+                self.arguments.lme_formula[0]["to_predict"]].isna()]
+        tracker.update(self.measurements, "Removed na observations:")
+
+        # Apply cutoffs
+        self.measurements = apply_cutoff(
+            self.measurements, self.arguments.lme_formula[0]["to_predict"])
+        tracker.update(self.measurements, "Cut off observations:")
+
+        # Apply outlier removal
+        self.measurements = remove_outliers_per_group(
+            self.measurements, (self.arguments.lme_formula[0]["to_predict"],),
+            "WorkerId")
+        tracker.update(self.measurements, "Applied outlier removal:")
+
         info(
             self.arguments.rank, logger,
             "Loaded psyling measurements.")
@@ -140,9 +160,10 @@ class PsyLingObjective(objective.Objective):
 
             # Handle pruning based on the intermediate value.
 
-            to_add = ["surprisal", *set(self.arguments.lme_formula[0][
-                "covariates"]) - set(
-                    ["surprisal", *readingtimes.BASELINE_METRICS])]
+            to_add = [
+                "unknown", "surprisal", *set(self.arguments.lme_formula[0][
+                    "covariates"]) - set(
+                    ["0", "surprisal", *readingtimes.BASELINE_METRICS])]
             to_add = [ta for ta in to_add if "." not in ta]
             # no spillover versions
 
@@ -157,7 +178,9 @@ class PsyLingObjective(objective.Objective):
                 length_weighted=self.arguments.length_weighted,
                 return_arc_logits=False,
                 use_ddp=False,
-                rank=None)
+                rank=None,
+                unk_id=self.data_provider.datasets[  # type: ignore
+                    "token_mapper"].unk_id)
             # TODO: allow unmasked dataset to be used
 
             # Untokenisation
@@ -167,8 +190,8 @@ class PsyLingObjective(objective.Objective):
                 spillover=self.arguments.shift
             )
 
-            if self.arguments.rank is None or self.arguments.rank == 0:
-                print(frame.df.head(n=10))
+            # if self.arguments.rank is None or self.arguments.rank == 0:
+            #     print(frame.df.head(n=10))
 
             # Joining
             # This may take some time. Should we precompute this,
@@ -180,7 +203,8 @@ class PsyLingObjective(objective.Objective):
                 frame.df,
                 self.measurements,
                 "ET" if self.is_et_corpus else "SP",
-                rank=self.arguments.rank)
+                rank=self.arguments.rank,
+                only_interest=False)
             del frame
 
             # In concatenated setting, there can be several corpora per
@@ -189,42 +213,38 @@ class PsyLingObjective(objective.Objective):
             joined["item"] = joined["Corpus"] + joined["item"].astype(str)
             joined["WorkerId"] = joined["Corpus"] + joined["WorkerId"]
 
-            relevant = {
-                "Corpus",
-                self.arguments.lme_formula[0]["to_predict"],
-                *self.arguments.lme_formula[0]["covariates"],
-                *self.arguments.lme_formula[0]["random_effects"],
-            }
-            joined = joined[list(relevant)]
-            joined.dropna(inplace=True)
+            tracker = LengthTracker(joined, rank=arguments.rank)
+            joined = apply_cutoff(
+                joined, "frequency",
+                lowerOther=2, upperOther=np.inf)
+            tracker.update(joined, "Removed observations with freq<2:")
+
+            joined = drop_sentences(joined)
+            tracker.update(
+                joined,
+                "Removed observations (sentences with words "
+                "unknown to tokeniser):")
 
             if self.arguments.average_psyling:
-                # # Remove outliers
-                # joined = remove_outliers_per_group(
-                #     joined, self.arguments.lme_formula["covariates"],
-                #     "Corpus", rank=self.arguments.rank
-                # )
-                # # Scale predictors
                 z_score_per_group_(
                     joined, self.arguments.lme_formula[0]["covariates"],
                     "Corpus"
                 )
             else:
-                # # Remove outliers
-                # joined = remove_outliers(
-                #     joined, self.arguments.lme_formula["covariates"],
-                #     rank=self.arguments.rank
-                # )
-                # # Scale predictors
                 z_score_(
                     joined, self.arguments.lme_formula[0]["covariates"],
                 )
+
             # Fit lme
             if self.arguments.average_psyling:
                 measures: list[float] = []
                 for corpus in joined["Corpus"].unique():
+                    joined_corpus = joined[joined["Corpus"] == corpus]
+                    info(
+                        arguments.rank, logger,
+                        f"Number of observations: {len(joined_corpus)}")
                     lme, d0 = readingtimes.fit_gpboost(
-                        joined[joined["Corpus"] == corpus],
+                        joined_corpus,
                         y_col=self.arguments.lme_formula[0]["to_predict"],
                         predictors=self.arguments.lme_formula[0]["covariates"],
                         random_effects=self.arguments.lme_formula[0][
@@ -255,6 +275,9 @@ class PsyLingObjective(objective.Objective):
                 loglik = sum(measures) / len(measures)
 
             else:
+                info(
+                    arguments.rank, logger,
+                    f"Number of observations: {len(joined)}")
                 lme, d0 = readingtimes.fit_gpboost(
                     joined,
                     y_col=self.arguments.lme_formula[0]["to_predict"],
@@ -347,18 +370,25 @@ def get_measurements(
         is_et_corpus: bool,
         psyling_datasets: Iterable[data.RTCorpus],
         psyling_df: pd.DataFrame | None = None,
-        merge_on: Sequence[str] = ["Corpus", "item", "zone"]
+        merge_on: Sequence[str] = ["Corpus", "item", "zone"],
+        only_interest: bool = False,
         ) -> pd.DataFrame:
-    measurement_keys = [
-        "FFD", "GPT", "GD"] if is_et_corpus else ["RT"]
-    measurement_keys.extend(
-        ["word", "item", "zone", "element", "WorkerId", "Corpus"])
+
     measurements = [
         data.prepare_RT_measurements(
             data.rt_corpus_to_measurements_file[dataset],
-            corpus=dataset)[measurement_keys]
+            corpus=dataset,
+            only_interest=only_interest)
         for dataset in psyling_datasets
     ]
+
+    if only_interest:
+        measurement_keys = [
+            "FFD", "GPT", "GD"] if is_et_corpus else ["RT"]
+        measurement_keys.extend(
+            ["word", "item", "zone", "element", "WorkerId", "Corpus"])
+        measurements = [dataset[measurement_keys] for dataset in measurements]
+
     measurements_df = pd.concat(measurements)
     # remove items that are not needed (i.e. that won't be joined on later)
     if psyling_df is not None:
@@ -394,6 +424,17 @@ def z_score_per_group_(
         .transform(lambda x: (x - x.mean()) / x.std()))
 
 
+def drop_sentences(
+        data: pd.DataFrame, goal: str = "unknown",
+        value: Any = True, sent_col: str = "item"):
+    mask = data[goal].astype(str).eq("True")
+    bad_sentences = data.loc[mask, sent_col].unique()
+
+    data = data.loc[~data[sent_col].isin(bad_sentences)].copy()
+
+    return data
+
+
 def z_score_numerical_per_group_(
         df: pd.DataFrame, exception: Iterable[str],
         group_col: str) -> None:
@@ -403,63 +444,81 @@ def z_score_numerical_per_group_(
     z_score_per_group_(df, num_cols, group_col)
 
 
-def remove_outliers(
-        df: pd.DataFrame,
-        cols: Collection[str], rank: int | None = None
-        ) -> pd.DataFrame:
-    cols = list(cols)
-    q1 = df[cols].quantile(0.25)
-    q3 = df[cols].quantile(0.75)
-    iqr = q3 - q1
-    mask = (
-        (df[cols] < (q1 - 1.5 * iqr))
-        | (df[cols] > (q3 + 1.5 * iqr))).any(axis=1)
-    info(rank, logger, f"Removed {sum(mask)} out of {len(df)} rows.")
-    return df[~mask]
-
-
 def remove_outliers_per_group(
         df: pd.DataFrame,
         cols: Collection[str],
         group_col: str,
-        rank: int | None = None
+        k: float = 2.5,
+        by: None | str | Sequence[str] = None,
         ) -> pd.DataFrame:
-    cols = list(cols)
-    grouped = df.groupby(group_col)
+    needed = [group_col, *cols]
+    missing = [c for c in needed if c not in df.columns]
+    if missing:
+        raise KeyError(f"Missing required columns: {missing}")
 
-    q1 = grouped[cols].transform("quantile", 0.25)
-    q3 = grouped[cols].transform("quantile", 0.75)
-    iqr = q3 - q1
-    mask = (
-        (df[cols] < (q1 - 1.5 * iqr))
-        | (df[cols] > (q3 + 1.5 * iqr))).any(axis=1)
+    if by is None:
+        by_cols: list[str] = []
+    elif isinstance(by, str):
+        by_cols = [by]
+    else:
+        by_cols = list(by)
 
-    removed_per_group = (
-        df.loc[mask]
-        .groupby(group_col)
-        .size()
-    )
-    total_per_group = (
-        grouped
-        .size()
-    )
+    missing_by = [c for c in by_cols if c not in df.columns]
+    if missing_by:
+        raise KeyError(f"Missing grouping columns in `by`: {missing_by}")
 
-    for (grp, n), (_, t) in zip(
-            removed_per_group.items(), total_per_group.items()):
-        info(rank, logger, f"Group '{grp}': removed {n} out of {t} rows")
-    info(rank, logger, f"Removed {sum(mask)} out of {len(df)} rows total.")
-    df = df[~mask]
-    return df
+    grp_cols = [group_col] + by_cols
+
+    keep = pd.Series(True, index=df.index)
+
+    # For each trimmed column, compute group-wise mean/sd and update keep-mask
+    for col in cols:
+        x = df[col]
+
+        mu = df.groupby(
+            grp_cols, dropna=False)[col].transform("mean")
+        sd = df.groupby(
+            grp_cols, dropna=False)[col].transform(lambda s: s.std(ddof=1))
+
+        # If sd is 0 or NaN, do not trim for that row/column
+        # (i.e., keep = True for this column)
+        valid_sd = sd.notna() & (sd != 0)
+
+        lower = mu - k * sd
+        upper = mu + k * sd
+
+        in_range = x.isna() | (~valid_sd) | ((x >= lower) & (x <= upper))
+        keep &= in_range
+
+    out = df.loc[keep].copy().reset_index(drop=True)
+
+    return out
 
 
-def remove_outliers_numerical(
-        df: pd.DataFrame,
-        exception: Iterable[str], rank: int | None = None
+def apply_cutoff(
+        data: pd.DataFrame,
+        goal: str,
+        lowerRT: float = 200,
+        upperRT: float = 2000,
+        lowerGPT: float = 80,
+        upperGPT: float = 3000,
+        lowerOther: float = 80,
+        upperOther: float = 1000,
         ) -> pd.DataFrame:
-    num_cols = list(
-        set(df.select_dtypes(include="number").columns)
-        - set(exception))
-    return remove_outliers(df, num_cols, rank)
+    if goal == "RT":
+        out = data.loc[(data["RT"] > lowerRT) & (data["RT"] < upperRT)].copy()
+    elif goal == "GPT":
+        if goal not in data.columns:
+            raise KeyError(f"Column '{goal}' not found in dataframe.")
+        out = data.loc[
+            (data[goal] > lowerGPT) & (data[goal] < upperGPT)].copy()
+    else:
+        if goal not in data.columns:
+            raise KeyError(f"Column '{goal}' not found in dataframe.")
+        out = data.loc[
+            (data[goal] > lowerOther) & (data[goal] < upperOther)].copy()
+
+    return out
 
 
 def print_lme_info(
@@ -485,3 +544,29 @@ def print_lme_info(
                     "random_effects"].items()
                 for c in coefs if c not in (1, 0)]
         ))
+
+
+class LengthTracker():
+    def __init__(
+            self, df: abc.Sized | None = None,
+            rank: None | int = None,
+            msg: None | str = "Initial length:"):
+        self.lengths: list[int] = []
+        self.rank = rank
+
+        if df is not None:
+            self.lengths.append(len(df))
+            if msg is not None:
+                info(
+                    self.rank, logger,
+                    f"{msg} {self.lengths[-1]}")
+
+    def update(
+            self, df: abc.Sized, msg: str | None = None,
+            mode: Literal["a", "r"] = "a") -> None:
+        self.lengths.append(len(df))
+        if msg is not None and len(self.lengths) > 1:
+            factor = -1 if mode == "r" else "a"
+            info(
+                self.rank, logger,
+                f"{msg} {factor*(self.lengths[-1]-self.lengths[-2])}")

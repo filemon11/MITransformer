@@ -53,6 +53,8 @@ def get_model_props(
     """Requires fitted model."""
     coef: pd.DataFrame = model.get_coef()  # type: ignore
     cov_pars: pd.DataFrame = model.get_cov_pars()  # type: ignore
+    # this seems to give a false additional group with very low variance
+    # if no random effects are specified.
 
     negloglik = model.get_current_neg_log_likelihood()
     assert negloglik is not None

@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import gpboost as gpb  # type: ignore
 
+from . import model_debug
+
 from typing import Iterable, Tuple, Mapping, Literal
 
 from ...utils.logmaker import getLogger
@@ -21,7 +23,8 @@ def build_X(df: pd.DataFrame, predictors: Iterable[str]) -> np.ndarray:
 def fit_gpboost(
         df: pd.DataFrame, y_col: str, predictors: Iterable[str],
         random_effects: Mapping[
-            str, Iterable[str | Literal[0] | Literal[1]]] | None = None
+            str, Iterable[str | Literal[0] | Literal[1]]] | None = None,
+        debug: bool = False
         ) -> Tuple[gpb.GPModel, pd.DataFrame]:
     """
     'random_effects': is a mapping from grouping variables to covariates.
@@ -53,14 +56,14 @@ def fit_gpboost(
             covs_list = list(covs)
             drop_rand_intr.append(0 in covs_list)
             filtered_list: list[str] = [
-                c for c in covs if not (c == 0 or c == 1)]
+                c for c in covs_list if not (c == 0 or c == 1)]
             pointers.extend([idx]*len(filtered_list))
             flat_names.extend(filtered_list)
 
         if len(flat_names) > 0:
             Z = df[flat_names].values
 
-        group = df[group_vars].values
+        group, _ = encode_groups(df, group_vars)
 
     X = build_X(df, predictors)
     y = df[y_col].values
@@ -68,6 +71,40 @@ def fit_gpboost(
     if group_vars is None:
         group = np.zeros((len(y), 1))
         drop_rand_intr = [True]
+
+    if drop_rand_intr is not None and not any(drop_rand_intr):
+        drop_rand_intr = None
+
+    if debug:
+        print("group_vars:", group_vars)
+        if group is not None:
+            print("group_data shape:", group.shape)
+        print("Z shape:", None if Z is None else Z.shape)
+        print("pointers:", pointers)
+        print("drop_rand_intr:", drop_rand_intr)
+
+        print("y dtype:", y.dtype, "finite:", np.isfinite(y).all())
+        print(
+            "X dtype:", X.dtype, "shape:",
+            X.shape, "finite:", np.isfinite(X).all())
+        if group is not None:
+            print("group dtype:", group.dtype, "shape:", group.shape)
+        if Z is not None:
+            print(
+                "Z dtype:", Z.dtype, "shape:",
+                Z.shape, "finite:", np.isfinite(Z).all())
+
+        model_debug.debug_gpboost_structure(
+            df=df,
+            group_vars=group_vars,
+            Z=Z,
+            pointers=pointers,
+            random_effects=random_effects,
+            print_report=True,
+        )
+
+    if Z is not None:
+        Z = Z.astype(np.float64)
 
     model = gpb.GPModel(
         group_data=group,
@@ -79,10 +116,26 @@ def fit_gpboost(
     # Vecchia approximations tested:
     # only miniscule decreases in accuracy
 
-    model.fit(y=y, X=X)
+    model.fit(y=y.astype(np.float64), X=X.astype(np.float64), params={
+        "trace": debug})
 
     return model, df
 
 # TODO: the coefficient names and random effect names are not
 # written to the output. The current anonymous names are hard
 # to keep track of.
+
+
+def encode_groups(
+        df: pd.DataFrame, group_vars: list[str]
+        ) -> tuple[np.ndarray, dict[str, dict]]:
+    encoders = {}
+    cols = []
+    for gv in group_vars:
+        codes, uniques = pd.factorize(df[gv], sort=True)
+        if (codes < 0).any():
+            raise ValueError(f"Grouping var {gv} contains NaN after dropna")
+        cols.append(codes.astype(np.int32))
+        encoders[gv] = {"uniques": uniques}
+    group = np.column_stack(cols)
+    return group, encoders

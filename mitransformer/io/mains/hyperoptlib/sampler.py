@@ -1,7 +1,7 @@
 from ... import parsing
-import numpy as np
+import numpy as np  # type: ignore
 
-import optuna
+import optuna  # type: ignore
 
 from mitransformer.utils.logmaker import (
     getLogger)

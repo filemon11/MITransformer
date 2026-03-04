@@ -22,7 +22,7 @@ def parse(formula: str) -> ParseResult:
     for c in components:
         if c[0] == "(" and c[-1] == ")":
             randoms.append(c[1:-1].strip())
-        else:
+        elif c.strip() != "1":
             covariates = covariates + (c,)
 
     # random effects
@@ -56,12 +56,15 @@ def parse(formula: str) -> ParseResult:
                     " appear as a covariate.")
 
     # Include formula in standard form
-    formula_components = [
-        f"({' + '.join([str(i) for i in s])}||{group})"
-        for group, s in random_effects.items()]
-    formula = " + ".join((
-        f"{to_predict} ~ {' + '.join(covariates)} ",
-        f"{' + '.join(formula_components)}"))
+
+    formula = f"{to_predict} ~ 1"
+    if len(covariates) > 0:
+        formula += ' + '.join(covariates)
+    if len(random_effects) > 0:
+        formula_components = [
+            f"({' + '.join([str(i) for i in s])}||{group})"
+            for group, s in random_effects.items()]
+        formula += ' + ' + ' + '.join(formula_components)
 
     return {
         "groups": groups,

@@ -94,7 +94,7 @@ def attention_distance_loss(
     distances = dist_mat*probs
     # [..., S, S] or [..., H, S, S]
 
-    distances = (distances).sum(-1)  # -> [..., S] or [..., H, S]
+    distances = distances.sum(-1)  # -> [..., S] or [..., H, S]
 
     if not global_distr:
         distances = distances.mean(-2)  # [..., H, S] -> [..., S]

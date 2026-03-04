@@ -6,7 +6,7 @@ from ... import parsing
 from .. import functions, train
 from . import sampler
 
-import optuna
+import optuna  # type: ignore
 import pandas as pd
 
 from mitransformer.utils.logmaker import (

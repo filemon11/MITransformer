@@ -372,7 +372,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                 models.AdditionalKeys,
                 list[torch.Tensor]] = defaultdict(list)
 
-            probs_global: list[torch.Tensor] = []
+            probs_global: list[float] = []
             tensorlist: list[torch.Tensor]
             for (
                 pred_probs, attention_logits,
@@ -1131,7 +1131,7 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
                 global_distr=global_distr,
                 include_current=include_current,
                 length_weighted=length_weighted
-                )[2:].numpy() for ad in arc_distr]
+                )[2:].numpy().astype(np.float32) for ad in arc_distr]
 
         return pd.Series(entropy), {
             "arc_distr": arc_distr,
@@ -1200,7 +1200,7 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
                 reduction="none",
                 global_distr=global_distr,
                 length_weighted=length_weighted
-                )[2:].numpy() for ad in arc_distr]
+                )[2:].numpy().astype(np.float32) for ad in arc_distr]
 
         return pd.Series(distance), {
             "arc_distr": arc_distr,
@@ -1270,7 +1270,7 @@ class SplitTokMetricMakerAttentionDifference(SplitTokMetricMaker):
                 global_distr=global_distr,
                 length_weighted=length_weighted,
                 include_current=include_current
-                )[2:].numpy() for ad in arc_distr]
+                )[2:].numpy().astype(np.float32) for ad in arc_distr]
 
         return pd.Series(difference), {
             "arc_distr": arc_distr,
@@ -1340,7 +1340,7 @@ class SplitTokMetricMakerAttentionActivation(SplitTokMetricMaker):
                 global_distr=global_distr,
                 length_weighted=length_weighted,
                 include_current=include_current
-                )[2:].numpy() for ad in arc_distr]
+                )[2:].numpy().astype(np.float32) for ad in arc_distr]
 
         return pd.Series(difference), {
             "arc_distr": arc_distr,
@@ -1370,7 +1370,7 @@ class SplitTokMetricMakerCosine(SplitTokMetricMaker):
                 embeddings=emb,
                 activations=act,
                 reduction="none",
-                )[2:].numpy() for emb, act in zip(
+                )[2:].numpy().astype(np.float32) for emb, act in zip(
                     embeddings, activations
                 )]
 
@@ -1398,7 +1398,7 @@ class SplitTokMetricMakerSurprox(SplitTokMetricMaker):
                 lgts,
                 lbl_ids,
                 reduction="none",
-                )[2:].numpy() for lgts, lbl_ids in zip(
+                )[2:].numpy().astype(np.float32) for lgts, lbl_ids in zip(
                     logits, label_ids)
                 ]
 
