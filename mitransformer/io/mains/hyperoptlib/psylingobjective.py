@@ -566,7 +566,7 @@ class LengthTracker():
             mode: Literal["a", "r"] = "a") -> None:
         self.lengths.append(len(df))
         if msg is not None and len(self.lengths) > 1:
-            factor = -1 if mode == "r" else "a"
+            factor = -1 if mode == "r" else 1
             info(
                 self.rank, logger,
                 f"{msg} {factor*(self.lengths[-1]-self.lengths[-2])}")
