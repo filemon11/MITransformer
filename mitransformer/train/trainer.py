@@ -294,7 +294,6 @@ class LMTrainer():
             self, steps: int, model_name: str | None = None) -> None:
         if model_name is None:
             model_name = self.config.model_name
-        model_name += f"_{steps}"
         source_directory = os.path.join(
             self.model_dir, f"{model_name}_{steps}")
         destination_directory = os.path.join(self.model_dir, model_name)
