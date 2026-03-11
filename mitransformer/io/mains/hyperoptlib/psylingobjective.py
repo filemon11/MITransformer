@@ -243,7 +243,6 @@ class PsyLingObjective(objective.Objective):
                     joined, self.arguments.lme_formula[0]["covariates"],
                 )
 
-            joined.to_csv("testcsvjoined.csv")
             # Fit lme
             if self.arguments.average_psyling:
                 measures: list[float] = []
