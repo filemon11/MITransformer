@@ -50,7 +50,7 @@ class Undefined():
 
 
 class AdditionalPrediction(TypedDict):
-    proj_states: NotRequired[list[torch.Tensor]]
+    proj_state_norms: NotRequired[list[torch.Tensor]]
     att: list[torch.Tensor]
     embeddings: list[torch.Tensor]
     activations: list[torch.Tensor]
@@ -297,7 +297,8 @@ class LMTrainer():
         source_directory = os.path.join(
             self.model_dir, f"{model_name}_{steps}")
         destination_directory = os.path.join(self.model_dir, model_name)
-        shutil.copytree(source_directory, destination_directory)
+        shutil.copytree(
+            source_directory, destination_directory, dirs_exist_ok=True)
 
     def load_state(
             self, model_name: str | None = None,
@@ -442,11 +443,11 @@ class LMTrainer():
             ignore_index: int = -100,
             reduction: Literal["sum", "none"] = "sum"
             ) -> dict[str, torch.Tensor]:
-        """proj_states cannot be none if mode is `att-n`.
+        """proj_state_norms cannot be none if mode is `att-n`.
         arc_logits have form (M, B, S, S)
         TODO: restructure so that we have two modes of returning arcs;
         one mode (item 2 returned) for alpha computation and second mode
-        (item 3 returned with dict of proj_states and att
+        (item 3 returned with dict of proj_state_norms and att
         for combined loss mode)"""
         out_dict: dict[str, torch.Tensor] = {}
         assert self.config.losses is not None
@@ -739,7 +740,7 @@ class LMTrainer():
             logits, arc_logits, additional = self.transformerlm(
                 **batch,
                 return_arc_logits=not self.config.combined_loss,
-                return_proj_states=(
+                return_proj_state_norms=(
                     self.config.combined_loss
                     and self.config.distr_mode == "att-n"),
                 return_att=(
@@ -869,7 +870,7 @@ class LMTrainer():
             logits, arc_logits, additional = self.transformerlm(
                 **batch,
                 return_arc_logits=not self.config.combined_loss,
-                return_proj_states=(
+                return_proj_state_norms=(
                     self.config.combined_loss
                     and self.config.distr_mode == "att-n"),
                 return_att=(
@@ -1278,7 +1279,7 @@ class LMTrainer():
             dataset_name: str | None = None,
             token_mapper: data.TokenMapper | None = None,
             return_arc_logits: bool | None = None,
-            return_proj_states: bool | None = None,
+            return_proj_state_norms: bool | None = None,
             return_att: bool | None = None,
             return_embeddings: bool | None = None,
             return_activations: bool | None = None,
@@ -1304,7 +1305,7 @@ class LMTrainer():
                 dataset_name=dataset_name,
                 token_mapper=token_mapper,
                 return_arc_logits=return_arc_logits,
-                return_proj_states=return_proj_states,
+                return_proj_state_norms=return_proj_state_norms,
                 return_att=return_att,
                 return_embeddings=return_embeddings,
                 return_activations=return_activations,
@@ -1332,7 +1333,7 @@ class LMTrainer():
             dataset_name: str | None = None,
             token_mapper: data.TokenMapper | None = None,
             return_arc_logits: bool | None = None,
-            return_proj_states: bool | None = None,
+            return_proj_state_norms: bool | None = None,
             return_att: bool | None = None,
             return_embeddings: bool | None = None,
             return_activations: bool | None = None,
@@ -1382,8 +1383,8 @@ class LMTrainer():
 
                     if return_arc_logits is None:
                         return_arc_logits = not self.config.combined_loss
-                    if return_proj_states is None:
-                        return_proj_states = (
+                    if return_proj_state_norms is None:
+                        return_proj_state_norms = (
                             self.config.combined_loss
                             and self.config.distr_mode == "att-n")
                     if return_att is None:
@@ -1409,7 +1410,7 @@ class LMTrainer():
                         logits, arc_logits, additional = self.transformerlm(
                             **batch,
                             return_arc_logits=return_arc_logits,
-                            return_proj_states=return_proj_states,
+                            return_proj_state_norms=return_proj_state_norms,
                             return_att=return_att,
                             return_embeddings=return_embeddings,
                             return_activations=return_activations)
@@ -1445,11 +1446,11 @@ class LMTrainer():
                                     labels, ignore_index))
 
                     additional_key: models.AdditionalKeys
-                    for additional_key in ("proj_states", "att"):
+                    for additional_key in ("proj_state_norms", "att"):
                         if additional_key in additional:  # type: ignore
                             num_after_square = 0
-                            if additional_key in ("proj_states",):
-                                num_after_square = 1
+                            # if additional_key in ("proj_state_norms",):
+                            #    num_after_square = 1
                             unpadded_additional[additional_key] = (
                                 functions.unpad_masks(
                                     additional[

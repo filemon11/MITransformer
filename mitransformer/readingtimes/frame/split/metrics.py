@@ -271,7 +271,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
             return_arc_logits: bool = True,
             return_logits: bool = True,
             return_label_ids: bool = True,
-            return_proj_states: bool | None = None,
+            return_proj_state_norms: bool | None = None,
             return_att: bool | None = None,
             use_ddp: bool = False,
             rank: int | None = None,
@@ -384,7 +384,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                     return_logits=return_logits,
                     return_label_ids=return_label_ids,
                     return_att=return_att,
-                    return_proj_states=return_proj_states,
+                    return_proj_state_norms=return_proj_state_norms,
                     to_device="cpu"):
 
                 probs = [(-np.log2(p[1:-1]+1e-5)).tolist() for p in pred_probs]
@@ -497,9 +497,9 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
         return_label_ids: bool = True
         if "return_label_ids" in kwargs:
             return_label_ids = kwargs["return_label_ids"]
-        return_proj_states: bool | None = None
-        if "return_proj_states" in kwargs:
-            return_proj_states = kwargs["return_proj_states"]
+        return_proj_state_norms: bool | None = None
+        if "return_proj_state_norms" in kwargs:
+            return_proj_state_norms = kwargs["return_proj_state_norms"]
         return_att: bool | None = None
         if "return_att" in kwargs:
             return_att = kwargs["return_att"]
@@ -558,7 +558,7 @@ class SplitTokMetricMakerSurprisal(SplitTokMetricMaker):
                         return_logits=return_logits,
                         return_label_ids=return_label_ids,
                         return_att=return_att,
-                        return_proj_states=return_proj_states,
+                        return_proj_state_norms=return_proj_state_norms,
                         to_device="cpu"):
 
                     provided += len(pred_probs)
@@ -1086,12 +1086,12 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
             arc_distr_mode: Literal["att", "att-n"] | None = None,
             global_distr: bool = False,
             att: Sequence[torch.Tensor] | None = None,
-            proj_states: Sequence[torch.Tensor] | None = None,
+            proj_state_norms: Sequence[torch.Tensor] | None = None,
             include_current: bool = False,
             length_weighted: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
 
-        if att is not None or proj_states is not None:
+        if att is not None or proj_state_norms is not None:
             assert arc_distr_mode is not None, (
                 "'arc_distr_mode' must be specified if 'arc_distr' "
                 "is not provided.")
@@ -1108,21 +1108,20 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
                         without_dummy_prefixes=2)
                     for a in att]
             else:
-                assert proj_states is not None, (
-                    "Must provide 'proj_states' for 'att-n' mode.")
+                assert proj_state_norms is not None, (
+                    "Must provide 'proj_state_norms' for 'att-n' mode.")
                 arc_distr = [
                     attdistr.arc_distribution(
-                        {"proj_states": p.view(
-                            -1, p.shape[-3], p.shape[-2],
-                            p.shape[-1])},  # type: ignore
+                        {"proj_state_norms": p.view(
+                            -1, p.shape[-2], p.shape[-1])},  # type: ignore
                         mode=arc_distr_mode,
                         without_diagonal=not include_current,
                         without_dummy_prefixes=2)
-                    for p in proj_states]
+                    for p in proj_state_norms]
         else:
             assert arc_distr is not None, (
                 "'arc_distr' is not provided. You need to specify 'arc_distr'"
-                " or 'att'/'proj_states' (for reloading)."
+                " or 'att'/'proj_state_norms' (for reloading)."
             )
         entropy: list[np.ndarray] = [
             losses.attention_entropy_loss(
@@ -1137,7 +1136,7 @@ class SplitTokMetricMakerAttentionEntropy(SplitTokMetricMaker):
             "arc_distr": arc_distr,
             "arc_distr_mode": arc_distr_mode,
             "att": att,
-            "proj_states": proj_states,
+            "proj_state_norms": proj_state_norms,
             "include_current": include_current,
             "length_weighted": length_weighted
         }
@@ -1156,12 +1155,12 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
             arc_distr_mode: Literal["att", "att-n"] | None = None,
             global_distr: bool = False,
             att: Sequence[torch.Tensor] | None = None,
-            proj_states: Sequence[torch.Tensor] | None = None,
+            proj_state_norms: Sequence[torch.Tensor] | None = None,
             include_current: bool = False,
             length_weighted: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
 
-        if att is not None or proj_states is not None:
+        if att is not None or proj_state_norms is not None:
             assert arc_distr_mode is not None, (
                 "'arc_distr_mode' must be specified if 'arc_distr' "
                 "is not provided.")
@@ -1178,21 +1177,20 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
                         without_dummy_prefixes=2)
                     for a in att]
             else:
-                assert proj_states is not None, (
-                    "Must provide 'proj_states' for 'att-n' mode.")
+                assert proj_state_norms is not None, (
+                    "Must provide 'proj_state_norms' for 'att-n' mode.")
                 arc_distr = [
                     attdistr.arc_distribution(
-                        {"proj_states": p.view(
-                            -1, p.shape[-3],
-                            p.shape[-2], p.shape[-1])},  # type: ignore
+                        {"proj_state_norms": p.view(
+                            -1, p.shape[-2], p.shape[-1])},  # type: ignore
                         mode=arc_distr_mode,
                         without_diagonal=not include_current,
                         without_dummy_prefixes=2)
-                    for p in proj_states]
+                    for p in proj_state_norms]
         else:
             assert arc_distr is not None, (
                 "'arc_distr' is not provided. You need to specify 'arc_distr'"
-                "or 'att'/'proj_states' (for reloading)."
+                "or 'att'/'proj_state_norms' (for reloading)."
             )
         distance: list[np.ndarray] = [
             losses.attention_distance_loss(
@@ -1206,7 +1204,7 @@ class SplitTokMetricMakerAttentionDistance(SplitTokMetricMaker):
             "arc_distr": arc_distr,
             "arc_distr_mode": arc_distr_mode,
             "att": att,
-            "proj_states": proj_states,
+            "proj_state_norms": proj_state_norms,
             "include_current": include_current,
             "length_weighted": length_weighted
         }
@@ -1225,12 +1223,12 @@ class SplitTokMetricMakerAttentionDifference(SplitTokMetricMaker):
             arc_distr_mode: Literal["att", "att-n"] | None = None,
             global_distr: bool = False,
             att: Sequence[torch.Tensor] | None = None,
-            proj_states: Sequence[torch.Tensor] | None = None,
+            proj_state_norms: Sequence[torch.Tensor] | None = None,
             include_current: bool = False,
             length_weighted: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
 
-        if att is not None or proj_states is not None:
+        if att is not None or proj_state_norms is not None:
             assert arc_distr_mode is not None, (
                 "'arc_distr_mode' must be specified if 'arc_distr' "
                 "is not provided.")
@@ -1247,21 +1245,20 @@ class SplitTokMetricMakerAttentionDifference(SplitTokMetricMaker):
                         without_dummy_prefixes=2)
                     for a in att]
             else:
-                assert proj_states is not None, (
-                    "Must provide 'proj_states' for 'att-n' mode.")
+                assert proj_state_norms is not None, (
+                    "Must provide 'proj_state_norms' for 'att-n' mode.")
                 arc_distr = [
                     attdistr.arc_distribution(
-                        {"proj_states": p.view(
-                            -1, p.shape[-3],
-                            p.shape[-2], p.shape[-1])},  # type: ignore
+                        {"proj_state_norms": p.view(
+                            -1, p.shape[-2], p.shape[-1])},  # type: ignore
                         mode=arc_distr_mode,
                         without_diagonal=not include_current,
                         without_dummy_prefixes=2)
-                    for p in proj_states]
+                    for p in proj_state_norms]
         else:
             assert arc_distr is not None, (
                 "'arc_distr' is not provided. You need to specify 'arc_distr'"
-                "or 'att'/'proj_states' (for reloading)."
+                "or 'att'/'proj_state_norms' (for reloading)."
             )
         difference: list[np.ndarray] = [
             losses.attention_difference_loss(
@@ -1276,7 +1273,7 @@ class SplitTokMetricMakerAttentionDifference(SplitTokMetricMaker):
             "arc_distr": arc_distr,
             "arc_distr_mode": arc_distr_mode,
             "att": att,
-            "proj_states": proj_states,
+            "proj_state_norms": proj_state_norms,
             "include_current": include_current,
             "length_weighted": length_weighted
         }
@@ -1295,12 +1292,12 @@ class SplitTokMetricMakerAttentionActivation(SplitTokMetricMaker):
             arc_distr_mode: Literal["att", "att-n"] | None = None,
             global_distr: bool = False,
             att: Sequence[torch.Tensor] | None = None,
-            proj_states: Sequence[torch.Tensor] | None = None,
+            proj_state_norms: Sequence[torch.Tensor] | None = None,
             include_current: bool = False,
             length_weighted: bool = False,
             *args, **kwargs) -> tuple[pd.Series, dict[str, Any]]:
 
-        if att is not None or proj_states is not None:
+        if att is not None or proj_state_norms is not None:
             assert arc_distr_mode is not None, (
                 "'arc_distr_mode' must be specified if 'arc_distr' "
                 "is not provided.")
@@ -1317,21 +1314,20 @@ class SplitTokMetricMakerAttentionActivation(SplitTokMetricMaker):
                         without_dummy_prefixes=2)
                     for a in att]
             else:
-                assert proj_states is not None, (
-                    "Must provide 'proj_states' for 'att-n' mode.")
+                assert proj_state_norms is not None, (
+                    "Must provide 'proj_state_norms' for 'att-n' mode.")
                 arc_distr = [
                     attdistr.arc_distribution(
-                        {"proj_states": p.view(
-                            -1, p.shape[-3],
-                            p.shape[-2], p.shape[-1])},  # type: ignore
+                        {"proj_state_norms": p.view(
+                            -1, p.shape[-2], p.shape[-1])},  # type: ignore
                         mode=arc_distr_mode,
                         without_diagonal=not include_current,
                         without_dummy_prefixes=2)
-                    for p in proj_states]
+                    for p in proj_state_norms]
         else:
             assert arc_distr is not None, (
                 "'arc_distr' is not provided. You need to specify 'arc_distr'"
-                "or 'att'/'proj_states' (for reloading)."
+                "or 'att'/'proj_state_norms' (for reloading)."
             )
         difference: list[np.ndarray] = [
             losses.attention_activation_loss(
@@ -1347,7 +1343,7 @@ class SplitTokMetricMakerAttentionActivation(SplitTokMetricMaker):
             "arc_distr_mode": arc_distr_mode,
             "global_distr": global_distr,
             "att": att,
-            "proj_states": proj_states,
+            "proj_state_norms": proj_state_norms,
             "include_current": include_current,
             "length_weighted": length_weighted
         }

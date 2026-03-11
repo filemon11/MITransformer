@@ -516,7 +516,7 @@ def new_process(
             only_content_words_cost=only_content_words_cost,
             only_content_words_left=only_content_words_left,
             return_att=True,
-            return_proj_states=True,
+            return_proj_state_norms=True,
             only_left=True,
             arc_distr_mode=distr_mode,
             include_current=include_current,

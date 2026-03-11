@@ -45,7 +45,7 @@ def arc_distribution(
         ) -> torch.Tensor:
     """additional can contain:
     att (required): (... s s)
-    proj_states: (... s s mhe)
+    proj_state_norms: (... s s mhe)
 
     returns: (... s s)
     """
@@ -56,9 +56,8 @@ def arc_distribution(
             att = additional["att"]  # type: ignore
 
         case "att-n":
-            assert "proj_states" in additional.keys()
-            proj_states = additional["proj_states"]  # type: ignore
-            att = normalise_by_norms(proj_states)
+            assert "proj_state_norms" in additional.keys()
+            att = additional["proj_state_norms"]  # type: ignore
 
         case _:
             raise Exception

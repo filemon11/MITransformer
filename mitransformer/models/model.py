@@ -22,11 +22,11 @@ from typing import (
 
 
 AdditionalKeys = Literal[
-    "proj_states", "att", "activations", "embeddings"]
+    "proj_state_norms", "att", "activations", "embeddings"]
 
 
 class AdditionalResults(TypedDict):
-    proj_states: NotRequired[torch.Tensor]
+    proj_state_norms: NotRequired[torch.Tensor]
     att: NotRequired[torch.Tensor]
     embeddings: NotRequired[torch.Tensor]
     activations: NotRequired[torch.Tensor]
@@ -230,7 +230,7 @@ class Attention(nn.Module):
             self,
             x: torch.Tensor,
             return_arc_logits: bool = False,
-            return_proj_states: bool = False,
+            return_proj_state_norms: bool = False,
             return_att: bool = False,
             ) -> tuple[
                 torch.Tensor,
@@ -239,7 +239,7 @@ class Attention(nn.Module):
         """
         return_arc_logits: bool, default=False
             Return per-head attention logits.
-        return_proj_states: bool, default=False
+        return_proj_state_norms: bool, default=False
             Return projected states.
         return_att: bool, default=False
             Return attention distribution."""
@@ -304,7 +304,7 @@ class Attention(nn.Module):
         if return_att:
             additional_output["att"] = att
 
-        if return_proj_states:
+        if return_proj_state_norms:
             # adapted from Goro Kobayashi
             # (https://github.com/gorokoba560/norm-analysis-of-transformer)
             v_layer = v.permute(0, 2, 1, 3).contiguous().unsqueeze(3)
@@ -319,18 +319,27 @@ class Attention(nn.Module):
             # and weight matrix (output_weight).
             # the bias of the output transformation is assumed to be
             # distributed equally among heads
-            projected_states = v_layer.matmul(output_weight).squeeze(3)
+            proj_state_norms = v_layer.matmul(output_weight).squeeze(3)
             # (b s h 1 e) x (h e he) -> b s h he
 
-            projected_states = projected_states.permute(
+            proj_state_norms = proj_state_norms.permute(
                 0, 2, 1, 3).contiguous()
             if self.proj.bias is not None:
-                projected_states += (self.proj.bias / H)
+                proj_state_norms += (self.proj.bias / H)
             # (b h s he)
-            projected_states = torch.einsum(
-                "bhks,bhsd->bhksd", att, projected_states)  # (b h s s he)
 
-            additional_output["proj_states"] = projected_states
+            proj_state_norms = torch.linalg.vector_norm(
+                proj_state_norms, dim=-1)  # (b, h, s)
+
+            # Normalise here (TODO: use my normalise function)
+            # att: (b, h, s, s)
+            proj_state_norms = att * proj_state_norms.unsqueeze(-2)
+            # (b, h, s, s)
+
+            proj_state_norms = proj_state_norms / proj_state_norms.sum(
+                dim=-1, keepdim=True).clamp_min(1e-12)
+
+            additional_output["proj_state_norms"] = proj_state_norms
 
         return out, out_logits, additional_output
 
@@ -409,7 +418,7 @@ class MIAttention(nn.Module):
             x: torch.Tensor,
             masks: dict[str, torch.Tensor | None] | None = None,
             return_arc_logits: bool = False,
-            return_proj_states: bool = False,
+            return_proj_state_norms: bool = False,
             return_att: bool = False
             ) -> tuple[
                 torch.Tensor,
@@ -418,7 +427,7 @@ class MIAttention(nn.Module):
         """
         return_arc_logits: bool, default=False
             Return per-head attention logits.
-        return_proj_states: bool, default=False
+        return_proj_state_norms: bool, default=False
             Return projected states.
         return_att: bool, default=False
             Return attention distribution."""
@@ -516,7 +525,7 @@ class MIAttention(nn.Module):
         if return_att:
             additional_output["att"] = att
 
-        if return_proj_states:
+        if return_proj_state_norms:
             # adapted from Goro Kobayashi
             # (https://github.com/gorokoba560/norm-analysis-of-transformer)
             v_layer = v.permute(0, 2, 1, 3).contiguous().unsqueeze(3)
@@ -542,7 +551,7 @@ class MIAttention(nn.Module):
             projected_states = torch.einsum(
                 "bhks,bhsd->bhksd", att, projected_states)  # (b mh s s mhe)
 
-            additional_output["proj_states"] = projected_states
+            additional_output["proj_state_norms"] = projected_states
 
         return out, out_logits, additional_output
 
@@ -586,7 +595,7 @@ class MILayer(nn.Module):
             x: torch.Tensor,
             masks: dict[str, torch.Tensor | None],
             return_arc_logits: bool = False,
-            return_proj_states: bool = False,
+            return_proj_state_norms: bool = False,
             return_att: bool = False
             ) -> tuple[
                 torch.Tensor,
@@ -602,13 +611,13 @@ class MILayer(nn.Module):
             x_attn, out_logits, additional = self.attn(
                 self.ln_1(x), masks,
                 return_arc_logits=return_arc_logits,
-                return_proj_states=return_proj_states,
+                return_proj_state_norms=return_proj_state_norms,
                 return_att=return_att)
         else:
             x_attn, out_logits, additional = self.attn(
                 self.ln_1(x),
                 return_arc_logits=return_arc_logits,
-                return_proj_states=return_proj_states,
+                return_proj_state_norms=return_proj_state_norms,
                 return_att=return_att)
         x = x + x_attn
         x = x + self.ff(self.ln_2(x))
@@ -705,7 +714,7 @@ class MITransformer(nn.Module):
             self, input_ids: torch.Tensor,
             masks: dict[str, torch.Tensor | None] | None = None,
             return_arc_logits: bool = False,
-            return_proj_states: bool = False,
+            return_proj_state_norms: bool = False,
             return_att: bool = False,
             return_embeddings: bool = False,
             **kwargs
@@ -747,7 +756,7 @@ class MITransformer(nn.Module):
             x, al, additional = layer(
                 x, masks if self.use_input_mask else None,
                 return_arc_logits=return_arc_logits,
-                return_proj_states=return_proj_states,
+                return_proj_state_norms=return_proj_state_norms,
                 return_att=return_att)
             if al is not None:
                 att_logits.append(al)
@@ -756,8 +765,8 @@ class MITransformer(nn.Module):
         additional_names: list[AdditionalKeys] = []
         if return_att:
             additional_names.append("att")
-        if return_proj_states:
-            additional_names.append("proj_states")
+        if return_proj_state_norms:
+            additional_names.append("proj_state_norms")
 
         additional_stacked: AdditionalResults = {}
         for key in additional_names:  # type: ignore
@@ -805,7 +814,7 @@ class MITransformerLM(nn.Module):
             self, input_ids: torch.Tensor,
             masks: dict[str, torch.Tensor | None] | None = None,
             return_arc_logits: bool = False,
-            return_proj_states: bool = False,
+            return_proj_state_norms: bool = False,
             return_att: bool = False,
             return_embeddings: bool = False,
             return_activations: bool = False,
@@ -827,7 +836,7 @@ class MITransformerLM(nn.Module):
         x, att_logits, additional = self.mi_transformer(
             input_ids, masks,
             return_arc_logits=return_arc_logits,
-            return_proj_states=return_proj_states,
+            return_proj_state_norms=return_proj_state_norms,
             return_att=return_att,
             return_embeddings=return_embeddings)
 
