@@ -1,11 +1,10 @@
 
-import torch
+import torch  # type: ignore
 import torch.nn.functional as F
 
 from typing import Literal
 
 
-@torch.compile
 def lm_loss(
         logits: torch.Tensor, labels: torch.Tensor,
         ignore_index: int = -100,
