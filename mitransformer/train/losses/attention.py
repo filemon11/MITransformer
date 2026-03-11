@@ -1,10 +1,54 @@
-import torch
+import torch  # type: ignore
 from . import utils
 
 from typing import Literal
 
 
-@torch.compile
+_norm_cache: dict[tuple[torch.device, torch.dtype], torch.Tensor] = {}
+
+
+def get_entropy_norm(
+            length: int,
+            include_current: bool,
+            prefix_dummies: int,
+            device: torch.device,
+            dtype: torch.dtype,
+        ) -> torch.Tensor:
+    key = (device, dtype)
+
+    needed = max(1, length - prefix_dummies + int(include_current))
+    base = _norm_cache.get(key)
+
+    if base is None or base.numel() < needed:
+        base = torch.log2(
+            torch.arange(1, needed + 1, device=device, dtype=dtype)
+        )
+        _norm_cache[key] = base
+
+    if include_current:
+        # desired non-prefix part: log2(1), log2(2), ...,
+        # log2(length-prefix_dummies)
+        core = base[: max(0, length - prefix_dummies)]
+    else:
+        # desired non-prefix part: log2(0), log2(1), ...,
+        # but log2(0) is not used directly
+        # so prepend a zero manually and then continue
+        # with log2(1), log2(2), ...
+        nonprefix_len = max(0, length - prefix_dummies)
+        if nonprefix_len == 0:
+            core = base[:0]
+        else:
+            zero = torch.zeros(1, device=device, dtype=dtype)
+            rest = base[: nonprefix_len - 1]
+            core = torch.concat((zero, rest), dim=0)
+
+    if prefix_dummies > 0:
+        prefix = torch.zeros(prefix_dummies, device=device, dtype=dtype)
+        return torch.concat((prefix, core), dim=0)
+
+    return core
+
+
 def attention_entropy_loss(
         arc_distributions: torch.Tensor,
         to_ignore_mask: torch.Tensor | Literal["triangular"] | None,
@@ -26,7 +70,7 @@ def attention_entropy_loss(
     else scalar"""
 
     if to_ignore_mask is not None and to_ignore_mask != "triangular":
-        to_ignore_mask = to_ignore_mask.sum(0).to(torch.bool)  # type: ignore
+        to_ignore_mask = to_ignore_mask.any(dim=0)  # type: ignore
 
     if global_distr:
         arc_distributions = get_head_averaged_distribution(arc_distributions)
@@ -82,7 +126,8 @@ def attention_distance_loss(
     r = torch.arange(1, s+1-prefix_dummies, device=probs.device)
 
     if prefix_dummies > 0:
-        prefix = torch.zeros(prefix_dummies, device=probs.device)
+        prefix = torch.zeros(
+            prefix_dummies, device=probs.device, dtype=probs.dtype)
         r = torch.concat(
             (prefix, r))
 
@@ -106,7 +151,8 @@ def attention_distance_loss(
             device=distances.device)
 
         if prefix_dummies > 0:
-            prefix = torch.zeros(prefix_dummies, device=distances.device)
+            prefix = torch.zeros(
+                prefix_dummies, device=distances.device, dtype=distances.dtype)
             norm_vector = torch.concat(
                 (prefix, norm_vector))
 
@@ -304,30 +350,20 @@ def get_attention_entropy(
 
     if to_ignore is not None:
         if to_ignore == "triangular":
-            entropy = entropy.masked_fill(
-                torch.tril(
-                    torch.ones(
-                        *entropy.shape,
-                        device=entropy.device)) == 0, 0)
+            entropy = torch.tril(entropy).sum(-1)
         else:
             entropy[to_ignore] = 0  # type: ignore
-
-    entropy = entropy.sum(-1)
+            entropy = entropy.sum(-1)
     # [..., S]
 
     if length_weighted:
-        start_at = 1 if include_current else 0
-        norm_vector = torch.arange(
-            start_at, entropy.shape[-1]+start_at-prefix_dummies,
-            dtype=torch.float,
-            device=entropy.device)
-
-        if prefix_dummies > 0:
-            prefix = torch.zeros(prefix_dummies, device=entropy.device)
-            norm_vector = torch.concat(
-                (prefix, norm_vector))
-        # [S] ([0?, ..., 1, 2, 3, ...])
-        norm_vector = torch.log2(norm_vector).clamp(min=1e-4)
+        norm_vector = get_entropy_norm(
+            entropy.shape[-1],
+            include_current,
+            prefix_dummies,
+            entropy.device,
+            entropy.dtype
+        )
 
         entropy = torch.div(entropy, norm_vector)
         # [..., S]
@@ -336,6 +372,7 @@ def get_attention_entropy(
 
         # prevent numerical problem for one-item
         # distribution
+        start_at = 1 if include_current else 0
         if (1-start_at)+prefix_dummies < entropy.shape[-1]:
             entropy[..., (1-start_at)+prefix_dummies] = 1
 

@@ -438,7 +438,7 @@ class LMTrainer():
 
     def attention_losses(
             self, additional: models.AdditionalResults,
-            to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None,
+            to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None = None,
             label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
             reduction: Literal["sum", "none"] = "sum"
@@ -524,12 +524,15 @@ class LMTrainer():
     def additional_losses(
             self, additional: models.AdditionalResults,
             to_ignore_mask: torch.BoolTensor | Literal[
-                "triangular"] | None = "triangular",
+                "triangular"] | None = None,
             label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
             logits: torch.Tensor | None = None,
             reduction: Literal["sum", "none"] = "sum"
             ) -> dict[str, torch.Tensor]:
+        # to_ignore_mask is None since distribution normaliser
+        # already produces triangular distribution following
+        # include_current config parameter
         additional_losses = self.attention_losses(
             additional, to_ignore_mask=to_ignore_mask,
             reduction=reduction,
@@ -822,6 +825,9 @@ class LMTrainer():
                 arc_loss=arc_loss,
                 additional_losses=additional_losses,
                 weights=self.config.losses)
+            del additional_losses
+            del arc_loss
+            del lm_loss
 
             loss: torch.Tensor = metric.loss
             metric.detach_()
@@ -1007,7 +1013,7 @@ class LMTrainer():
             return True
         return False
 
-    @torch.compile()
+    @torch.compile(fullgraph=True)
     def train_iter(
             self,
             train: (
@@ -1244,7 +1250,7 @@ class LMTrainer():
                     batch,
                     self.config.dependency_mode,
                     loader.dataset.keys_for_padding["label_ids"])
-                for batch in tqdm(loader, desc="Eval batches")]
+                for i, batch in enumerate(tqdm(loader, desc="Eval batches")) if i == 0]
         return self.gather_metrics(metrics.sum_metrics(metrics_list))
 
     @torch.compile()

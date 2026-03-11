@@ -1,6 +1,9 @@
 import torch
+import math
 
 from typing import Literal
+
+LOG2E = 1.0 / math.log(2.0)
 
 
 def reduce(
@@ -22,9 +25,7 @@ def reduce(
 def entropy(
         probs: torch.Tensor,
         reduction: Literal["sum", "none"] = "sum") -> torch.Tensor:
-    logprobs = torch.log2(probs.clamp(min=1e-4))
-    # attention: this was originally log_e
-    entropy = -(probs*logprobs)
+    entropy = -torch.xlogy(probs, probs) / LOG2E
     return reduce(entropy, reduction)
 
 
@@ -33,6 +34,6 @@ def shift_ignore_mask(mask: torch.Tensor) -> torch.Tensor:
     input/outputs: [..., S].
     Prepends 'False' to front of sequence and cuts of last element"""
 
-    mask[..., 1:] = mask[..., :-1].clone()
-    mask[..., 0] = False
-    return mask
+    out = torch.zeros_like(mask)
+    out[..., 1:] = mask[..., :-1].clone()
+    return out

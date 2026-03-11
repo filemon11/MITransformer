@@ -1,6 +1,7 @@
 from .. import models
 
 import torch
+import torch.linalg
 
 from typing import Literal
 
@@ -8,30 +9,31 @@ from typing import Literal
 def normalise(
         probs: torch.Tensor,
         without_diagonal: bool = False,
-        without_dummy_prefixes: int = 0) -> torch.Tensor:
+        without_dummy_prefixes: int = 0,
+        eps: float = 1e-4,
+        ) -> torch.Tensor:
     if not without_diagonal and without_dummy_prefixes == 0:
         return probs
 
-    probs = probs.clamp(1e-4)
     if without_diagonal:
         probs = torch.tril(probs, diagonal=-1)
     else:
         probs = torch.tril(probs)
     if without_dummy_prefixes > 0:
         probs[..., :without_dummy_prefixes] = 0
-    probs = probs / probs.sum(dim=-1, keepdim=True)
+    probs = probs / probs.sum(dim=-1, keepdim=True).clamp_min(eps)
 
-    if without_diagonal:
-        probs = torch.tril(probs, diagonal=-1)
-    else:
-        probs = torch.tril(probs)
-    if without_dummy_prefixes:
-        probs[..., :without_dummy_prefixes] = 0
+    # if without_diagonal:
+    #     probs = torch.tril(probs, diagonal=-1)
+    # else:
+    #     probs = torch.tril(probs)
+    # if without_dummy_prefixes:
+    #     probs[..., :without_dummy_prefixes] = 0
     return probs
 
 
-def normalize_by_norms(tensor: torch.Tensor) -> torch.Tensor:
-    norms = torch.norm(tensor, dim=-1)
+def normalise_by_norms(tensor: torch.Tensor) -> torch.Tensor:
+    norms = torch.linalg.vector_norm(tensor, dim=-1)
     return norms/norms.sum(dim=-1, keepdim=True)
 
 
@@ -56,7 +58,7 @@ def arc_distribution(
         case "att-n":
             assert "proj_states" in additional.keys()
             proj_states = additional["proj_states"]  # type: ignore
-            att = normalize_by_norms(proj_states)
+            att = normalise_by_norms(proj_states)
 
         case _:
             raise Exception
