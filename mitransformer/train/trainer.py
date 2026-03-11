@@ -1013,7 +1013,7 @@ class LMTrainer():
             return True
         return False
 
-    @torch.compile(fullgraph=True)
+    @torch.compile()
     def train_iter(
             self,
             train: (
@@ -1250,7 +1250,7 @@ class LMTrainer():
                     batch,
                     self.config.dependency_mode,
                     loader.dataset.keys_for_padding["label_ids"])
-                for i, batch in enumerate(tqdm(loader, desc="Eval batches")) if i == 0]
+                for batch in tqdm(loader, desc="Eval batches")]
         return self.gather_metrics(metrics.sum_metrics(metrics_list))
 
     @torch.compile()
