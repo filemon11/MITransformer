@@ -12,6 +12,8 @@ import numpy as np  # type: ignore
 from collections import abc
 from typing import Iterable, Sequence, Collection, Any, Literal
 
+# from torch.profiler import profile, ProfilerActivity, record_function
+
 from mitransformer.utils.logmaker import (
     getLogger, info)
 
@@ -152,7 +154,13 @@ class PsyLingObjective(objective.Objective):
         best_loglik: float = -np.inf
 
         best_eval_metric: train.LMMetric | float | None = None
+        # gen = iter(enumerate(train_iterator, start=1))
         for step, metrics in enumerate(train_iterator, start=1):
+            # for step, metrics in enumerate(train_iterator, start=1):
+            # with profile(activities=[ProfilerActivity.CUDA],
+            #   record_shapes=True) as prof:
+            #     with record_function("training"):
+            #        step, metrics = next(gen)
             if best_eval_metric is None:
                 best_eval_metric = metrics["eval"].minval()
             if metrics["eval"] > best_eval_metric:
@@ -235,6 +243,7 @@ class PsyLingObjective(objective.Objective):
                     joined, self.arguments.lme_formula[0]["covariates"],
                 )
 
+            joined.to_csv("testcsvjoined.csv")
             # Fit lme
             if self.arguments.average_psyling:
                 measures: list[float] = []
@@ -324,6 +333,8 @@ class PsyLingObjective(objective.Objective):
                 break
 
             add_method = self.tok_frame.reload_batched_
+
+            # print(prof.key_averages().table(row_limit=1000))
 
         assert loglik is not None and metrics is not None, (
             "eval_interval is larger than total number of steps")
