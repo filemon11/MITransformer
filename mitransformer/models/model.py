@@ -744,24 +744,34 @@ class MITransformer(nn.Module):
             pos_emb = self.wpe(S)
 
         x = self.embd_dropout(tok_emb + pos_emb)
-        del pos_emb
 
         if self.lstm is not None:
             # x = self.lstm(x)[0]
             x = x + self.lstm_dropout(self.lstm(self.ln_1(x))[0])
             x = x + self.ff(self.ln_2(x))
 
-        att_logits = []
-        additional_list: list[AdditionalResults] = []
+        att_logits = [] if return_arc_logits else None
+        att_list = [] if return_att else None
+        proj_norm_list = [] if return_proj_state_norms else None
+
         for layer in self.layers:
             x, al, additional = layer(
-                x, masks if self.use_input_mask else None,
+                x,
+                masks if self.use_input_mask else None,
                 return_arc_logits=return_arc_logits,
                 return_proj_state_norms=return_proj_state_norms,
                 return_att=return_att)
-            if al is not None:
+            if return_arc_logits and al is not None:
+                assert att_logits is not None
                 att_logits.append(al)
-            additional_list.append(additional)
+
+            if return_att:
+                assert att_list is not None
+                att_list.append(additional["att"])
+
+            if return_proj_state_norms:
+                assert proj_norm_list is not None
+                proj_norm_list.append(additional["proj_state_norms"])
 
         additional_names: list[AdditionalKeys] = []
         if return_att:
@@ -769,21 +779,24 @@ class MITransformer(nn.Module):
         if return_proj_state_norms:
             additional_names.append("proj_state_norms")
 
-        additional_stacked: AdditionalResults = {}
-        for key in additional_names:  # type: ignore
-            stacked = torch.stack(
-                [additional[key]      # type: ignore
-                    for additional in additional_list])
-            additional_stacked[key] = stacked  # type: ignore
+        additional_stacked = {}
+        if return_att:
+            additional_stacked["att"] = torch.stack(att_list)
+        if return_proj_state_norms:
+            additional_stacked[
+                "proj_state_norms"] = torch.stack(proj_norm_list)
+        if return_embeddings:
+            additional_stacked["embeddings"] = tok_emb
 
         out_logits = None
         if return_arc_logits:
+            assert att_logits is not None
             out_logits = combine_scores(att_logits)
 
         if return_embeddings:
             additional_stacked["embeddings"] = tok_emb
 
-        return x, out_logits, additional_stacked
+        return x, out_logits, additional_stacked  # type: ignore
 
 
 class MITransformerLM(nn.Module):
