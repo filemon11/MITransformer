@@ -438,7 +438,8 @@ class LMTrainer():
 
     def attention_losses(
             self, additional: models.AdditionalResults,
-            to_ignore_mask: torch.BoolTensor | Literal["triangular"] | None = None,
+            to_ignore_mask: torch.BoolTensor | Literal[
+                "triangular"] | None = None,
             label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
             reduction: Literal["sum", "none"] = "sum"

@@ -750,9 +750,12 @@ class MITransformer(nn.Module):
             x = x + self.lstm_dropout(self.lstm(self.ln_1(x))[0])
             x = x + self.ff(self.ln_2(x))
 
-        att_logits = [] if return_arc_logits else None
-        att_list = [] if return_att else None
-        proj_norm_list = [] if return_proj_state_norms else None
+        att_logits: None | list[
+            dict[str, list[torch.Tensor]]] = [] if return_arc_logits else None
+        att_list: None | list[
+            torch.Tensor] = [] if return_att else None
+        proj_norm_list: None | list[
+            torch.Tensor] = [] if return_proj_state_norms else None
 
         for layer in self.layers:
             x, al, additional = layer(

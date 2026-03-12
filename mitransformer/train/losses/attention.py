@@ -87,8 +87,8 @@ def attention_entropy_loss(
     if label_ids is not None:
         entropy[utils.shift_ignore_mask(label_ids == ignore_index)] = 0
 
-    reduced = utils.reduce(entropy, reduction)
-    return reduced
+    entropy = utils.reduce(entropy, reduction)
+    return entropy
 
 
 def attention_distance_loss(
@@ -354,6 +354,8 @@ def get_attention_entropy(
         else:
             entropy[to_ignore] = 0  # type: ignore
             entropy = entropy.sum(-1)
+    else:
+        entropy = entropy.sum(-1)
     # [..., S]
 
     if length_weighted:
