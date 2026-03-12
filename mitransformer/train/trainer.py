@@ -808,7 +808,8 @@ class LMTrainer():
 
             elif self.config.combined_loss:
                 additional_losses = self.additional_losses(
-                    additional, to_ignore_mask="triangular",
+                    additional,
+                    to_ignore_mask=None,
                     logits=logits,
                     label_ids=batch["label_ids"], ignore_index=ignore_index,
                     reduction="sum")
@@ -976,7 +977,8 @@ class LMTrainer():
                     # can make separate list of heads
             elif self.config.combined_loss:
                 additional_losses = self.additional_losses(
-                    additional, to_ignore_mask="triangular",
+                    additional,
+                    to_ignore_mask=None,
                     logits=logits,
                     label_ids=batch["label_ids"], ignore_index=ignore_index,
                     reduction="sum")
