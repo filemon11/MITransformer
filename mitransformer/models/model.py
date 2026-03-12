@@ -282,7 +282,7 @@ class Attention(nn.Module):
                 att.shape, device=att.device)[..., 2:]
                 < self.attn_dropout] = float('-inf')
 
-        att_logits = att
+        att_logits = att if return_arc_logits else None
 
         att = F.softmax(att, dim=-1)
 
@@ -297,6 +297,7 @@ class Attention(nn.Module):
 
         out_logits: None | dict[str, list[torch.Tensor]] = None
         if return_arc_logits:
+            assert att_logits is not None
             out_logits = {
                 self.tag: [att_logits[:, h] for h in range(self.n_head)]}
 
