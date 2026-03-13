@@ -397,8 +397,8 @@ class WeightedMetric(Metric):
 
         weights: Sequence[float] = getattr(self, "weights")
         components: list[torch.Tensor] = [
-            weights[i]*utils.to_t(getattr(self, name))
-            for i, name in enumerate(self.loss_fields)]
+            weight*utils.to_t(getattr(self, name))
+            for weight, name in zip(weights, self.loss_fields) if weight != 0]
         summed: torch.Tensor = sum(
             components, torch.zeros_like(components[0]))
 
