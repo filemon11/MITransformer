@@ -12,6 +12,7 @@ import numpy as np  # type: ignore
 from collections import abc
 from typing import Iterable, Sequence, Collection, Any, Literal
 
+# import torch
 # from torch.profiler import profile, ProfilerActivity, record_function
 
 from mitransformer.utils.logmaker import (
@@ -156,11 +157,16 @@ class PsyLingObjective(objective.Objective):
         best_eval_metric: train.LMMetric | float | None = None
         # gen = iter(enumerate(train_iterator, start=1))
         for step, metrics in enumerate(train_iterator, start=1):
-            # for step, metrics in enumerate(train_iterator, start=1):
-            # with profile(activities=[ProfilerActivity.CUDA],
-            #   record_shapes=True) as prof:
+            # with profile(
+            #         activities=[ProfilerActivity.CUDA],
+            #         profile_memory=True,
+            #         record_shapes=True,
+            #         with_stack=True,
+            #         experimental_config=(
+            #             torch._C._profiler._ExperimentalConfig(
+            #                 verbose=True)) as prof:
             #     with record_function("training"):
-            #        step, metrics = next(gen)
+            #         step, metrics = next(gen)
             if best_eval_metric is None:
                 best_eval_metric = metrics["eval"].minval()
             if metrics["eval"] > best_eval_metric:
@@ -242,7 +248,6 @@ class PsyLingObjective(objective.Objective):
                 z_score_(
                     joined, self.arguments.lme_formula[0]["covariates"],
                 )
-
             # Fit lme
             if self.arguments.average_psyling:
                 measures: list[float] = []
@@ -334,6 +339,7 @@ class PsyLingObjective(objective.Objective):
             add_method = self.tok_frame.reload_batched_
 
             # print(prof.key_averages().table(row_limit=1000))
+            # prof.export_chrome_trace("trace3.json")
 
         assert loglik is not None and metrics is not None, (
             "eval_interval is larger than total number of steps")

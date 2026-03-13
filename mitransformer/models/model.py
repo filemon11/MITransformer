@@ -703,6 +703,12 @@ class MITransformer(nn.Module):
             self.ff = FeedForward(
                 n_embd, config.d_ff_factor, config.dropout_ff, config.bias)
 
+        self.register_buffer(
+            "position_ids",
+            torch.arange(config.block_size, dtype=torch.long),
+            persistent=False,
+        )
+
     def _init_weights(self, module: nn.Module):
         if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
@@ -737,7 +743,8 @@ class MITransformer(nn.Module):
 
         tok_emb = self.wte(input_ids.long())
         if self.pos_enc_type == "embedding":
-            pos_emb = self.wpe(torch.arange(0, S, device=tok_emb.device))
+            pos_ids = self.position_ids[:S]  # type: ignore
+            pos_emb = self.wpe(pos_ids)
         else:
             tok_emb *= tok_emb.shape[-1]**0.5
             # scale to make larger than encodings
