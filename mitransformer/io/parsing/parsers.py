@@ -52,6 +52,10 @@ def create_parser() -> argparse.ArgumentParser:
         default=True,
         help="whether to use automatic mixed precision (half-precision FP16)")
     parser.add_argument(
+        '--use_8bit', type=argtypes.str_to_bool,
+        default=True,
+        help="whether to use 8bit optimisers (including StableEmbeddings)")
+    parser.add_argument(
         '--seed', type=int, default=1895,
         help="seed for random processes")
     # TODO: actually set seed

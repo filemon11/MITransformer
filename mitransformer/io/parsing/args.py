@@ -28,6 +28,7 @@ class ParserArgs(Params):
     device: str
     use_ddp: bool
     use_amp: bool
+    use_8bit: bool
     dataset_name: str
     max_len_train: None | int
     max_len_eval_test: None | int

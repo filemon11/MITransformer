@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import einops
+import bitsandbytes as bnb
 
 import math
 
@@ -648,6 +649,7 @@ class MITransformerConfig(utils.Params):
     bias: bool = False
     use_lstm: bool = True
     pos_enc: Literal["embedding", "sinusoidal"] = "embedding"
+    use_8bit: bool = False
 
 
 class MITransformer(nn.Module):
@@ -668,12 +670,14 @@ class MITransformer(nn.Module):
 
         self.vocab_size = config.vocab_size
 
-        self.wte = nn.Embedding(config.vocab_size, n_embd)
+        EmbdClass = bnb.nn.StableEmbedding if config.use_8bit else nn.Embedding
+        self.wte: bnb.nn.StableEmbedding | nn.Embedding
+        self.wte = EmbdClass(config.vocab_size, n_embd)
         # self.wpe = PositionalEncoding(n_embd, 0, self.block_size)
         self.pos_enc_type = config.pos_enc
-        self.wpe: nn.Embedding | pe.PositionalEncoding
+        self.wpe: bnb.nn.StableEmbedding | nn.Embedding | pe.PositionalEncoding
         if config.pos_enc == "embedding":
-            self.wpe = nn.Embedding(self.block_size, n_embd)
+            self.wpe = EmbdClass(self.block_size, n_embd)
         else:
             self.wpe = pe.PositionalEncoding(
                 config.n_embd, 0,
