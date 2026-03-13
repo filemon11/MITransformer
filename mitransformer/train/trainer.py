@@ -525,15 +525,12 @@ class LMTrainer():
     def additional_losses(
             self, additional: models.AdditionalResults,
             to_ignore_mask: torch.BoolTensor | Literal[
-                "triangular"] | None = None,
+                "triangular"] | None = "triangular",
             label_ids: torch.Tensor | None = None,
             ignore_index: int = -100,
             logits: torch.Tensor | None = None,
             reduction: Literal["sum", "none"] = "sum"
             ) -> dict[str, torch.Tensor]:
-        # to_ignore_mask is None since distribution normaliser
-        # already produces triangular distribution following
-        # include_current config parameter
         additional_losses = self.attention_losses(
             additional, to_ignore_mask=to_ignore_mask,
             reduction=reduction,
@@ -810,9 +807,10 @@ class LMTrainer():
             elif self.config.combined_loss:
                 additional_losses = self.additional_losses(
                     additional,
-                    to_ignore_mask=None,
+                    to_ignore_mask="triangular",
                     logits=logits,
-                    label_ids=batch["label_ids"], ignore_index=ignore_index,
+                    label_ids=batch["label_ids"],
+                    ignore_index=ignore_index,
                     reduction="sum")
             del additional
 
@@ -848,7 +846,6 @@ class LMTrainer():
             # which can be different from a gloal average.
         else:
             self.scaler.scale(loss).backward()
-        del loss
 
         if perform_opt:
             self.scaler.step(self.optimiser)   # update parameters
@@ -979,7 +976,7 @@ class LMTrainer():
             elif self.config.combined_loss:
                 additional_losses = self.additional_losses(
                     additional,
-                    to_ignore_mask=None,
+                    to_ignore_mask="triangular",
                     logits=logits,
                     label_ids=batch["label_ids"], ignore_index=ignore_index,
                     reduction="sum")
