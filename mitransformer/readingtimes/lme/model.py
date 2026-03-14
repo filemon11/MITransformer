@@ -4,7 +4,7 @@ import gpboost as gpb  # type: ignore
 
 from . import model_debug
 
-from typing import Iterable, Tuple, Mapping, Literal
+from typing import Iterable, Tuple, Mapping, Literal, Any
 
 from ...utils.logmaker import getLogger
 logger = getLogger(__name__)
@@ -107,7 +107,10 @@ def fit_gpboost(
     if Z is not None:
         Z = Z.astype(np.float64)
 
-    print("device", device_type)
+    additional_args: dict[str, Any] = {}
+    if device_type == "cude":
+        additional_args["GPU_use"] = True
+
     model = gpb.GPModel(
         group_data=group,
         group_rand_coef_data=Z,
@@ -115,7 +118,7 @@ def fit_gpboost(
         drop_intercept_group_rand_effect=drop_rand_intr,
         likelihood="gaussian",
         gp_approx="vecchia",
-        GPU_use=device_type == "cuda",
+        **additional_args
     )
 
     # Vecchia approximations tested:
