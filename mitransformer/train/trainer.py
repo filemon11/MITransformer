@@ -118,6 +118,7 @@ class LMTrainer():
             transformer_config: models.MITransformerConfig,
             config: GeneralConfig):
         self.use_amp = config.use_amp
+        self.device_type: Literal["cpu", "cuda"]
         self.device_type = "cpu" if config.device == "cpu" else "cuda"
         self.scaler = GradScaler(
             self.device_type,
@@ -1245,7 +1246,7 @@ class LMTrainer():
             data.DataLoader[data.SentenceIds, data.IdBatch])
             ) -> metrics.LMMetric:
         self.transformerlm.eval()
-        with torch.no_grad():
+        with torch.inference_mode():
             # eval loop: no backprop on this data, to avoid storing
             # all intermediatte variable
             metrics_list = [
@@ -1372,7 +1373,7 @@ class LMTrainer():
 
         self.transformerlm.eval()
         provided = 0
-        with torch.no_grad():
+        with torch.inference_mode():
             # eval loop: no backprop on this data, to avoid storing
             # all intermediate variable
             logits: torch.Tensor

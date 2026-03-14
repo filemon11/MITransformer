@@ -24,7 +24,8 @@ def fit_gpboost(
         df: pd.DataFrame, y_col: str, predictors: Iterable[str],
         random_effects: Mapping[
             str, Iterable[str | Literal[0] | Literal[1]]] | None = None,
-        debug: bool = False
+        debug: bool = False,
+        device_type: Literal["cpu", "cuda"] = "cpu",
         ) -> Tuple[gpb.GPModel, pd.DataFrame]:
     """
     'random_effects': is a mapping from grouping variables to covariates.
@@ -106,13 +107,17 @@ def fit_gpboost(
     if Z is not None:
         Z = Z.astype(np.float64)
 
+    print("device", device_type)
     model = gpb.GPModel(
         group_data=group,
         group_rand_coef_data=Z,
         ind_effect_group_rand_coef=pointers,
         drop_intercept_group_rand_effect=drop_rand_intr,
         likelihood="gaussian",
-        gp_approx="vecchia",)
+        gp_approx="vecchia",
+        GPU_use=device_type == "cuda",
+    )
+
     # Vecchia approximations tested:
     # only miniscule decreases in accuracy
 

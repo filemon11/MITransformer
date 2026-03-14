@@ -261,7 +261,8 @@ class PsyLingObjective(objective.Objective):
                         y_col=self.arguments.lme_formula[0]["to_predict"],
                         predictors=self.arguments.lme_formula[0]["covariates"],
                         random_effects=self.arguments.lme_formula[0][
-                            "random_effects"]
+                            "random_effects"],
+                        device_type="cpu"   # CUDA does not improve speed
                     )
 
                     model_props = readingtimes.get_model_props(lme, len(d0))
@@ -296,7 +297,8 @@ class PsyLingObjective(objective.Objective):
                     y_col=self.arguments.lme_formula[0]["to_predict"],
                     predictors=self.arguments.lme_formula[0]["covariates"],
                     random_effects=self.arguments.lme_formula[
-                        0]["random_effects"]
+                        0]["random_effects"],
+                    device_type="cpu"   # CUDA does not improve speed
                 )
 
                 model_props = readingtimes.get_model_props(lme, len(d0))
