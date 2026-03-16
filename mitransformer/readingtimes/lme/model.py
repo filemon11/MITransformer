@@ -108,7 +108,7 @@ def fit_gpboost(
         Z = Z.astype(np.float64)
 
     additional_args: dict[str, Any] = {}
-    if device_type == "cude":
+    if device_type == "cuda":
         additional_args["GPU_use"] = True
 
     model = gpb.GPModel(
