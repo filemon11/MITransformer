@@ -1025,6 +1025,13 @@ def create_parser() -> argparse.ArgumentParser:
             "to replicate results from "
             "https://aclanthology.org/2025.brigap-1.7/"))
     settings_group.add_argument(
+        "--measurements", type=argtypes.str_to_bool,
+        default=True,
+        help=(
+            "Whether to join RT measurements. Set to False for "
+            "corpora that do not come with measurements.")
+    )
+    settings_group.add_argument(
         '--to_add', type=argtypes.OptNone(argtypes.StrToTuple(str, ...)),
         default=("surprisal",),
         help=(

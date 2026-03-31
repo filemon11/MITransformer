@@ -15,6 +15,8 @@ from .geco import (  # noqa: F401
     load_geco, prepare_RTs_geco, split_geco)
 from .provo import (  # noqa: F401
     load_provo, prepare_RTs_provo, split_provo)
+from .ud import (  # noqa: F401
+    load_ud)
 from .protocols import (  # noqa: F401
     CorpusLoader, CorpusSplitter, CorpusPreparer)
 from .utils import create_suffixed_filepath  # noqa: F401

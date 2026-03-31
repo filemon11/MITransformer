@@ -210,6 +210,7 @@ class RTParserArgs(ParserArgs):
     lme: bool
     to_add: tuple[str, ...] | None
     legacy_process: bool
+    measurements: bool
 
     model_name: str
     dependency_mode: Literal["supervised", "input", "standard"] | Undefined

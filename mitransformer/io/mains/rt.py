@@ -56,11 +56,6 @@ def main_rt(
         "--masked cannot be False. Dependencies are needed for computing"
         " costs.")
 
-    # Load measurements
-    measurements = data.prepare_RT_measurements(
-        data.rt_corpus_to_measurements_file[corpus],
-        corpus=corpus, only_interest=False)
-
     # Load candidates
     corpus_df = readingtimes.io_corpus_convert(
         model_name, corpus, in_file, verbose=True,
@@ -101,14 +96,24 @@ def main_rt(
             include_current=arguments.include_current,
             global_distr=arguments.global_distr)
 
-    readingtimes.join(
-        candidates,
-        measurements,
-        "ET" if corpus in data.ET_CORPORA else "SP",
-        f"RT/data/{corpus}_{arguments.name}_preprocessed_{model_name}.csv",
-        rank=arguments.rank,
-        only_interest=False
-    )
+    if arguments.measurements:
+        # Load measurements
+        measurements = data.prepare_RT_measurements(
+            data.rt_corpus_to_measurements_file[corpus],
+            corpus=corpus, only_interest=False)
+
+        readingtimes.join(
+            candidates,
+            measurements,
+            "ET" if corpus in data.ET_CORPORA else "SP",
+            f"RT/data/{corpus}_{arguments.name}_preprocessed_{model_name}.csv",
+            rank=arguments.rank,
+            only_interest=False
+        )
+    else:
+        candidates.to_csv(
+            f"RT/data/{corpus}_{arguments.name}_preprocessed_{model_name}.csv",
+            index=False)
 
     if arguments.lme:
         readingtimes.lme(

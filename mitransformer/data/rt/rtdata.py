@@ -25,6 +25,7 @@ RTCorpus = Literal[
     "meco2", "meco2_train", "meco2_test",
     "geco", "geco_train", "geco_test",
     "provo", "provo_train", "provo_test",
+    "EWT"
 ]
 
 RTCorpusTypes = Literal["ET", "SP"]
@@ -35,16 +36,19 @@ ET_CORPORA = {
     "provo"}
 SP_CORPORA = {
     "naturalstories", "frank_SP"}
-NO_SENTENCE_NUM_CORPORA = {"naturalstories", "geco"}
+NO_SENTENCE_NUM_CORPORA = {"naturalstories", "geco", "EWT"}
 
-CORE_CORPORA = set(ET_CORPORA | SP_CORPORA)
+NO_MEASUREMENT_CORPORA = {"EWT", }
+
+CORE_CORPORA = set(ET_CORPORA | SP_CORPORA | NO_MEASUREMENT_CORPORA)
 
 for constant in (ET_CORPORA, SP_CORPORA, NO_SENTENCE_NUM_CORPORA):
     for corpus in constant.copy():
         for variant in ("train", "test"):
             constant.add(f"{corpus}_{variant}")
 
-RTCORPORA = ET_CORPORA | SP_CORPORA
+
+RTCORPORA = ET_CORPORA | SP_CORPORA | NO_MEASUREMENT_CORPORA
 
 rt_corpus_to_measurements_file: dict[RTCorpus, str] = {
     "naturalstories": "RT/data/processed_RTs.tsv",
@@ -86,6 +90,7 @@ rt_corpus_to_prepare_text_func: dict[RTCorpus, corpora.CorpusLoader] = {
         "meco2": corpora.load_meco2,
         "geco": corpora.load_geco,
         "provo": corpora.load_provo,
+        "EWT": corpora.load_ud,
     }
 
 
@@ -126,7 +131,8 @@ rt_corpus_to_text_file: dict[RTCorpus, str] = {
         "meco1": "meco/joint_l1_data_trimmed_version2.0.rda",
         "meco2": "meco/joint_data_trimmed_wave2_version2.0.rda",
         "geco": "geco/MonolingualReadingData.xlsx",
-        "provo": "provo/Provo_Corpus-Eyetracking_Data_Words.csv"
+        "provo": "provo/Provo_Corpus-Eyetracking_Data_Words.csv",
+        "EWT": "UD/UD_English-EWT/en_ewt-ud-test.txt",
     }
 
 
