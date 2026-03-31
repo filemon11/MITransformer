@@ -370,6 +370,9 @@ class PsyLingObjective(objective.Objective):
                     run_name=str(trial.number),
                     global_step=arguments.eval_interval*step)
 
+        del train_iterator
+        del trainer
+
         if should_prune:
             raise optuna.exceptions.TrialPruned()
 
