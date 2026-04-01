@@ -8,7 +8,7 @@ import pandas as pd
 from . import utils
 from ... import tokeniser
 
-from typing import Tuple
+from typing import Tuple, overload
 
 
 def line_to_components(line: str) -> Tuple[str, str, str, str]:
@@ -59,32 +59,32 @@ def load_ud(
         token_mapper = tokeniser.TokenMapper.load(token_mapper_dir)
 
     df = pd.DataFrame(columns=["item", "zone", "word"])
-    # with open(input_file, "r") as src:
-    #     current = 0
-    #     for i, sentence in enumerate(conllu.parse_incr(src)):
-    #         for j, token in enumerate(sentence):
-    #             df.loc[current] = pd.Series({
-    #                 "item": i,
-    #                 "zone": j,
-    #                 "word": token["form"]})
-    #             current += 1
-
     with open(input_file, "r") as src:
-        current_row = 0
-        current_item = 0
-        current_zone = 0
-        for i, line in enumerate(src):
-            if line == "\n":
-                current_item += 1
-                current_zone = 0
-                continue
-            for j, token in enumerate(line.split()):
-                df.loc[current_row] = pd.Series({
-                    "item": current_item,
-                    "zone": current_zone,
-                    "word": token})
-                current_zone += 1
-                current_row += 1
+        current = 0
+        for i, sentence in enumerate(conllu.parse_incr(src)):
+            for j, token in enumerate(sentence):
+                df.loc[current] = pd.Series({
+                    "item": str(i),
+                    "zone": str(j),
+                    "word": token["form"]})
+                current += 1
+
+    # with open(input_file, "r") as src:
+    #     current_row = 0
+    #     current_item = 0
+    #     current_zone = 0
+    #     for i, line in enumerate(src):
+    #         if line == "\n":
+    #             current_item += 1
+    #             current_zone = 0
+    #             continue
+    #         for j, token in enumerate(line.split()):
+    #             df.loc[current_row] = pd.Series({
+    #                 "item": current_item,
+    #                 "zone": current_zone,
+    #                 "word": token})
+    #             current_zone += 1
+    #             current_row += 1
 
     # Sort to be sure the order is right
     df.sort_values(by=[
@@ -111,3 +111,56 @@ def load_ud(
         df["word"].to_list(),
         df["item"].to_list(),
         df["zone"].to_list())
+
+
+@overload
+def prepare_RTs_ud(
+        input_file: str, output_file: str,
+        only_interest: bool = True,
+        ) -> None:
+    ...
+
+
+@overload
+def prepare_RTs_ud(
+        input_file: str, output_file: None = None,
+        only_interest: bool = True,
+        ) -> pd.DataFrame:
+    ...
+
+
+def prepare_RTs_ud(
+        input_file: str, output_file: str | None = None,
+        only_interest: bool = True,
+        ) -> None | pd.DataFrame:
+
+    df = pd.DataFrame(columns=["item", "zone", "word", "head"])
+    with open(input_file, "r") as src:
+        current = 0
+        for i, sentence in enumerate(conllu.parse_incr(src)):
+            for j, token in enumerate(sentence):
+                df.loc[current] = pd.Series({
+                    "item": i,
+                    "zone": j,
+                    "word": token["form"],
+                    "head": token["head"],
+                    })
+                current += 1
+
+    df["Corpus"] = "EWT"
+    df["WorkerId"] = 1
+
+    if only_interest:
+        df = df[[
+            "Corpus", "item", "zone", "WorkerId",
+            "word", "head"]]
+
+    df["zone"] = df["zone"].astype(str)
+    df["item"] = df["item"].astype(str)
+    df["element"] = df[
+        "Corpus"] + "_" + df["zone"] + "_" + df["item"].astype(str)
+
+    if output_file is None:
+        return df
+    df.to_csv(output_file)
+    return None

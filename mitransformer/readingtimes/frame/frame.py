@@ -600,7 +600,7 @@ class SplitFrame(Frame):
 
     def adjust_untokenise_(self, words: Sequence[str]) -> None:
         def process(s: str) -> str:
-            s = re.sub(r'\b\d+(?:,\d{3})*(?:\.\d+)?\b', '<num>', s)
+            s = re.sub(r'(?<!\w)-?[\d,.]*\d', '<num>', s)
             return s
 
         other_words_iter = iter(process(word) for word in words)
@@ -640,6 +640,8 @@ class SplitFrame(Frame):
                 positions.append((row_i, word_j))
 
                 combined = this_word.replace(" ", "")
+                # print(other_word, this_word)
+                # print(this_word, other_word)
 
                 # Keep consuming source tokens until we match
                 max_checks = 100
@@ -660,6 +662,7 @@ class SplitFrame(Frame):
                     positions.append((row_i, word_j))
 
                     combined += next_word.replace(" ", "")
+                    # print(next_word, combined, other_norm)
 
                     # Early failure: combined too long
                     if not other_norm.startswith(combined):

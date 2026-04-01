@@ -14,7 +14,8 @@ def io_join(
         additional_name: str,
         ) -> None:
     corpus_type: data.RTCorpusTypes = (
-        "ET" if corpus in data.ET_CORPORA else "SP")
+        "ET" if corpus in data.ET_CORPORA else (
+            "SP" if corpus in data.SP_CORPORA else "NONE"))
     join(
         f"RT/data/{corpus}_{additional_name}_metrics.csv",
         f"RT/data/{corpus}_{additional_name}_candidates_{model_name}.csv",
@@ -47,7 +48,8 @@ def join(
 
 def join(
         candidates_file: str | pd.DataFrame, metrics_file: str | pd.DataFrame,
-        corpus_type: data.RTCorpusTypes, output_file: str | None = None,
+        corpus_type: data.RTCorpusTypes,
+        output_file: str | None = None,
         how: pdtyping.MergeHow = "inner",
         rank: int | None = None,
         only_interest: bool = True,
@@ -65,16 +67,19 @@ def join(
 
     # Select relevant columns and inner join with meta
     base_columns = ('item', 'zone', 'WorkerId', 'Corpus', 'element')
+    interest: list[str]
     if corpus_type == "ET":
         interest = list(base_columns) + ['FFD', 'GPT', 'GD']
         measurements[interest] = measurements[interest].fillna(0)
-    else:
+    elif corpus_type == "SP":
         interest = list(base_columns) + ['RT']
+    else:
+        interest = list(base_columns)
 
     if not only_interest:
         interest.extend([
             colname for colname in (
-                "Text_ID", "Word_Number", "Sentence_Number")
+                "Text_ID", "Word_Number", "Sentence_Number", "head")
             if colname in measurements.columns
         ])
     measurements = measurements[interest]
