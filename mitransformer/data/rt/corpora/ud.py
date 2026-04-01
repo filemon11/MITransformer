@@ -86,11 +86,6 @@ def load_ud(
     #             current_zone += 1
     #             current_row += 1
 
-    # Sort to be sure the order is right
-    df.sort_values(by=[
-        "item", "zone"], inplace=True)
-    df.to_csv("testcsv.csv")
-
     # Make words lowercase
     if make_lower:
         df["word"] = df["word"].str.lower()
