@@ -105,7 +105,8 @@ def main_rt(
         readingtimes.join(
             candidates,
             measurements,
-            "ET" if corpus in data.ET_CORPORA else "SP",
+            "ET" if corpus in data.ET_CORPORA else (
+                "SP" if corpus in data.SP_CORPORA else "NONE"),
             f"RT/data/{corpus}_{arguments.name}_preprocessed_{model_name}.csv",
             rank=arguments.rank,
             only_interest=False
